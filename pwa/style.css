@@ -1389,23 +1389,27 @@ body {
     padding-left: 1.5ch;
 }
 
+/* One reading per pane, so a row is a single stack: the line naming it, then the
+   track it is drawn on. No name column — the name sits on the value's line. */
 .wk-row {
     display: grid;
-    grid-template-columns: minmax(7ch, 12ch) 1fr;
-    align-items: start;
-    column-gap: 1ch;
+    grid-template-columns: 1fr;
     row-gap: 0.2em;
+}
+
+/* Name and value on one centred line. `gap` rather than justify-content:
+   space-between, so the pair reads as one phrase at whatever width the modal is
+   rather than being pushed to opposite edges of a wide row. */
+.wk-lead {
+    display: flex;
+    justify-content: center;
+    align-items: baseline;
+    gap: 0.6ch;
+    text-align: center;
 }
 
 .wk-name {
     overflow-wrap: anywhere;
-}
-
-.wk-metrics {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 0.4em 1.2ch;
-    min-width: 0;
 }
 
 .wk-head {
@@ -1430,15 +1434,20 @@ body {
 
 .wk-metric {
     min-width: 0;
-    /* Neutral until the posterior earns colour; the two tones below override. */
+}
+
+/* The tone lives on the ROW, not on the cell, because the value line and the
+   track both read it and they are siblings. Neutral until the posterior earns
+   colour; the pairs below override. */
+.wk-row {
     --wk-tone: currentColor;
     --wk-weight: 0;
 }
 
-.wk-metric[data-tone="weak"]   { --wk-tone: #d9534f; }
-.wk-metric[data-tone="strong"] { --wk-tone: #46a06e; }
-.wk-metric[data-tone="under"]  { --wk-tone: #5b8fd6; }
-.wk-metric[data-tone="over"]   { --wk-tone: #d9903f; }
+.wk-row[data-tone="weak"]   { --wk-tone: #d9534f; }
+.wk-row[data-tone="strong"] { --wk-tone: #46a06e; }
+.wk-row[data-tone="under"]  { --wk-tone: #5b8fd6; }
+.wk-row[data-tone="over"]   { --wk-tone: #d9903f; }
 
 .wk-track {
     position: relative;
@@ -1484,15 +1493,10 @@ body {
     box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45);
 }
 
+/* Carries the reading's own tone, so the number agrees with the track under it. */
 .wk-value {
-    margin-top: 0.15em;
     line-height: 1.15;
-}
-
-.wk-ci-text {
-    opacity: 0.6;
-    font-size: 0.85em;
-    line-height: 1.2;
+    color: color-mix(in srgb, var(--wk-tone) calc(var(--wk-weight) * 100%), currentColor);
 }
 
 .wk-examples-toggle {
@@ -1505,15 +1509,7 @@ body {
     margin-left: 0;
 }
 
-/* Narrow modal: the two metric cells stack under a full-width motif name
-   rather than squeezing both tracks into half a cramped column. */
 @media (max-width: 30em) {
-    .wk-row {
-        grid-template-columns: 1fr;
-    }
-    .wk-metrics {
-        grid-template-columns: 1fr;
-    }
     .wk-examples-toggle,
     .wk-examples-list {
         grid-column: 1;

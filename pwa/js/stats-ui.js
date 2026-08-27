@@ -22,7 +22,7 @@ import {
     historyRefreshesLeftToday,
     HISTORY_REFRESH_DAILY_CAP,
 } from './account-sync.js';
-import { buildLikelyIssuesElement } from './stats-weaknesses.js';
+import { buildMotifPane } from './stats-weaknesses.js';
 import { buildRankSummaryText, buildRatingHistoryChart } from './stats-rank-pane.js';
 import { buildTimeUsageChart } from './stats-time-chart.js';
 import { buildProblemsPerDayChart } from './stats-activity-chart.js';
@@ -203,7 +203,12 @@ export async function showDetailedStats() {
         // a superseded fit's vector is not detectably wrong, since a refit can
         // keep K and move every axis under it. Nothing is lost: the readings
         // slice to MODEL_INPUT_HISTORY_LENGTH, six times inside this window.
-        const issuesElement = buildLikelyIssuesElement(getMergedAnswerHistory());
+        // Two panes over ONE computation of the readings — the split is in the
+        // rendering, so the strength pane and the tendency pane can never
+        // disagree about a motif.
+        const motifHistory = getMergedAnswerHistory();
+        const weaknessPane = buildMotifPane('strength', motifHistory);
+        const tendencyPane = buildMotifPane('tendency', motifHistory);
 
         // Activity pane: the problems-per-day chart above the review-queue
         // summary text.
@@ -250,7 +255,8 @@ export async function showDetailedStats() {
         // (no weaknesses, too little data for a chart, server stats unavailable)
         // are dropped by showStatsModal.
         showStatsModal([
-            { label: getTerm('statsTabWeaknesses'), content: issuesElement },
+            { label: getTerm('statsTabWeaknesses'), content: weaknessPane },
+            { label: getTerm('statsTabTendencies'), content: tendencyPane },
             { label: getTerm('statsTabRank'), content: makeRankPane(), make: makeRankPane },
             { label: getTerm('statsTabTime'), content: makeTimePane(), make: makeTimePane },
             { label: getTerm('statsTabActivity'), content: activityPane, make: makeActivityPane },

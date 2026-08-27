@@ -56,7 +56,12 @@ const RANK_FULL_SCALE = 2.0;
 const TONE_FULL_Z = MOTIF_Z + 1;
 
 // Builds the motif table consumed by showDetailedStats.
-export function buildLikelyIssuesElement(history = state.answerHistory) {
+// One pane per READING, not one pane carrying both. `kind` is 'strength'
+// (weak <-> strong: how the user SCORES on motif-heavy problems) or 'tendency'
+// (underplay <-> overplay: which way their mistakes LEAN). They answer different
+// questions and are read one at a time, so a reader comparing rows within a pane
+// is comparing like with like instead of scanning across two axes at once.
+export function buildMotifPane(kind, history = state.answerHistory) {
     const labelMap = state.embeddingLabels || {};
     const labelFor = (k, side) => localizedMotif(labelMap[String(k)], side);
 
@@ -110,43 +115,42 @@ export function buildLikelyIssuesElement(history = state.answerHistory) {
         return root;
     }
 
-    // Strongest evidence first, on the strength column — the one the headers
-    // lead with and the one the example links gate on.
-    rows.sort((a, b) => Math.abs(b.strength?.z ?? 0) - Math.abs(a.strength?.z ?? 0));
+    // Strongest evidence first, on the reading this pane shows.
+    rows.sort((a, b) => Math.abs(b[kind]?.z ?? 0) - Math.abs(a[kind]?.z ?? 0));
 
     const table = document.createElement('div');
     table.className = 'wk-table';
-    table.appendChild(buildHeaderRow());
+    table.appendChild(buildHeaderRow(kind));
 
     // Problems currently in the user's recall window — withhold their links so a
     // glance at the examples panel can't be used to ace an imminent recall.
     const recallSet = new Set(getRecallCandidates({ history }).map(c => c.problemId));
-    for (const row of rows) table.appendChild(buildMotifRow(row, recallSet, history));
+    for (const row of rows) table.appendChild(buildMotifRow(kind, row, recallSet, history));
     root.appendChild(table);
 
     return root;
 }
 
-function buildHeaderRow() {
+// The two poles of the reading this pane shows, each at its own end of the track
+// below with the arrow centred, so the header reads as the axis the bar is drawn
+// on.
+const POLES = {
+    strength: ['statsMotifWeak', 'statsMotifStrong'],
+    tendency: ['statsMotifUnder', 'statsMotifOver'],
+};
+
+function buildHeaderRow(kind) {
     const head = document.createElement('div');
     head.className = 'wk-row wk-head';
-    head.appendChild(document.createElement('div')).className = 'wk-name';
-    const metrics = document.createElement('div');
-    metrics.className = 'wk-metrics';
-    // Each pole sits at its own end of the track it labels, arrow centred, so the
-    // header reads as the axis the bar below it is drawn on.
-    for (const [lo, hi] of [['statsMotifWeak', 'statsMotifStrong'],
-                            ['statsMotifUnder', 'statsMotifOver']]) {
-        const cell = document.createElement('div');
-        cell.className = 'wk-col-head';
-        for (const t of [getTerm(lo), '↔', getTerm(hi)]) {
-            const span = document.createElement('span');
-            span.textContent = t;
-            cell.appendChild(span);
-        }
-        metrics.appendChild(cell);
+    const cell = document.createElement('div');
+    cell.className = 'wk-col-head';
+    const [lo, hi] = POLES[kind];
+    for (const term of [getTerm(lo), '↔', getTerm(hi)]) {
+        const span = document.createElement('span');
+        span.textContent = term;
+        cell.appendChild(span);
     }
-    head.appendChild(metrics);
+    head.appendChild(cell);
     return head;
 }
 
@@ -160,14 +164,19 @@ function toneWeight(z) {
     return clamp01((Math.abs(z) - MOTIF_Z) / (TONE_FULL_Z - MOTIF_Z));
 }
 
-// One metric cell: a track with the population centre marked, the credible
-// interval as a band, the point estimate as a dot, and the numbers beside it.
-// `tone` names the direction for CSS; `weight` is how strongly to paint it.
-function buildMetricCell({ frac, loFrac, hiFrac, valueText, ciText, tone, weight }) {
+// One metric cell: a track with the neutral point marked, the credible interval
+// as a band, and the point estimate as a dot. `tone` names the direction for CSS;
+// `weight` is how strongly to paint it.
+//
+// The track carries the interval and NO printed range. The band already shows
+// how wide the posterior is, in the one place it can be compared against the
+// neutral mark at a glance, so the numbers restated it in a form that has to be
+// read twice — and the row is a claim about a direction, not a measurement
+// anybody acts on to two decimals. The point estimate stays, on the label's own
+// line, because that is what names the size of the effect.
+function buildMetricCell({ frac, loFrac, hiFrac }) {
     const cell = document.createElement('div');
     cell.className = 'wk-metric';
-    cell.dataset.tone = tone;
-    cell.style.setProperty('--wk-weight', weight.toFixed(3));
 
     const track = document.createElement('div');
     track.className = 'wk-track';
@@ -190,16 +199,6 @@ function buildMetricCell({ frac, loFrac, hiFrac, valueText, ciText, tone, weight
     track.appendChild(dot);
 
     cell.appendChild(track);
-
-    const value = document.createElement('div');
-    value.className = 'wk-value';
-    value.textContent = valueText;
-    cell.appendChild(value);
-
-    const ci = document.createElement('div');
-    ci.className = 'wk-ci-text';
-    ci.textContent = ciText;
-    cell.appendChild(ci);
     return cell;
 }
 
@@ -223,47 +222,72 @@ const fmtLean = (share) => {
 // visibly "we don't know" rather than a confident-looking zero.
 const EMPTY_CELL = { frac: 0.5, loFrac: 0, hiFrac: 1, tone: 'none', weight: 0 };
 
-function buildMotifRow(row, recallSet, history) {
-    const el = document.createElement('div');
-    el.className = 'wk-row';
-
-    const name = document.createElement('div');
-    name.className = 'wk-name';
-    name.textContent = row.name;
-    el.appendChild(name);
-
-    const metrics = document.createElement('div');
-    metrics.className = 'wk-metrics';
-    const g = row.strength;
-    metrics.appendChild(buildMetricCell(g ? {
-        frac: rankFrac(g.ranks),
-        loFrac: rankFrac(g.lo),
-        hiFrac: rankFrac(g.hi),
-        valueText: getTerm('statsMotifRanks', { value: fmtRank(g.ranks) }),
-        ciText: `${fmtRank(g.lo)} … ${fmtRank(g.hi)}`,
-        // Valenced: worse on motif-heavy problems is bad, better is good.
-        tone: g.z < 0 ? 'weak' : 'strong',
-        weight: toneWeight(g.z),
-    } : { ...EMPTY_CELL, valueText: getTerm('statsMotifNoData'), ciText: '' }));
+// The reading this pane draws, as the cell geometry plus the text that names it.
+// Reading-specific in three ways that do not generalise: the scale the value sits
+// on, how it is formatted, and whether the two ends are VALENCED. Strength is —
+// worse on motif-heavy problems is bad and better is good — so it takes the
+// red/green pair. Tendency is not: both ends are training directions and neither
+// is a virtue, so it must not reuse those colours.
+function cellFor(kind, row) {
+    if (kind === 'strength') {
+        const g = row.strength;
+        if (!g) return null;
+        return {
+            frac: rankFrac(g.ranks),
+            loFrac: rankFrac(g.lo),
+            hiFrac: rankFrac(g.hi),
+            valueText: getTerm('statsMotifRanks', { value: fmtRank(g.ranks) }),
+            tone: g.z < 0 ? 'weak' : 'strong',
+            weight: toneWeight(g.z),
+        };
+    }
     const t = row.tendency;
-    metrics.appendChild(buildMetricCell(t ? {
+    if (!t) return null;
+    return {
         frac: t.share,
         loFrac: t.lo,
         hiFrac: t.hi,
         valueText: fmtLean(t.share),
-        ciText: `${fmtLean(t.lo)} … ${fmtLean(t.hi)}`,
-        // NOT valenced: both ends are training directions, neither is a virtue,
-        // so this column must not reuse the weak/strong red-green pair.
         tone: t.z > 0 ? 'over' : 'under',
         weight: toneWeight(t.z),
-    } : { ...EMPTY_CELL, valueText: getTerm('statsMotifNoData'), ciText: '' }));
-    el.appendChild(metrics);
+    };
+}
+
+function buildMotifRow(kind, row, recallSet, history) {
+    const el = document.createElement('div');
+    el.className = 'wk-row';
+
+    const spec = cellFor(kind, row);
+    // Tone and weight go on the ROW, not on the track: the value line and the
+    // track are siblings and both read them, so the number cannot end up
+    // disagreeing with the bar underneath it.
+    el.dataset.tone = spec ? spec.tone : 'none';
+    el.style.setProperty('--wk-weight', (spec ? spec.weight : 0).toFixed(3));
+
+    // Name and value share one centred line above the track they describe, so a
+    // row is read left-to-right as one statement rather than as a label in one
+    // column and a number in another.
+    const lead = document.createElement('div');
+    lead.className = 'wk-lead';
+    const name = document.createElement('span');
+    name.className = 'wk-name';
+    name.textContent = row.name;
+    lead.appendChild(name);
+    const value = document.createElement('span');
+    value.className = 'wk-value';
+    value.textContent = spec ? spec.valueText : getTerm('statsMotifNoData');
+    lead.appendChild(value);
+    el.appendChild(lead);
+
+    el.appendChild(buildMetricCell(spec || EMPTY_CELL));
 
     // Mistake examples are offered only where the strength reading is credibly
     // negative — they illustrate a deficit, and there is nothing for them to
     // show on an axis the data has not resolved or has resolved as a strength.
-    // WHICH mistakes is read from the tendency column, so the examples and the
-    // numbers above them tell one story.
+    // So they belong to the STRENGTH pane and appear nowhere else, even though
+    // WHICH mistakes is still read from the tendency reading, which is what keeps
+    // the examples and the row above them telling one story.
+    if (kind !== 'strength') return el;
     if (!row.strength || !isFlagged(row.strength) || row.strength.z > 0) return el;
     const t2 = row.tendency;
     const quadrant = (t2 && isFlagged(t2))
