@@ -63,6 +63,12 @@ const RANK_FULL_SCALE = 2.0;
 // Same for the judgment slope's track (standard deviations of lean per unit of
 // answer loading — a display clamp only, like RANK_FULL_SCALE above).
 const CONDITION_FULL_SCALE = 1.0;
+// Same for the tendency track, in lean units (share − null share). The track is
+// drawn in DEVIATION space so the availability null is always the visual
+// centre: the null share varies per axis and per user, and a neutral mark
+// wandering along the track makes the row unreadable — the reader has to
+// relocate "balanced" on every row before the dot means anything.
+const TENDENCY_FULL_SCALE = 0.25;
 // Colour ramps from fully neutral at the MOTIF_Z gate to fully saturated one
 // further SE out, so a row below the gate carries no colour at all — the pane
 // makes no claim there, and a tinted row reads as one.
@@ -201,7 +207,7 @@ function toneWeight(z) {
 // read twice — and the row is a claim about a direction, not a measurement
 // anybody acts on to two decimals. The point estimate stays, on the label's own
 // line, because that is what names the size of the effect.
-function buildMetricCell({ frac, loFrac, hiFrac, midFrac }) {
+function buildMetricCell({ frac, loFrac, hiFrac }) {
     const cell = document.createElement('div');
     cell.className = 'wk-metric';
 
@@ -216,12 +222,11 @@ function buildMetricCell({ frac, loFrac, hiFrac, midFrac }) {
     band.style.width = `${Math.max(0.5, (hi - lo) * 100).toFixed(2)}%`;
     track.appendChild(band);
 
-    // The neutral mark. Readings whose neutral point is data (the tendency
-    // pane's availability null) place it; the rest leave it at the CSS-default
-    // centre.
+    // The neutral mark sits at the track's centre on every pane: each reading
+    // is drawn as its deviation from its own neutral point (the tendency
+    // pane's availability null included — see TENDENCY_FULL_SCALE).
     const mid = document.createElement('span');
     mid.className = 'wk-mid';
-    if (Number.isFinite(midFrac)) mid.style.left = `${(clamp01(midFrac) * 100).toFixed(2)}%`;
     track.appendChild(mid);
 
     const dot = document.createElement('span');
@@ -241,8 +246,8 @@ const fmtRank = (v) => `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(2)}`;
 // errors that would have to go the other way to match a typical error's lean:
 // `share - nullShare` exactly, undoubled — doubling would state the swing
 // between the two sides rather than the count of choices to change, which is
-// not what the number is read as. The bar geometry marks the same null (the
-// row's mid-line), so the printed value and the dot-to-mark gap agree.
+// not what the number is read as. The bar is drawn in the same deviation
+// space (cellFor), so the dot's distance from the centre mark IS this number.
 const fmtLean = (share, nullShare) => {
     const v = Math.round((share - nullShare) * 100);
     return `${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.abs(v)}%`;
@@ -288,11 +293,13 @@ function cellFor(kind, row) {
     }
     const t = row.tendency;
     if (!t) return null;
+    // Deviation space: the dot's distance from the centre IS the printed lean,
+    // and the centre IS the availability null, on every row.
+    const leanFrac = (v) => clamp01(0.5 + (v - t.nullShare) / (2 * TENDENCY_FULL_SCALE));
     return {
-        frac: t.share,
-        loFrac: t.lo,
-        hiFrac: t.hi,
-        midFrac: t.nullShare,
+        frac: leanFrac(t.share),
+        loFrac: leanFrac(t.lo),
+        hiFrac: leanFrac(t.hi),
         valueText: fmtLean(t.share, t.nullShare),
         tone: t.z > 0 ? 'over' : 'under',
         weight: toneWeight(t.z),
