@@ -5,6 +5,7 @@ import json
 import math
 import os
 import shutil
+import struct
 import sys
 import zipfile
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -850,6 +851,18 @@ def compute_data_version(output_dir):
             h.update(f.read())
     except OSError:
         h.update(b"missing-correct-embeddings")
+    # The two other lookup-aligned sidecars, for the same reason: their row
+    # alignment against lookup.txt holds only within one packaging run, and the
+    # alt-stats counts are referenced to the correct-move vectors above, so all
+    # three have to cache-bust together or a client pairs one run's counts with
+    # another run's answer vector.
+    for name in ("lookup.offsets.bin", "lookup.altstats.bin"):
+        q = os.path.join(output_dir, "tsumegos", name)
+        try:
+            with open(q, "rb") as f:
+                h.update(f.read())
+        except OSError:
+            h.update(f"missing-{name}".encode())
     # And the SE-floor curve, which is derived from the same ratings + M: it feeds
     # the shown rank directly, so a change to it has to reach clients on the same
     # cache-bust as the ratings that moved it.
@@ -1051,6 +1064,204 @@ def emit_correct_embeddings(output_dir):
     return out_path
 
 
+# --- lookup-aligned shard-block sidecars -----------------------------------
+#
+# Two more files row-aligned to lookup.txt, alongside lookup.embeddings.bin.
+# Both exist so a reader that holds NO shard can still resolve a problem: the
+# per-cell byte offsets otherwise live only in embeddings_index.json INSIDE the
+# 2MB zip, which made "read one 780-byte block" cost a whole shard download.
+#
+# They are rebuilt from the shards on disk every run rather than carried in
+# memory out of create_packages, because packaging is incremental PER SIZE: a
+# run that rebuilds only 9x9 must still emit rows for 13x13, and the shards it
+# did not touch are the only remaining record of their own offsets.
+
+OFFSETS_BYTES_PER_ROW = 5   # <u4 offset + u1 n_cells
+
+
+def _read_shard_index(output_dir, size, zip_hash):
+    """embeddings_index.json out of one shard zip: {tid: {offset, n_cells}}.
+    Returns None when the shard has no index (a `just rezip the SGFs` run built
+    it with embed_cells disabled). Reads the one member, not the archive."""
+    zip_path = os.path.join(output_dir, "tsumegos", str(size), f"{zip_hash}.zip")
+    try:
+        with zipfile.ZipFile(zip_path) as z:
+            return json.loads(z.read("embeddings_index.json"))["problems"]
+    except (OSError, KeyError, ValueError, zipfile.BadZipFile):
+        return None
+
+
+def _lookup_rows(output_dir):
+    """lookup.txt as [(tsumego_id, zip_hash, size)] in file (id-sorted) order —
+    the row order every lookup-aligned sidecar is addressed by."""
+    lookup_path = os.path.join(output_dir, "lookup.txt")
+    rows = []
+    with open(lookup_path, "r", encoding="utf-8") as f:
+        for line in f:
+            if not line.strip():
+                continue
+            tid, zip_hash, size_str = line.split()
+            rows.append((tid, zip_hash, int(size_str)))
+    return rows
+
+
+def _group_rows_by_shard(rows):
+    """Map (size, zip_hash) -> [(row_index, tsumego_id)], so each shard is
+    opened once however many of its problems the caller wants."""
+    by_shard = {}
+    for i, (tid, zip_hash, size) in enumerate(rows):
+        by_shard.setdefault((size, zip_hash), []).append((i, tid))
+    return by_shard
+
+
+def emit_lookup_offsets(output_dir):
+    """Where each problem's per-cell block lives, ALIGNED TO lookup.txt: row i
+    is (uint32 byte offset, uint8 n_cells) for the problem on lookup.txt line i,
+    inside its own shard's .embeddings.bin. The shard is already named by
+    lookup.txt's zipHash column, so offset + cell count is all that was missing.
+
+    5 bytes/problem. A reader holding this plus lookup.txt can address any
+    problem's block without opening a single zip — which is the whole point,
+    since the in-zip embeddings_index.json costs a ~2MB download to read.
+
+    An id whose shard carries no index gets an ALL-ZERO row (offset 0,
+    n_cells 0); n_cells == 0 is the absent sentinel, since every real problem
+    has at least one variation."""
+    rows = _lookup_rows(output_dir)
+    buf = bytearray(len(rows) * OFFSETS_BYTES_PER_ROW)
+    missing = 0
+    shards_without_index = 0
+    for (size, zip_hash), items in _group_rows_by_shard(rows).items():
+        index = _read_shard_index(output_dir, size, zip_hash)
+        if index is None:
+            shards_without_index += 1
+            missing += len(items)
+            continue
+        for row_i, tid in items:
+            entry = index.get(tid)
+            if entry is None:
+                missing += 1
+                continue
+            offset = int(entry["offset"])
+            n_cells = int(entry["n_cells"])
+            # Both widths are load-bearing: a silent wraparound here addresses
+            # a stranger's bytes rather than failing, so bound them explicitly.
+            if not 0 <= offset < 2 ** 32:
+                raise ValueError(f"{tid}: block offset {offset} exceeds uint32")
+            if not 0 < n_cells < 256:
+                raise ValueError(f"{tid}: n_cells {n_cells} outside 1..255")
+            struct.pack_into("<IB", buf, row_i * OFFSETS_BYTES_PER_ROW,
+                             offset, n_cells)
+
+    if shards_without_index and shards_without_index == len(_group_rows_by_shard(rows)):
+        print("  skipping lookup.offsets.bin (no shard carries an embeddings "
+              "index — per-cell embeddings were not built this run)")
+        return None
+
+    out_path = os.path.join(output_dir, "tsumegos", "lookup.offsets.bin")
+    with open(out_path, "wb") as f:
+        f.write(buf)
+    print(f"  wrote lookup.offsets.bin ({len(rows)} rows x {OFFSETS_BYTES_PER_ROW} B"
+          f"{f', {missing} absent zero-filled' if missing else ''}) at {out_path}")
+    return out_path
+
+
+def _js_quantize(a):
+    """quantizeEmbedding (pwa/js/math-utils.js) exactly: round to 2 decimals.
+
+    JS Math.round is floor(x + 0.5) — it breaks ties toward +infinity, where
+    numpy.round breaks them to even. fp16 carries plenty of values that land on
+    an exact .5 after scaling (0.125 -> 12.5), and the counts below are strict
+    per-axis comparisons, so a tie resolved the other way moves a count. Do the
+    arithmetic in float64, which is what a JS Number is."""
+    return np.floor(np.asarray(a, dtype=np.float64) * 100.0 + 0.5) / 100.0
+
+
+def emit_alt_stats(output_dir, correct_rows=None):
+    """The availability null per problem, ALIGNED TO lookup.txt: row i holds,
+    for the problem on lookup.txt line i, how many of the moves a click could
+    pick load strictly ABOVE then strictly BELOW the correct move's loading, per
+    axis. 2*K bytes/problem (uint8 counts).
+
+    This is computeAltStats (pwa/js/picked-embedding.js) evaluated at packaging
+    time. It is a property of the CORPUS, not of the player — the counts depend
+    only on the problem and its answer — so computing it here costs the client
+    the whole shard walk it currently pays to rediscover the same numbers.
+
+    The reference is the correct-move vector from lookup.embeddings.bin, NOT the
+    block's own first row. The two are not bit-identical (they come from
+    per_problem.csv and the per-cell npz respectively), and the client's two
+    paths disagree today because of it: the live path references the block row,
+    the backfill references the stored sidecar vector. Pinning it to the sidecar
+    makes one answer for both, and matches the vector shipped beside it as the
+    attempt's `embedding`.
+
+    Ties carry no direction and are outside both counts, mirroring the
+    observed-side tie drop — which is also why the correct row needs no special
+    exclusion: it ties with itself on every axis and falls out of the strict
+    comparisons. The pass placeholder (all-zeros row) is skipped: a click cannot
+    select the pass. An id whose shard or block is absent gets an ALL-ZERO row,
+    which the client already reads as `no null available` (altAbove + altBelow
+    == 0 fails motif-stats' nAvail guard)."""
+    rows = _lookup_rows(output_dir)
+    correct_path = os.path.join(output_dir, "tsumegos", "lookup.embeddings.bin")
+    if correct_rows is None:
+        correct_rows = np.fromfile(correct_path, dtype=EMBEDDING_DTYPE)
+    if correct_rows.size % len(rows) != 0:
+        raise ValueError(
+            f"lookup.embeddings.bin holds {correct_rows.size} floats, not a whole "
+            f"number of rows for {len(rows)} lookup lines — refusing to emit a "
+            f"misaligned alt-stats sidecar")
+    K = correct_rows.size // len(rows)
+    correct_rows = correct_rows.reshape(len(rows), K)
+    correct_q = _js_quantize(correct_rows)
+
+    out = np.zeros((len(rows), 2 * K), dtype=np.uint8)
+    missing = 0
+    for (size, zip_hash), items in _group_rows_by_shard(rows).items():
+        index = _read_shard_index(output_dir, size, zip_hash)
+        bin_path = os.path.join(output_dir, "tsumegos", str(size),
+                                f"{zip_hash}.embeddings.bin")
+        if index is None or not os.path.exists(bin_path):
+            missing += len(items)
+            continue
+        blob = np.fromfile(bin_path, dtype=EMBEDDING_DTYPE)
+        for row_i, tid in items:
+            entry = index.get(tid)
+            if entry is None:
+                missing += 1
+                continue
+            start = int(entry["offset"]) // EMBEDDING_BYTES_PER_FLOAT
+            n_cells = int(entry["n_cells"])
+            block = blob[start:start + n_cells * K]
+            if block.size != n_cells * K:
+                raise ValueError(
+                    f"{tid}: shard {zip_hash} bin is short for its own index "
+                    f"({block.size} floats, expected {n_cells * K}) — refusing "
+                    f"to ship counts read past the end of a block")
+            q = _js_quantize(block.reshape(n_cells, K))
+            q = q[~np.all(q == 0.0, axis=1)]   # drop the pass placeholder
+            ref = correct_q[row_i]
+            above = (q > ref).sum(axis=0)
+            below = (q < ref).sum(axis=0)
+            # n_cells is uint8-bounded by emit_lookup_offsets, and neither count
+            # can exceed it, so this only fires if that bound ever moves.
+            if above.max(initial=0) > 255 or below.max(initial=0) > 255:
+                raise ValueError(f"{tid}: alt count exceeds uint8")
+            out[row_i, :K] = above
+            out[row_i, K:] = below
+
+    if missing == len(rows):
+        print("  skipping lookup.altstats.bin (no shard carries per-cell blocks)")
+        return None
+
+    out_path = os.path.join(output_dir, "tsumegos", "lookup.altstats.bin")
+    out.tofile(out_path)
+    print(f"  wrote lookup.altstats.bin ({len(rows)} rows x {2 * K} B"
+          f"{f', {missing} absent zero-filled' if missing else ''}) at {out_path}")
+    return out_path
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Package rated tsumegos for the PWA.")
     parser.add_argument(
@@ -1151,6 +1362,21 @@ if __name__ == "__main__":
     else:
         emit_correct_embeddings(OUTPUT_DIR)
 
+    # Where each problem's per-cell block sits, and the availability null read off
+    # it. Both are row-aligned to the same final lookup.txt as the correct-move
+    # sidecar. Offsets are rebuilt from the shard zips on disk, so they stay right
+    # for a size whose shards were not rebuilt this run; the alt-stats counts are
+    # referenced to the correct-move sidecar, so they follow ITS sentinel rule —
+    # keep the pair in lockstep or the counts describe a different answer vector
+    # than the one shipped beside them.
+    print("\n--- per-cell block offsets + availability null ---")
+    if _axes_dir()[0] is None or any_sentinel:
+        print("  keeping existing lookup.offsets.bin / lookup.altstats.bin "
+              "(embeddings/ absent or a size took the sentinel path)")
+    else:
+        emit_lookup_offsets(OUTPUT_DIR)
+        emit_alt_stats(OUTPUT_DIR)
+
     # Single shared embedding_meta.json. Carries both joint embedding info and
     # per-size ratings_version (content hash) so the PWA can independently
     # detect embedding refits vs rating refreshes.
@@ -1159,6 +1385,11 @@ if __name__ == "__main__":
         K = meta_out.get("K") or 0
         meta_out["dtype"] = EMBEDDING_DTYPE_NAME
         meta_out["bytes_per_cell"] = int(K) * EMBEDDING_BYTES_PER_FLOAT
+        # Layout of the two block sidecars, so a reader never hardcodes either
+        # width: lookup.offsets.bin is <u4 offset + u1 n_cells per problem,
+        # lookup.altstats.bin is K uint8 above-counts then K uint8 below-counts.
+        meta_out["offsets_bytes_per_row"] = OFFSETS_BYTES_PER_ROW
+        meta_out["altstats_bytes_per_row"] = 2 * int(K)
         if ratings_versions:
             meta_out["ratings_version"] = ratings_versions
         meta_out["rating_model"] = RATING_MODEL_TAG
