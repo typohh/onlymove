@@ -1369,12 +1369,22 @@ async function fillSyncedForSize(size, problemParams = null) {
     }
     filled += await fillCorrectEmbeddingsViaSidecar(embedNeedy);
 
-    // The zip walk remains ONLY where the zip's contents are genuinely needed:
-    // deriving pickedCellIndex from a synced move coordinate (needs the SGF)
-    // and the picked-embedding fill (byte offsets live in the zip's
-    // embeddings_index.json). Wrong attempts are a minority and skew
-    // rank-local, so this walk touches a fraction of the shards the correct
-    // fills used to.
+    // Batched /refit first. This is the walk it was built for: an adopting
+    // device holds a full synced history and none of the vectors, and the two
+    // things the zips were needed for — resolving a reported move coordinate to
+    // a variation index, and locating a problem's per-cell block — are both
+    // published now, so the endpoint answers them without a shard. Best-effort
+    // as everywhere: what it cannot supply falls through to the walk below,
+    // which is unchanged and remains the offline path.
+    filled += await fillViaRefitEndpoint(history, startIdx,
+                                         () => persistAnswerHistory(size, history));
+
+    // The zip walk remains where the zip's own contents are needed: deriving
+    // pickedCellIndex from a synced move coordinate when the endpoint could not
+    // be reached (it needs the SGF), and the picked-embedding fill (byte offsets
+    // live in the zip's embeddings_index.json). Wrong attempts are a minority
+    // and skew rank-local, so this walk touches a fraction of the shards the
+    // correct fills used to.
     const needIds = new Set();
     for (let i = startIdx; i < history.length; i++) {
         const a = history[i];

@@ -29,6 +29,11 @@ from utils.rating.motif_rules import LABEL_SET, RULE_LABELS
 
 # Per-cell embedding sidecar parameters. Keep these in sync with whatever the
 # PWA-side decoder expects in pwa/tsumegos/embedding_meta.json.
+# Reserved point code for the pass variation in the published cell map. Board
+# points encode as `y * size + x`, so the largest real code is 168 on 13x13 and
+# 255 can never collide with one.
+PASS_POINT_CODE = 255
+
 EMBEDDING_DTYPE = np.float16
 EMBEDDING_DTYPE_NAME = "float16"
 EMBEDDING_BYTES_PER_FLOAT = 2
@@ -50,7 +55,10 @@ RATING_MODEL_TAG = "v2"
 
 def project_cells_for_problem(per_cell_path, sgf_path):
     """Load pre-projected per-cell embeddings for one tsumego in the order the
-    PWA's cell index expects. Returns (fp16 (n_cells, K) array, n_cells). A missing,
+    PWA's cell index expects. Returns (fp16 (n_cells, K) array, n_cells, point codes).
+    The point codes are the same variations' board points as uint8 `y * size + x`
+    (255 for the pass), which is what lets a reader that holds no SGF turn a
+    reported move coordinate back into a variation index. A missing,
     corrupt, or SGF-inconsistent .npz RAISES — packaging requires a per-cell projection
     for every problem (write_mirt_per_cell fills the whole corpus), so a gap is a hard
     error, never silently skipped.
@@ -95,7 +103,9 @@ def project_cells_for_problem(per_cell_path, sgf_path):
     xy_to_row = {(int(x), int(y)): i for i, (x, y) in enumerate(xys)}
 
     ordered_rows = []
+    point_codes = bytearray()
     n_real_cells = 0
+    n_pass = 0
     zero_row = np.zeros(embeddings.shape[1], dtype=embeddings.dtype)
     for node in variation_nodes:
         _, mb = node.get_raw_move()
@@ -103,6 +113,8 @@ def project_cells_for_problem(per_cell_path, sgf_path):
         if xy is None:
             # Pass: never embedded — placeholder row for index parity (see docstring).
             ordered_rows.append(zero_row)
+            point_codes.append(PASS_POINT_CODE)
+            n_pass += 1
             continue
         row = xy_to_row.get(xy)
         if row is None:
@@ -114,13 +126,22 @@ def project_cells_for_problem(per_cell_path, sgf_path):
                 f"per_cell {per_cell_path} is missing cell {xy} present in {sgf_path} "
                 f"(stale extraction?) — refusing to ship a misaligned sidecar")
         ordered_rows.append(embeddings[row])
+        point_codes.append(int(xy[1]) * size + int(xy[0]))
         n_real_cells += 1
 
     if n_real_cells == 0:
         raise RuntimeError(
             f"per_cell {per_cell_path}: no non-pass variation matched {sgf_path}")
+    # Every problem carries exactly one pass variation (it holds the refutation
+    # line). Two would mean two placeholder rows sharing one reserved code, and
+    # none would mean the tree is not the shape everything downstream assumes.
+    if n_pass != 1:
+        raise RuntimeError(
+            f"{sgf_path}: {n_pass} pass variations, expected exactly 1 — the "
+            f"variation list is not the shape the published layout assumes")
 
-    return np.stack(ordered_rows, axis=0).astype(EMBEDDING_DTYPE), len(ordered_rows)
+    return (np.stack(ordered_rows, axis=0).astype(EMBEDDING_DTYPE),
+            len(ordered_rows), bytes(point_codes))
 
 
 # Fixed DOS-epoch timestamp for every zip entry. zipfile.writestr stamps each
@@ -160,6 +181,7 @@ def _build_group_shard(task):
     # Build the per-shard per-cell embedding sidecar + index ahead of the
     # zip so we can drop embeddings_index.json inside the same zip below.
     bin_buffer = bytearray()
+    cells_buffer = bytearray()
     embeddings_index = {}
     n_with_cells = 0
     if embed_cells_enabled:
@@ -170,9 +192,14 @@ def _build_group_shard(task):
             # project_cells_for_problem RAISES on any missing/corrupt/
             # SGF-inconsistent npz (a gap is a hard error, never silently
             # skipped), so there is no "no cells" case to count here.
-            cells, n_cells = project_cells_for_problem(per_cell_path, sgf_path)
+            cells, n_cells, point_codes = project_cells_for_problem(
+                per_cell_path, sgf_path)
             offset = len(bin_buffer)
             bin_buffer.extend(cells.tobytes())  # fp16 little-endian
+            # The cell map runs in lockstep with the embedding block at one byte
+            # per cell, so it needs no offsets of its own: a problem's codes
+            # start at offset // bytes_per_cell and run n_cells bytes.
+            cells_buffer.extend(point_codes)
             embeddings_index[tid] = {"offset": offset, "n_cells": int(n_cells)}
             n_with_cells += 1
 
@@ -202,6 +229,7 @@ def _build_group_shard(task):
         "zip_hash": zip_hash,
         "zip_bytes": zip_bytes,
         "bin_bytes": bytes(bin_buffer) if (embed_cells_enabled and bin_buffer) else None,
+        "cells_bytes": bytes(cells_buffer) if (embed_cells_enabled and cells_buffer) else None,
         "min_rating": min_rating,
         "max_rating": max_rating,
         "tsumego_ids": [item["filename"].split(".")[0] for item in group_items],
@@ -216,6 +244,7 @@ def create_packages(metadata, board_size, tsumegos_dir="tsumegos", output_dir="p
     Output layout:
         {output_dir}/tsumegos/{board_size}/{hash}.zip
         {output_dir}/tsumegos/{board_size}/{hash}.embeddings.bin   (if per_cell_dir)
+        {output_dir}/tsumegos/{board_size}/{hash}.cells.bin        (if per_cell_dir)
         {output_dir}/tsumegos/{board_size}/metadata.json
         {output_dir}/lookup.txt   (merged across sizes; rows: "id zipHash size")
 
@@ -243,7 +272,7 @@ def create_packages(metadata, board_size, tsumegos_dir="tsumegos", output_dir="p
     if os.path.exists(zip_dir):
         for f in os.listdir(zip_dir):
             if (f.endswith(".zip") or f.endswith(".embeddings.bin")
-                    or f == "metadata.json"):
+                    or f.endswith(".cells.bin") or f == "metadata.json"):
                 os.remove(os.path.join(zip_dir, f))
     else:
         os.makedirs(zip_dir)
@@ -275,6 +304,10 @@ def create_packages(metadata, board_size, tsumegos_dir="tsumegos", output_dir="p
             bin_filename = f"{res['zip_hash']}.embeddings.bin"
             with open(os.path.join(zip_dir, bin_filename), 'wb') as f:
                 f.write(res["bin_bytes"])
+        if res["cells_bytes"] is not None:
+            cells_filename = f"{res['zip_hash']}.cells.bin"
+            with open(os.path.join(zip_dir, cells_filename), 'wb') as f:
+                f.write(res["cells_bytes"])
         zip_metadata.append((res["group_index"], {
             "filename": zip_filename,
             "min_rating": res["min_rating"],

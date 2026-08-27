@@ -41,17 +41,33 @@ function lookupRow(lines, tsumegoId) {
     return -1;
 }
 
+// Can this entry name the move that was played? Either it holds the variation
+// index (recorded locally) or the board coordinate a sync delivered — the
+// coordinate being what the record keeps, since reordering a problem's root
+// variations re-points every index while leaving the coordinate correct.
+function playedMove(a) {
+    if (typeof a.pickedCellIndex === 'number' && a.pickedCellIndex >= 0) {
+        return { picked: a.pickedCellIndex };
+    }
+    if (typeof a.syncedMove === 'string') return { move: a.syncedMove };
+    return null;
+}
+
 // Does this entry still want anything /refit can supply?
 function wants(a) {
     if (!a || typeof a.problemId !== 'string') return false;
     if (!a.embedding && !a.noEmb) return true;
-    if (a.correct === false && typeof a.pickedCellIndex === 'number') {
-        if (!a.pickedEmbedding) return true;
-        // The availability null is referenced to the correct move, so it is only
-        // requestable once the correct-move vector is in hand (or coming in the
-        // same batch, which it is — both are filled from one response).
-        if (a.altAbove === undefined) return true;
-    }
+    if (a.correct !== false) return false;
+    const played = playedMove(a);
+    if (!played) return false;
+    // A synced entry with no index yet wants the resolution itself, which is
+    // the whole reason the endpoint accepts a coordinate.
+    if (played.move) return true;
+    if (!a.pickedEmbedding) return true;
+    // The availability null is referenced to the correct move, so it is only
+    // requestable once the correct-move vector is in hand (or coming in the
+    // same batch, which it is — both are filled from one response).
+    if (a.altAbove === undefined) return true;
     return false;
 }
 
@@ -60,6 +76,15 @@ function wants(a) {
 function apply(a, r) {
     let touched = false;
     if (r.embedding && !a.embedding) { a.embedding = r.embedding; touched = true; }
+    if (Number.isInteger(r.pickedCellIndex) && typeof a.pickedCellIndex !== 'number') {
+        a.pickedCellIndex = r.pickedCellIndex;
+        // The coordinate has done its job. Dropping it matches the shard walk's
+        // one-shot rule and is what keeps a resolved entry from re-selecting its
+        // shard; an entry the endpoint could NOT resolve keeps it, so the walk
+        // still gets its turn.
+        delete a.syncedMove;
+        touched = true;
+    }
     if (r.pickedEmbedding && !a.pickedEmbedding && a.correct === false) {
         a.pickedEmbedding = r.pickedEmbedding;
         touched = true;
@@ -94,9 +119,10 @@ export async function fillViaRefitEndpoint(history, startIdx, checkpoint = null)
         if (row < 0) continue;
         const parts = lines[row].split(' ');
         const item = { id: a.problemId, row };
-        if (a.correct === false && typeof a.pickedCellIndex === 'number'
-            && a.pickedCellIndex >= 0) {
-            item.picked = a.pickedCellIndex;
+        const played = a.correct === false ? playedMove(a) : null;
+        if (played) {
+            if (played.picked !== undefined) item.picked = played.picked;
+            else item.move = played.move;
             item.zip = parts[1];
             item.size = parseInt(parts[2], 10);
         }

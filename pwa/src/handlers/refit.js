@@ -98,11 +98,70 @@ function cacheCell(key, vec) {
     }
 }
 
-async function shardBin(env, size, zipHash) {
+async function shardAsset(env, size, zipHash, suffix) {
     const res = await env.ASSETS.fetch(
-        new Request(`https://onlymove.net/tsumegos/${size}/${zipHash}.embeddings.bin`));
+        new Request(`https://onlymove.net/tsumegos/${size}/${zipHash}.${suffix}`));
     if (!res || !res.ok) return null;
     return new Uint8Array(await res.arrayBuffer());
+}
+
+// --- resolving a reported move to a variation index ------------------------
+// An attempt that arrived from another device carries the played move as a
+// board coordinate, not as an index — the coordinate is what the record keeps,
+// because reordering a problem's root variations re-points every index while
+// leaving the coordinate correct. Turning it back into an index needs the
+// problem's variations in order, which is why the cell map is published: one
+// byte per cell, `y * size + x`, running in lockstep with the embedding block
+// so a problem's codes start at offset / bytes_per_cell and run n_cells bytes.
+// Without it this resolution needs the SGF, hence the whole shard archive.
+const PASS_POINT_CODE = 255;
+const COL_LETTERS = 'ABCDEFGHJKLMNOPQRST';   // no I, as in the client's sgf.js
+
+// Board notation -> point code. Mirrors boardNotationToXy in pwa/js/sgf.js and
+// must keep mirroring it: the coordinate is minted there, in the canonical
+// orientation-0 frame the published SGFs are written in.
+function movePointCode(move, size) {
+    if (typeof move !== 'string') return -1;
+    const m = /^([A-HJ-T])(\d{1,2})$/.exec(move.toUpperCase());
+    if (!m) return -1;
+    const x = COL_LETTERS.indexOf(m[1]);
+    const y = size - parseInt(m[2], 10);
+    if (x < 0 || x >= size || y < 0 || y >= size) return -1;
+    return y * size + x;
+}
+
+// Resolved indices are cached for the same reason picked cells are: the set of
+// (problem, played move) pairs a re-derive asks about is small and repeats
+// across users, so the map is read once and the answers persist.
+const _indexCache = new Map();   // `${size}/${zip}/${row}/${code}` -> index
+
+function lookupIndexInMap(map, size, zipHash, cellStart, nCells, code) {
+    const key = `${size}/${zipHash}/${cellStart}/${code}`;
+    const hit = _indexCache.get(key);
+    if (hit !== undefined) return hit;
+    // A map that failed to load is a transient miss, not an answer — returning
+    // -1 is right for this request but caching it would poison the shard for
+    // the isolate's life.
+    if (!map || cellStart + nCells > map.length) return -1;
+    let found = -1;
+    for (let i = 0; i < nCells; i++) {
+        if (map[cellStart + i] === code) { found = i; break; }
+    }
+    // A pass can never answer this: it carries no board coordinate, so no code
+    // derived from one can equal the reserved value.
+    if (code === PASS_POINT_CODE) found = -1;
+    _indexCache.set(key, found);
+    while (_indexCache.size > CELL_CACHE_MAX) {
+        _indexCache.delete(_indexCache.keys().next().value);
+    }
+    return found;
+}
+
+// Whether any of a shard's wanted moves still needs the map — a batch whose
+// coordinates are all cached, or all already indices, must not fetch it.
+function needsMap(wanted, size, zipHash) {
+    return wanted.some((w) => w.picked < 0 && _indexCache.get(
+        `${size}/${zipHash}/${w.blockOffset / BYTES_PER_CELL}/${w.code}`) === undefined);
 }
 
 // --- decoding ---------------------------------------------------------------
@@ -213,35 +272,59 @@ export async function handleRefit(request, env) {
 
         results[i] = out;
 
-        // The one user-dependent field, and the only one that touches a shard.
-        if (Number.isInteger(it.picked) && it.picked >= 0
+        // The one user-dependent part, and the only one that reads a shard. The
+        // caller supplies the played move as whichever it holds: an index for a
+        // locally recorded attempt, a board coordinate for one that arrived
+        // from another device. Only the coordinate needs resolving, and the
+        // resolved index is always echoed back so the caller can store it.
+        const hasIndex = Number.isInteger(it.picked) && it.picked >= 0;
+        const hasMove = typeof it.move === 'string';
+        if ((hasIndex || hasMove)
             && typeof it.zip === 'string' && /^[0-9a-f]{8}$/.test(it.zip)
             && (it.size === 9 || it.size === 13)) {
             const blockOffset = offsetsView.getUint32(row * OFFSETS_ROW, true);
             const nCells = offsetsView.getUint8(row * OFFSETS_ROW + 4);
-            if (nCells > 0 && it.picked < nCells) {
+            const code = hasIndex ? -1 : movePointCode(it.move, it.size);
+            if (nCells > 0 && (hasIndex ? it.picked < nCells : code >= 0)) {
                 const key = `${it.size}/${it.zip}`;
                 if (!byShard.has(key)) byShard.set(key, []);
                 byShard.get(key).push({
                     slot: i,
-                    byteOffset: blockOffset + it.picked * BYTES_PER_CELL,
+                    picked: hasIndex ? it.picked : -1,
+                    code,
+                    blockOffset,
+                    nCells,
                 });
             }
         }
     }
 
     for (const [key, wanted] of byShard) {
-        // Anything already cached needs no shard read at all; only a genuinely
-        // new pick does, which is why the shard fetch is inside the miss check.
+        const [size, zipHash] = key.split('/');
+        // One map read per shard, not per move: several coordinates in one shard
+        // share it, and a shard with nothing left to resolve reads none.
+        const map = needsMap(wanted, size, zipHash)
+            ? await shardAsset(env, size, zipHash, 'cells.bin')
+            : null;
         const misses = [];
         for (const w of wanted) {
-            const hit = _cellCache.get(`${key}/${w.byteOffset}`);
+            let picked = w.picked;
+            if (picked < 0) {
+                picked = lookupIndexInMap(
+                    map, size, zipHash, w.blockOffset / BYTES_PER_CELL,
+                    w.nCells, w.code);
+                if (picked < 0) continue;          // move matches no variation
+                results[w.slot].pickedCellIndex = picked;
+            }
+            // Anything already cached needs no shard read at all; only a
+            // genuinely new pick does, which is why the fetch is behind this.
+            const byteOffset = w.blockOffset + picked * BYTES_PER_CELL;
+            const hit = _cellCache.get(`${key}/${byteOffset}`);
             if (hit) results[w.slot].pickedEmbedding = hit;
-            else misses.push(w);
+            else misses.push({ slot: w.slot, byteOffset });
         }
         if (misses.length === 0) continue;
-        const [size, zipHash] = key.split('/');
-        const bin = await shardBin(env, size, zipHash);
+        const bin = await shardAsset(env, size, zipHash, 'embeddings.bin');
         if (!bin) continue;
         for (const w of misses) {
             const vec = decodeVec(bin, w.byteOffset);
