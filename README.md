@@ -7,7 +7,7 @@ Each problem has exactly one correct first move. From the attempt log the pipeli
 ## Project structure
 
 - **`pipeline/`** — executable scripts that form the core workflow (generation, benchmarking, rating, feature extraction, packaging).
-- **`utils/`** — the shared logic, split by domain: **`utils/katago/`** is the Go and KataGo side (engine controller and queries, the vendored PyTorch copy, coordinates, SGF construction, problem finding, board rendering) and **`utils/rating/`** is the statistical side (feature assembly, the rating artifacts reader, rank-curve fitting, surveys, the residual-axes model). The two families share no imports; `utils/constants.py` holds the handful of values both need.
+- **`utils/`** — the shared logic, split by domain: **`utils/katago/`** is the Go and KataGo side (engine controller and queries, the vendored PyTorch copy, coordinates, SGF construction, problem finding, board rendering) and **`utils/rating/`** is the statistical side (feature assembly, the model's layer stack, the rating artifacts reader, rank-curve fitting, surveys, the motif rules, the SE-floor geometry). The two families share no imports; `utils/constants.py` holds the handful of values both need.
 - **`auxiliary/`** — analysis tools, rating-model research, and diagnostic scripts (not part of the main flow).
 - **`pwa/`** — the front-end (vanilla JS + esbuild) and the Cloudflare Worker that hosts it.
 - **`analysis_server/`** — a small KataGo-backed HTTP service used as the PWA's analysis fallback. `worker.py` lets a faster machine dial in and take that service's work over while it is running.
@@ -36,7 +36,7 @@ The repository is complete as source and deliberately incomplete as a deployment
 
 ### Hardware
 
-A GPU is a practical requirement for generation, bot benchmarking and activation extraction (steps 3–5). Extraction runs about 8 GPU-minutes per 1000 problems on a Quadro M2200, so a full-corpus pass is a day of compute; `vast_orchestration.py` rents a Vast.ai instance for the three remotable steps. Everything downstream of extraction, and everything in `auxiliary/`, is CPU-only.
+A GPU is a practical requirement for generation, bot benchmarking and the two extraction passes (steps 3–6). Activation extraction runs about 1.4 GPU-minutes per 1000 problems on a Quadro M2200 — measured end to end over a full corpus rebuild, so it includes SGF parsing and npz compression — which puts a full-corpus pass at a few hours rather than a day. **Budget disk rather than compute for it**: roughly 0.6 MB per 9×9 problem and 1.15 MB per 13×13 one, on the order of 100 GB for a full corpus, and the pass is bound by writing that rather than by the forward pass. `vast_orchestration.py` rents a Vast.ai instance for the three remotable steps. Everything downstream of extraction, and everything in `auxiliary/`, is CPU-only.
 
 ### Cloudflare (deployment only)
 
@@ -44,13 +44,13 @@ Deploying the PWA needs a Wrangler login, a D1 database created from `pwa/schema
 
 ## What a fork can run
 
-**Steps 2–6 reproduce anywhere.** Tuning, generation, bot benchmarking, activation extraction and the feature cache need only KataGo, the weights and a GPU, and they manufacture their own inputs. That is where a fork starts.
+**Steps 2–8 reproduce anywhere.** Tuning, generation, bot benchmarking, the two extraction passes, the feature caches and the motif proxies need only KataGo, the weights and a GPU, and they manufacture their own inputs. That is where a fork starts.
 
 **Step 1 belongs to this project's Cloudflare account.** `fetch_database` runs `wrangler d1 export` against the live D1 holding the human attempt log. A fork cannot authenticate to it, and the log is not published — it is real users' per-attempt answer history.
 
-**Steps 7–10 read that log**, so the rating, rank and motif fits do not reproduce outside the project. The seam for substituting an attempt log of your own is at least a clean one — `db/d1.sqlite` is an ordinary SQLite file whose shape is fixed by `pwa/schema.sql`, and the loaders open it directly — but nobody has done it, so treat it as an opening rather than a documented path.
+**Steps 9–12 read that log**, so the rating, rank and motif fits do not reproduce outside the project. The seam for substituting an attempt log of your own is at least a clean one — `db/d1.sqlite` is an ordinary SQLite file whose shape is fixed by `pwa/schema.sql`, and the loaders open it directly — but nobody has done it, so treat it as an opening rather than a documented path.
 
-**`npm run build` fails on a fresh clone**, and the error is worth recognising rather than debugging. `pwa/js/data-version.js` statically imports `../tsumegos/embedding_meta.json` so the data manifest can never be served stale; `pwa/tsumegos/` is written by step 11. Until packaging has run, esbuild stops on the unresolved import.
+**`npm run build` fails on a fresh clone**, and the error is worth recognising rather than debugging. `pwa/js/data-version.js` statically imports `../tsumegos/embedding_meta.json` so the data manifest can never be served stale; `pwa/tsumegos/` is written by step 13. Until packaging has run, esbuild stops on the unresolved import.
 
 ## Board size
 
@@ -90,43 +90,55 @@ Captures KataGo trunk activations at every legal cell into `activations/<size>/<
 ./.venv/bin/python3 -m pipeline.extract_activations
 ```
 
-### 6. Cache move features
-Builds the candidate-move-eval cache the rating trainer reads.
+### 6. Extract ownership swing
+Measures, per problem, how many stones' worth of ownership the correct first move swings against the best resolved refutation, into `activations/_signal_cache/ownership_swing.csv` (GPU, via the KataGo analysis binary; resumable by the `tid` column). **Mandatory, not diagnostic**: it is a feature block the rating trainer reads, and two of the shipped motif rules read it too.
+```bash
+./.venv/bin/python3 -m pipeline.extract_ownership_swing
+```
+
+### 7. Cache rating features
+Builds both roll-up caches the rating trainer reads — the candidate-move-eval cache and the correct-cell activation vectors — in one command, so they cannot drift apart. Incremental, and reconciles in both directions.
 ```bash
 ./.venv/bin/python3 -m pipeline.cache_rating_features
 ```
 
-### 7. Train the MIRT
+### 8. Build motif proxies
+Labels every problem against the motif proxy rules into `axes/motif_proxies.npz`, one column per rule. These are the directions the next step teaches its axes onto, and it aborts without them. A rule or threshold change is invisible to the per-problem key, so it needs `--force`.
+```bash
+./.venv/bin/python3 -m pipeline.build_motif_proxies
+```
+
+### 9. Train the MIRT
 Fits the rating and the K skill axes together, as one compensatory model on human first-time attempts (activation, bot-winrate, move-eval and game-phase features), into `ratings/<size>/` and `axes/`. Takes no arguments — the shipped configuration is baked in; the experiment surface lives in `auxiliary/rating_dev/train_joint_mirt.py`.
 ```bash
 ./.venv/bin/python3 -m pipeline.train_mirt
 ```
 
-### 8. Write per-cell axis vectors
+### 10. Write per-cell axis vectors
 Fans the axis projection out to every legal cell into `axes/per_cell/<size>/<tid>.npz`, which the client needs because it scores the move the user picked and not only the answer. Resumable by file existence.
 ```bash
 ./.venv/bin/python3 -m pipeline.write_mirt_per_cell
 ```
 
-### 9. Map rating to rank
+### 11. Map rating to rank
 Fits the rating→rank curve and the per-server couplings against the rank surveys, into `ratings/rating_to_rank.json` and `ratings/rank_map.json`. Board-independent and needs no GPU, but it sits *inside* the sequence: it reads the ratings the MIRT wrote.
 ```bash
 ./.venv/bin/python3 -m pipeline.map_rating_to_rank
 ```
 
-### 10. Fit population constants
-Fits the retention and time-bias constants and the per-axis weakness prior into `ratings/population_constants.json`. It fits one prior entry per axis, so it must follow `train_mirt` — packaging refuses to run on a stale prior vector.
+### 12. Fit population constants
+Fits the retention and time-bias constants and the rank prior into `ratings/population_constants.json`. It reads the ratings and the rank curve, so it follows both; it fits no per-axis quantity, so an axis refit does not require re-running it.
 ```bash
 ./.venv/bin/python3 -m pipeline.fit_population_constants
 ```
 
-### 11. Package for PWA
+### 13. Package for PWA
 The single writer of `pwa/tsumegos/`: bundles tsumegos, ratings, motifs and the curve into the archives and sidecars the web app serves. Change-detects per size, so a curve-only or labels-only change publishes without rebuilding shards.
 ```bash
 ./.venv/bin/python3 -m pipeline.package_for_pwa
 ```
 
-Steps 7–11 are ordered by hard data dependencies rather than convention; `docs/methodology.md` §3.1 spells out each edge and what breaks if it is skipped.
+Steps 9–13 are ordered by hard data dependencies rather than convention; `docs/methodology.md` §3.1 spells out each edge and what breaks if it is skipped.
 
 ### Remote execution
 
