@@ -92,9 +92,15 @@ OPENING_MAX_PREFIX = {9: 18, 13: 46}
 #
 # The share lands at 17.2%/15.3% rather than 20% because the distance is a whole
 # number of lines: >=3 gives 25.9%/23.4% and >=4 gives 17.2%/15.3%, so 4 is the
-# integer nearest the target. Sente at <=1 gives 22.4%/17.5%, averaging 20%.
-TENUKI_MIN_DIST = 4    # lines between the answer and the opponent's last move
-SENTE_MAX_DIST = 1     # the reply lands on one of the answer's eight neighbours
+# integer nearest the target.
+#
+# ONE bar serves BOTH rules, and rule_sente has none of its own. Tenuki is a
+# single notion — the opponent played away — and both rules are statements about
+# it, so a second constant would only create the possibility of the two drifting
+# apart while each kept the name. rule_tenuki asks it of the answer against the
+# opponent's LAST move; rule_sente asks it twice, of the reply each first move
+# draws, and wants the answer below the bar and the refuted try at or above it.
+TENUKI_MIN_DIST = 4    # lines between a move and the opponent's play
 
 # SHAPE — the two best resolved first moves are CLOSE in winrate, so the position
 # does not announce which is right and the choice rests on judging the shape.
@@ -377,19 +383,54 @@ def answer_opponent_distance(setup, correct):
     return None
 
 
-def answer_reply_distance(answer_node, correct):
-    """Distance from the ANSWER to the opponent's mainline reply to it, or None.
+def reply_distance(node):
+    """How close the opponent's answer lands to the move that provoked it.
+
+    ONE measurement, taken from a root variation's OWN move to the opponent's
+    reply to it, so the same question can be asked of the answer and of a refuted
+    try without either needing a notion of its own. Returns None when the line
+    has no reply to measure.
 
     The reply is taken along the TE-marked line (see _line_moves): TE is what
     says the generator drove a branch to a conclusion, so it names the line that
     was actually read, where the first child is merely the first one written."""
-    if answer_node is None or not correct:
+    if node is None:
         return None
-    acol, amove = correct
-    mv = _line_moves(answer_node, 2)
-    if len(mv) != 2 or mv[1][0].upper() == acol.upper():
+    colour, raw = node.get_raw_move()
+    if colour is None or not raw or raw == b"tt":
         return None
-    return _dist(amove, mv[1][1])
+    mv = _line_moves(node, 2)
+    if len(mv) != 2 or mv[1][0].upper() == colour.upper():
+        return None
+    return _dist(mv[0][1], mv[1][1])
+
+
+def best_refuted_node(variation_nodes, correct):
+    """The strongest first move that is NOT the answer, or None.
+
+    "Strongest" is the client's own rule — highest winrate in the mover's frame,
+    score breaking ties — over the RESOLVED alternatives only. An abandoned stub
+    has a continuation the generator never read, so what the opponent "does"
+    about it is not evidence of anything; rule_shape ranks only resolved moves
+    for the same reason."""
+    if not correct:
+        return None
+    _acol, amove = correct
+    best, best_eval = None, None
+    for n in variation_nodes:
+        colour, raw = n.get_raw_move()
+        if colour is None or not raw or raw == b"tt":
+            continue
+        if raw.decode("utf-8") == amove:
+            continue                      # the answer, not a refuted move
+        if not _subtree_has_te(n):
+            continue
+        ev = _mover_eval(n)
+        if ev is None:
+            continue
+        if best_eval is None or ev > best_eval:
+            best, best_eval = n, ev
+    return best
 
 
 def rule_tenuki(opp_distance, root_ko, min_dist=None):
@@ -410,17 +451,40 @@ def rule_tenuki(opp_distance, root_ko, min_dist=None):
     return opp_distance >= (TENUKI_MIN_DIST if min_dist is None else min_dist)
 
 
-def rule_sente(reply_distance, max_dist=None):
-    """The opponent answers the correct move LOCALLY — the move is sente.
+def rule_sente(answer_reply, refuted_reply, min_dist=None):
+    """The opponent MUST answer the correct move — and demonstrably so.
 
-    A MAXIMUM distance: the reply landing next to the move is what says the move
-    demanded an answer there. A reply played far away means the opponent judged
-    the move ignorable and took the bigger point, which is the opposite reading.
+    A CONTRAST between two moves rather than a property of one, and the SAME
+    question of each (reply_distance): how close does the opponent play to the
+    move just made. The answer draws a reply that is not a tenuki; the best
+    refuted try draws one that is.
+
+    Asking it only of the answer does not identify sente. Most of this corpus is
+    a local fight, and a local fight produces a local reply whatever was played,
+    so a near reply on its own says the position is busy. It is the refuted move
+    being ignored that says the reply to the answer was compelled — a move both
+    tries get is a busy corner, a move only the right one gets is sente.
+
+    ONE bar, TENUKI_MIN_DIST, because there is one notion here and it is tenuki:
+    the rule reads "not a tenuki, against a tenuki". A second constant for the
+    answer side would let the two drift apart while both kept the name.
+
+    Declines when either distance is missing, rather than reading an absent
+    refutation as a tenuki — which would fire the rule where the corpus knows
+    least. In practice that costs almost nothing: sampled at 4k per board, both
+    distances are measurable on 99.6% of 9x9 and 100% of 13x13, so the rule is
+    decided on essentially the whole corpus rather than on a subset.
+
+    The share lands at 20.4%/23.8%, on the ~20% target the rule set aims for, and
+    the CONTRAST is what puts it there: the answer-side test alone fires on
+    61.7%/48.4%, far too broad to name anything. The refuted side is doing most
+    of the work, which is the measured form of the argument above.
 
     Board-independent, for the reason given on rule_tenuki."""
-    if reply_distance is None:
+    if answer_reply is None or refuted_reply is None:
         return False
-    return reply_distance <= (SENTE_MAX_DIST if max_dist is None else max_dist)
+    bar = TENUKI_MIN_DIST if min_dist is None else min_dist
+    return answer_reply < bar and refuted_reply >= bar
 
 
 def rule_opening(prefix, size):

@@ -68,7 +68,7 @@ from utils.katago.sgf_parsing import parse_tsumego_sgf  # noqa: E402
 from utils.rating.model_constants import SIZES  # noqa: E402
 from utils.rating.motif_rules import (  # noqa: E402
     LABEL_SET, OWNERSHIP_CSV, _mover_eval, _subtree_has_te,
-    answer_opponent_distance, answer_reply_distance,
+    answer_opponent_distance, best_refuted_node, reply_distance,
     rule_counting, rule_ko, rule_life_and_death, rule_opening, rule_sente,
     rule_shape, rule_tenuki, rule_territory)
 
@@ -119,7 +119,11 @@ def label_one(args):
     # Both distances ride THIS parse -- the geometry rules need no board replay
     # and no second pass over the corpus.
     opp_dist = answer_opponent_distance(setup_sgf, correct)
-    reply_dist = answer_reply_distance(answer_node, correct)
+    # The SAME measurement twice — how close the opponent replies to the move
+    # just made — asked of the answer and of the best refuted try. rule_sente
+    # wants the first to be a local answer and the second a tenuki.
+    reply_dist = reply_distance(answer_node)
+    refuted_dist = reply_distance(best_refuted_node(variation_nodes, correct))
     # Whether a ko stands in the ROOT position, computed once: rule_ko needs it
     # as its first test and rule_tenuki needs it as a disqualifier.
     from utils.katago.board_render import simulate
@@ -137,7 +141,7 @@ def label_one(args):
         "territory": rule_territory(own),
         "shape": rule_shape(resolved),
         "tenuki": rule_tenuki(opp_dist, root_ko),
-        "sente": rule_sente(reply_dist),
+        "sente": rule_sente(reply_dist, refuted_dist),
     }
     return tid, size, [bool(hit[k]) for k in LABEL_SET]
 
