@@ -2,7 +2,14 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <!-- viewport-fit=cover: take the WHOLE screen, cutout and all, rather than the
+       safe rectangle the browser would otherwise letterbox us into. That is what
+       makes env(safe-area-inset-*) report real values, which style.css subtracts
+       into --app-h/--app-w and pays back as body padding — so the shell still
+       sits inside the safe area while the fixed full-bleed layers (#corner-art,
+       the overlay/modal backdrops) reach the physical corners. Without it those
+       layers stop at the browser's letterbox and the insets are all 0px. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="color-scheme" content="dark light">
   <meta name="theme-color" content="#000000">
   <!-- Standalone hints. `mobile-web-app-capable` is the modern, cross-browser

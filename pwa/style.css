@@ -14,9 +14,13 @@
    2. Neither accounts for a notch or home indicator. --app-h/--app-w take the
       safe-area insets out, so the shell stays clear of both.
 
-   The insets are all 0 until the viewport meta carries viewport-fit=cover, so
-   that half is inert today — it is here so enabling cover is a one-attribute
-   change rather than a reflow. See index.html.
+   The insets are LIVE: index.html carries viewport-fit=cover, so the page owns
+   the whole screen and env(safe-area-inset-*) report real values on inset
+   hardware. Everything below is measured against what is left after they are
+   taken out, so on such a device --u — and with it the board, the type scale,
+   --col-w and --mb-tab-reserve — is a little smaller than the raw screen would
+   give. On hardware with no insets every subtraction is a no-op and nothing
+   changes. See index.html.
 
    --u is this file's unit: one percent of the smaller usable dimension, i.e.
    a corrected `vmin`. Nothing may go back to bare vmin: --u and vmin differ
@@ -136,10 +140,19 @@ body {
     display: flex; justify-content: center; align-items: center;
     /* Hold the app shell inside the safe area, so #main-container's 100%
        height/width below resolve to the SAME usable box --app-h/--app-w
-       describe. Zero (and therefore inert) until viewport-fit=cover. The
-       decorative full-bleed layers — #corner-art, every overlay/modal
-       backdrop — are position:fixed and so are unaffected by this padding,
-       which is what keeps them edge-to-edge under cover. */
+       describe. THIS is what keeps the header (mode, komi, rank), the board
+       and the buttons clear of a notch or home indicator: they are all in
+       normal flow inside this padding, so protecting the body protects them,
+       and no rule of theirs mentions a safe inset.
+       The decorative full-bleed layers — #corner-art, every overlay/modal
+       backdrop — are position:fixed and so escape this padding, which is the
+       point: they reach the physical screen edge. Their CONTENT stays clear
+       anyway, being centred and capped against --app-h/--app-w, which already
+       have the insets taken out.
+       Anything ADDED as position:fixed is outside this guarantee and has to
+       handle the insets itself — .motif-bubble is the existing example, adding
+       --safe-l/r/t explicitly in landscape and taking a JS-measured park
+       position in portrait. */
     padding: var(--safe-t) var(--safe-r) var(--safe-b) var(--safe-l);
     box-sizing: border-box;
 }
