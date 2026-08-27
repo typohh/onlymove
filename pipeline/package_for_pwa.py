@@ -1177,7 +1177,7 @@ def _js_quantize(a):
     return np.floor(np.asarray(a, dtype=np.float64) * 100.0 + 0.5) / 100.0
 
 
-def emit_alt_stats(output_dir, correct_rows=None):
+def emit_alt_stats(output_dir):
     """The availability null per problem, ALIGNED TO lookup.txt: row i holds,
     for the problem on lookup.txt line i, how many of the moves a click could
     pick load strictly ABOVE then strictly BELOW the correct move's loading, per
@@ -1188,13 +1188,21 @@ def emit_alt_stats(output_dir, correct_rows=None):
     only on the problem and its answer — so computing it here costs the client
     the whole shard walk it currently pays to rediscover the same numbers.
 
-    The reference is the correct-move vector from lookup.embeddings.bin, NOT the
-    block's own first row. The two are not bit-identical (they come from
-    per_problem.csv and the per-cell npz respectively), and the client's two
-    paths disagree today because of it: the live path references the block row,
-    the backfill references the stored sidecar vector. Pinning it to the sidecar
-    makes one answer for both, and matches the vector shipped beside it as the
-    attempt's `embedding`.
+    The reference is the block's OWN first row — the correct move's cell in the
+    same per-cell projection the alternatives are drawn from. The nominally
+    equivalent vectors in per_problem.csv (hence lookup.embeddings.bin and each
+    shard's metadata.json) are not bit-identical to it, and referencing one of
+    those compares cells across two projections: measured over a corpus sample,
+    it moves a count for ~1.8% of problems against the CSV-derived sidecar and
+    ~4.6% against metadata.json. Row 0 also matches what the client computes on
+    a live wrong attempt, which reads the answer's own row out of the same
+    block, so the two producers agree exactly rather than nearly.
+
+    Row 0 IS the answer: generation enforces the answer as the first root
+    variation and every backend stage reads it positionally. The pass-row
+    assertion below is the cheap corpus-wide check of that — a problem whose
+    first variation is the pass would have a misordered SGF, and the counts
+    would be referenced to a placeholder.
 
     Ties carry no direction and are outside both counts, mirroring the
     observed-side tie drop — which is also why the correct row needs no special
@@ -1205,16 +1213,13 @@ def emit_alt_stats(output_dir, correct_rows=None):
     == 0 fails motif-stats' nAvail guard)."""
     rows = _lookup_rows(output_dir)
     correct_path = os.path.join(output_dir, "tsumegos", "lookup.embeddings.bin")
-    if correct_rows is None:
-        correct_rows = np.fromfile(correct_path, dtype=EMBEDDING_DTYPE)
-    if correct_rows.size % len(rows) != 0:
+    n_floats = os.path.getsize(correct_path) // EMBEDDING_BYTES_PER_FLOAT
+    if n_floats % len(rows) != 0:
         raise ValueError(
-            f"lookup.embeddings.bin holds {correct_rows.size} floats, not a whole "
-            f"number of rows for {len(rows)} lookup lines — refusing to emit a "
-            f"misaligned alt-stats sidecar")
-    K = correct_rows.size // len(rows)
-    correct_rows = correct_rows.reshape(len(rows), K)
-    correct_q = _js_quantize(correct_rows)
+            f"lookup.embeddings.bin holds {n_floats} floats, not a whole number "
+            f"of rows for {len(rows)} lookup lines — refusing to emit an "
+            f"alt-stats sidecar against a lookup it is not aligned to")
+    K = n_floats // len(rows)
 
     out = np.zeros((len(rows), 2 * K), dtype=np.uint8)
     missing = 0
@@ -1240,8 +1245,13 @@ def emit_alt_stats(output_dir, correct_rows=None):
                     f"({block.size} floats, expected {n_cells * K}) — refusing "
                     f"to ship counts read past the end of a block")
             q = _js_quantize(block.reshape(n_cells, K))
+            ref = q[0]                          # the answer's own row
+            if np.all(ref == 0.0):
+                raise ValueError(
+                    f"{tid}: first root variation is the pass placeholder — the "
+                    f"SGF's variations are misordered and the null would be "
+                    f"referenced to a row that is not a move")
             q = q[~np.all(q == 0.0, axis=1)]   # drop the pass placeholder
-            ref = correct_q[row_i]
             above = (q > ref).sum(axis=0)
             below = (q < ref).sum(axis=0)
             # n_cells is uint8-bounded by emit_lookup_offsets, and neither count
