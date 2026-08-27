@@ -39,6 +39,7 @@ import {
 import { MODEL_INPUT_HISTORY_LENGTH, EMBEDDING_VECTOR_FIELDS, EMBEDDING_ALL_FIELDS,
          EMBEDDING_VERSION_KEY, RATINGS_VERSION_KEY, RANK_CURVE_VERSION_KEY } from './constants.js';
 import { fetchProblemCellsWithIndexEntry, fetchCorrectEmbedding, computeAltStats } from './picked-embedding.js';
+import { fillViaRefitEndpoint } from './refit-endpoint.js';
 import { fetchLookupLines } from './problem-loader.js';
 import { rankForSize, ratingRankCurveVersion, problemInfoWeight } from './rank-decomposition.js';
 import { DATA_VERSION, EMBEDDING_META_INLINE, EMBEDDING_VERSION, RATINGS_VERSION,
@@ -434,6 +435,7 @@ async function repopulateMissingFields() {
     if (!motifOk && !ratingsOk) return;
     let filled = 0;
     let filledPicked = 0;
+    let filledBatched = 0;
     let filledRatings = 0;
     // problem_params.bin is 3+ MB, so it is fetched only if a row actually needs
     // it — which in the steady state is never, the recorder having written the
@@ -452,6 +454,14 @@ async function repopulateMissingFields() {
             const checkpoint = () => persistAnswerHistory(size, history);
 
             if (motifOk) {
+                // One batched pass over /refit first: it answers the correct-move
+                // vector, the picked-move vector and the availability null from
+                // resident corpus sidecars, so the two passes below are left with
+                // only what it could not supply. Best-effort by construction —
+                // when it fills nothing (offline, freeze, version skew) the
+                // original path runs unchanged, which is why nothing here is
+                // conditional on its result.
+                filledBatched += await fillViaRefitEndpoint(history, startIdx, checkpoint);
                 if (rows.some((a) => a && a.problemId && !a.embedding && !a.noEmb)) {
                     filled += await fillCorrectEmbeddingsViaSidecar(rows, checkpoint);
                     checkpoint();   // `noEmb` marks are worth persisting on their own
@@ -497,9 +507,9 @@ async function repopulateMissingFields() {
             return;   // the next load retries
         }
     }
-    if (filled > 0 || filledPicked > 0 || filledRatings > 0) {
-        console.log(`backfill: repopulated ${filled} correct + ${filledPicked} picked vector(s)` +
-                    `, ${filledRatings} rating field set(s)`);
+    if (filled > 0 || filledPicked > 0 || filledRatings > 0 || filledBatched > 0) {
+        console.log(`backfill: repopulated ${filledBatched} batched + ${filled} correct + ` +
+                    `${filledPicked} picked vector(s), ${filledRatings} rating field set(s)`);
     }
 }
 
@@ -906,6 +916,7 @@ async function backfillForSize(size, { embeddingsChanged, ratingsChanged, curveC
 
         let totalFilled = 0;
         let totalFilledPicked = 0;
+        let totalBatched = 0;
         if (embeddingsChanged && hasWorkingSet) {
             const startIdx = Math.max(0, history.length - KEEP_EMBEDDING_LAST);
             stripOldEmbeddingFields(size, history, startIdx);
@@ -922,6 +933,12 @@ async function backfillForSize(size, { embeddingsChanged, ratingsChanged, curveC
             // was given. So a corpus surgery that reorders variations either
             // rides a state-epoch bump or knowingly leaves those entries stale.
             // The zip walk shrinks to shards carrying such a need.
+            // Batched /refit first — see the note at the repopulate call site.
+            // This is the walk it matters most for: a refit wipes every vector,
+            // so the shard pass behind it would otherwise reopen one zip per
+            // problem across the whole keep window.
+            totalBatched = await fillViaRefitEndpoint(history, startIdx, checkpoint);
+            if (totalBatched > 0) checkpoint();
             totalFilled = await fillCorrectEmbeddingsViaSidecar(history.slice(startIdx), checkpoint);
             if (totalFilled > 0) checkpoint();
             const pickedNeedIds = collectPickedNeedIds(history, startIdx);
@@ -931,9 +948,10 @@ async function backfillForSize(size, { embeddingsChanged, ratingsChanged, curveC
             }
         }
 
-        if (totalFilled > 0 || totalFilledPicked > 0 || totalRatingsUpdated > 0) {
+        if (totalFilled > 0 || totalFilledPicked > 0 || totalRatingsUpdated > 0
+                || totalBatched > 0) {
             checkpoint();
-            console.log(`backfill[${size}]: filled correct=${totalFilled} picked=${totalFilledPicked} ratings=${totalRatingsUpdated}`);
+            console.log(`backfill[${size}]: filled batched=${totalBatched} correct=${totalFilled} picked=${totalFilledPicked} ratings=${totalRatingsUpdated}`);
         }
 
         // The standing challenge and the last-completed problem are persisted

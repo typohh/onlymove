@@ -14,6 +14,7 @@ import { handleLeaderboard } from './handlers/leaderboard-page.js';
 import { handleTournament } from './handlers/tournament-page.js';
 import { handleProfileHide, handleProfile } from './handlers/profile.js';
 import { handleGoogleSignIn, handleGoogleLink, handleGoogleUnlink } from './handlers/google.js';
+import { handleRefit } from './handlers/refit.js';
 import { reconcileBuffers, pruneIdleLeaderboardRows, refreshAgaRatings } from './leaderboard.js';
 
 // Per-IP rate-limited endpoints, checked BEFORE any handler touches D1 so a
@@ -49,6 +50,14 @@ const WRITE_ROUTES = [
   { path: '/google/signin', method: 'POST', limiter: 'RL_WRITE', handler: handleGoogleSignIn },
   { path: '/google/link', method: 'POST', limiter: 'RL_WRITE', handler: handleGoogleLink },
   { path: '/google/unlink', method: 'POST', limiter: 'RL_WRITE', handler: handleGoogleUnlink },
+  // History re-derive: one batch of problems in, every derived field the walk
+  // used to open shard zips for out. A READ of published assets — it touches no
+  // D1 and records nothing — but it sits here rather than in GET_ROUTES for two
+  // reasons: a body of a few hundred ids does not belong in a URL, and the
+  // maintenance freeze SHOULD cover it, since a snapshot-relative window is
+  // exactly when the sidecars it reads may be half-replaced. Clients already
+  // treat a 503 as being offline and retry, which is the right behaviour here.
+  { path: '/refit', method: 'POST', limiter: 'RL_WRITE', handler: handleRefit },
 ];
 
 // GET routes, dispatched like WRITE_ROUTES (reads, so no limiter). Every entry
