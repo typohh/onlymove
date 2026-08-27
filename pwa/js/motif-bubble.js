@@ -130,25 +130,48 @@ function topMotifs(problem) {
 function trainingFocusMotifs() {
     const labels = state.embeddingLabels;
     if (!labels) return [];
-    const scored = [];
-    for (const { k, tail, kind, z } of flaggedMotifCategories()) {
+    // ONE LINE PER MOTIF, the most confident finding on it. An axis can flag on
+    // both readings at once — weak at the motif AND over-reaching for it — and
+    // they are two genuine findings, which is why selection keeps them as two
+    // separate serve slots. As a READING LIST they are one motif twice, and the
+    // second line spends a slot of a short list restating the first's subject
+    // while the user is trying to see what to work on.
+    //
+    // Deliberately NOT done in flaggedMotifCategories(): weaknessServeCategories
+    // reads the same list, and collapsing it there would silently drop a serve
+    // criterion. This is a presentation rule and it belongs here.
+    //
+    // `z` arrives as a positive magnitude for every kind (weakness.js negates
+    // the ones whose raw z is negative), so the larger one is the more confident
+    // finding whichever readings are being compared.
+    const best = new Map();
+    for (const cat of flaggedMotifCategories()) {
         // `strong` is a serve direction, not a training direction: it tells
         // selection to spend LESS time on a motif the user already handles,
-        // which does not belong under a heading about what to work on.
-        if (kind === 'strong') continue;
+        // which does not belong under a heading about what to work on. Dropped
+        // before the comparison, so it cannot win a slot and hide a real one.
+        if (cat.kind === 'strong') continue;
+        const prev = best.get(cat.k);
+        if (!prev || cat.z > prev.z) best.set(cat.k, cat);
+    }
+
+    const scored = [];
+    for (const { k, tail, kind, z } of best.values()) {
         // `tail` is the NAMED tail describing the category, which for an
         // overplay is the opposite of its serve direction — an overplay of a
         // one-sided motif serves anti-motif problems but is described through
         // the motif's own name, with a "too much" qualifier.
         const name = localizedMotif(labels[String(k)], tail);
         if (!name) continue;
-        // Each kind needs its own wording. A bare name reads as "weak at this",
-        // so a tendency finding must not use one — an underplay shown bare beside
-        // a POSITIVE strength reading in the stats table looks like a
-        // contradiction rather than two different statements about the motif.
+        // Each kind is a different statement and needs its own wording. A bare
+        // name is not one of them: it reads as "weak at this" by implication
+        // only, which leaves the one finding that IS about skill looking like a
+        // label somebody forgot to finish, and makes a tendency line shown bare
+        // beside a positive strength reading in the stats table look like a
+        // contradiction rather than two statements about one motif.
         const text = kind === 'overplay' ? getTerm('trainingFocusTooMuch', { motif: name })
                    : kind === 'underplay' ? getTerm('trainingFocusTooLittle', { motif: name })
-                   : name;
+                   : getTerm('trainingFocusBadTiming', { motif: name });
         scored.push({ z, text });
     }
     scored.sort((a, b) => b.z - a.z);
