@@ -4,8 +4,8 @@
 // .embeddings.bin sidecar. Used on wrong attempts so the answer history
 // records what the user *should* have played (the correct-move embedding in
 // metadata.json), what they actually picked, and the availability null — the
-// motif profile a typical error on THIS problem would carry, computed from
-// the alternatives the board actually offered (computeAltStats below).
+// direction a typical error on THIS problem would lean, counted from the
+// alternatives the board actually offered (computeAltStats below).
 //
 // Wire protocol:
 //   - .embeddings.bin holds raw fp16 little-endian floats, K per cell, with
@@ -138,76 +138,36 @@ async function fetchProblemCellsFromIndexEntry({
     }
 }
 
-// The uniform-over-available error null for one problem, from its bin block.
+// The uniform-over-available error null for one problem, from its bin block:
+// per axis, how many of the moves a click could pick load strictly above /
+// below the CORRECT move's loading (`correctVec`). Their ratio is the null
+// probability that an error leans TOWARD the motif, which is what the
+// tendency test compares the observed direction against.
 //
-// The support is exactly the moves a click can pick: the problem's SGF
-// variations minus the pass placeholder (all-zeros row — a click cannot select
-// the pass) and minus the correct move itself. Per axis it returns, over those
-// alternatives:
-//
-//   altMean/altSd   mean and (population) standard deviation of the loading —
-//                   the null moments of a typical error's motif profile, which
-//                   the judgment reading standardises each pick against.
-//   altAbove/altBelow  how many alternatives load strictly above / below the
-//                   CORRECT move's loading. Their ratio is the null probability
-//                   that an error leans TOWARD the motif, which is what the
-//                   tendency test compares the observed direction against —
-//                   ties carry no direction and are outside both counts,
-//                   mirroring the observed-side tie drop.
-//
-// Everything is computed in quantizeEmbedding's own resolution so a stored
-// pick compared against a stored correct vector resolves ties exactly as the
-// counts here did. The correct row is excluded by index when the caller knows
-// it (live path) and by quantized-vector equality otherwise (backfill, where
-// only the stored correct-move embedding is in hand); the equality rule also
-// runs under a known index, which additionally drops any alternative that is
-// indistinguishable from the answer at this resolution — a row that could
-// carry no signal either way. Null when fewer than two alternatives remain.
-export function computeAltStats(rows, { correctIndex = null, correctVec = null } = {}) {
+// Ties carry no direction and are outside both counts, mirroring the
+// observed-side tie drop — which is also why the correct row needs no
+// special exclusion: it ties with itself on every axis and falls out of the
+// strict comparisons. The pass placeholder (all-zeros row) is skipped — a
+// click cannot select the pass. Everything is compared in quantizeEmbedding's
+// own resolution, so a stored pick compared against a stored correct vector
+// resolves ties exactly as the counts here did.
+export function computeAltStats(rows, correctVec) {
     if (!Array.isArray(rows) || rows.length === 0) return null;
-    const K = rows[0].length;
-    const source = Array.isArray(correctVec) && correctVec.length === K
-        ? correctVec
-        : (Number.isInteger(correctIndex) && Array.isArray(rows[correctIndex])
-            ? rows[correctIndex] : null);
-    if (!source) return null;
-    const correctQ = quantizeEmbedding(source);
-
-    const alts = [];
-    for (let i = 0; i < rows.length; i++) {
-        if (i === correctIndex) continue;
-        const q = quantizeEmbedding(rows[i]);
-        if (q.length !== K) continue;
-        if (q.every((v) => v === 0)) continue;                    // pass placeholder
-        if (q.every((v, k) => v === correctQ[k])) continue;       // the correct cell
-        alts.push(q);
-    }
-    if (alts.length < 2) return null;
-
-    const altMean = new Array(K).fill(0);
-    const altSd = new Array(K).fill(0);
+    if (!Array.isArray(correctVec) || correctVec.length === 0) return null;
+    const K = correctVec.length;
+    const correctQ = quantizeEmbedding(correctVec);
     const altAbove = new Array(K).fill(0);
     const altBelow = new Array(K).fill(0);
-    for (let k = 0; k < K; k++) {
-        let s = 0;
-        for (const a of alts) s += a[k];
-        const m = s / alts.length;
-        let ss = 0;
-        for (const a of alts) {
-            const d = a[k] - m;
-            ss += d * d;
-            if (a[k] > correctQ[k]) altAbove[k]++;
-            else if (a[k] < correctQ[k]) altBelow[k]++;
+    for (const row of rows) {
+        if (!Array.isArray(row) || row.length !== K) continue;
+        const q = quantizeEmbedding(row);
+        if (q.every((v) => v === 0)) continue;   // pass placeholder
+        for (let k = 0; k < K; k++) {
+            if (q[k] > correctQ[k]) altAbove[k]++;
+            else if (q[k] < correctQ[k]) altBelow[k]++;
         }
-        altMean[k] = m;
-        altSd[k] = Math.sqrt(ss / alts.length);
     }
-    return {
-        altMean: quantizeEmbedding(altMean),
-        altSd: quantizeEmbedding(altSd),
-        altAbove,
-        altBelow,
-    };
+    return { altAbove, altBelow };
 }
 
 function getMeta() {
@@ -236,12 +196,13 @@ function getMeta() {
 // in-memory embeddings_index (loaded alongside metadata.json by problem-loader),
 // Range-fetches the problem's whole bin block ONCE, and returns both what the
 // motif statistics need from it: the picked cell's vector and the
-// availability-null moments (computeAltStats). Returns
-// Promise<{ picked, alt } | null>; either half may be null; never throws.
+// availability-null counts (computeAltStats, referenced to the correct cell's
+// own row). Returns Promise<{ picked, alt } | null>; either half may be null;
+// never throws.
 export async function fetchWrongAttemptStats({
     tsumegoId,
     pickedIndex,       // SGF variation index from handleBoardClick (children.indexOf)
-    correctIndex,      // same index space, the answer node — excluded from the null
+    correctIndex,      // same index space, the answer node — the null's reference
     zipFilename,       // e.g. "00be9212.zip"; sidecar at "00be9212.embeddings.bin"
     boardSize,         // for URL composition: tsumegos/<size>/<zipFilename>
 }) {
@@ -257,7 +218,9 @@ export async function fetchWrongAttemptStats({
     if (!rows) return null;
     const picked = (Number.isInteger(pickedIndex) && pickedIndex >= 0 && pickedIndex < rows.length)
         ? rows[pickedIndex] : null;
-    const alt = computeAltStats(rows, { correctIndex });
+    const correctVec = (Number.isInteger(correctIndex) && correctIndex >= 0 && correctIndex < rows.length)
+        ? rows[correctIndex] : null;
+    const alt = correctVec ? computeAltStats(rows, correctVec) : null;
     return { picked, alt };
 }
 
@@ -349,7 +312,7 @@ export async function fetchCorrectEmbedding(rowIndex, expectedRows) {
 // caller has already parsed the shard's embeddings_index.json and passes the
 // entry directly — no cache dependency. Returns the problem's whole bin block
 // (Array<K-vector> in SGF variation order) so one fetch serves both the
-// picked-cell refill and the availability-null moments.
+// picked-cell refill and the availability-null counts.
 export async function fetchProblemCellsWithIndexEntry({
     zipFilename,
     boardSize,

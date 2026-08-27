@@ -19,17 +19,8 @@
 //              -> serve problems whose answer is NOT the motif. That is where
 //                 the habit actually costs you, so this is a REDIRECT toward
 //                 low-loading problems, not a de-prioritisation of the axis.
-//   condition  your errors lean toward the motif where it is NOT the answer
-//              AND away from it where it IS (the judgment reading's positive
-//              slope — both directional deficits at once, which the tendency
-//              share alone cannot represent)
-//              -> serve BOTH ends: two slots, one drilling recognition where
-//                 it applies, one drilling restraint where it does not.
 //   strong     better than the 3PL predicts on motif-heavy problems
 //              -> serve fewer of them: nothing to drill here.
-//   (a NEGATIVE judgment slope — errors tracking the condition better than a
-//   typical error — is, like `strong`, nothing to drill, and emits no
-//   category.)
 //
 // The gate is CONFIDENCE ONLY (|z| > MOTIF_Z), with no minimum effect size: a
 // bias the user is reliably making is worth acting on however small it is.
@@ -69,7 +60,7 @@ export function flaggedMotifCategories() {
     if (!stats) return [];
 
     const categories = [];
-    for (const { k, tendency, condition, strength } of stats) {
+    for (const { k, tendency, strength } of stats) {
         const comp = labels[String(k)];
         if (!comp) continue;
         // Describe the axis from whichever tail carries a name, preferring the
@@ -93,13 +84,6 @@ export function flaggedMotifCategories() {
             if (z > 0) categories.push({ k, sign: -dir, tail, kind: 'overplay', z });
             // Errors MISS the motif -> serve where it is the answer.
             else categories.push({ k, sign: dir, tail, kind: 'underplay', z: -z });
-        }
-        // The judgment slope is mirror-invariant (motif-stats.js), so no dir
-        // factor: positive is the deficit whichever tail names the axis. It is
-        // two-sided by construction, so it takes two slots — one per end.
-        if (condition && isFlagged(condition) && condition.z > 0) {
-            categories.push({ k, sign: dir, tail, kind: 'condition', z: condition.z });
-            categories.push({ k, sign: -dir, tail, kind: 'condition', z: condition.z });
         }
     }
     return categories;

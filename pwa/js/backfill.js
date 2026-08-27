@@ -8,11 +8,11 @@
 //      Wipes any stale embeddings, then fills `embedding` from the
 //      lookup-aligned correct-move sidecar (tsumegos/lookup.embeddings.bin,
 //      one ~130-byte Range per problem — no shard zips), plus, for wrong
-//      attempts, `pickedEmbedding` and the availability-null moments
-//      (altMean/altSd/altAbove/altBelow) via each shard's per-cell bin (byte
-//      offsets live in the zip's embeddings_index.json, so only shards
-//      carrying a need are downloaded). Older entries get their embedding
-//      fields stripped to keep localStorage bounded.
+//      attempts, `pickedEmbedding` and the availability-null counts
+//      (altAbove/altBelow) via each shard's per-cell bin (byte offsets live
+//      in the zip's embeddings_index.json, so only shards carrying a need
+//      are downloaded). Older entries get their embedding fields stripped to
+//      keep localStorage bounded.
 //
 //   2. Rating refresh (all history entries, no keep-window cap)
 //      Triggered by `ratings_version` change. Reads the single
@@ -664,27 +664,22 @@ async function parseEmbeddingsIndex(zip, onParseError) {
     }
 }
 
-// Does this wrong attempt still need the availability-null moments? Requires a
-// way to identify the correct move among the block's rows: the stored
-// `correctCellIndex` (rows recorded since it exists) or the stored correct-move
-// `embedding` for a quantized-vector match (older rows — so the correct fill
-// must run BEFORE this walk, which both callers already order). `altMean` is
-// the presence marker for the whole quartet; `[]` is computeAltStats's
-// computed-but-degenerate result, kept so the pass stops re-asking (it clears
-// with the vectors on a refit, like `noEmb`).
+// Does this wrong attempt still need the availability-null counts? The counts
+// are referenced to the correct move's loadings, read here from the stored
+// correct-move `embedding` — so the correct fill must run BEFORE this walk,
+// which both callers already order.
 function needsAltStats(a) {
-    return a.altMean === undefined &&
-        (typeof a.correctCellIndex === 'number' || Array.isArray(a.embedding));
+    return a.altAbove === undefined && Array.isArray(a.embedding);
 }
 
 // Fill one entry's wrong-attempt embedding fields from the shard's per-cell
 // sidecar, when it's an eligible wrong attempt (known pickedCellIndex, and the
 // shard's index knows the problem): `pickedEmbedding` if missing, and the
-// availability-null moments (altMean/altSd/altAbove/altBelow) if missing and
-// identifiable (needsAltStats). One Range fetch brings the problem's WHOLE
-// per-cell block, memoized in `blockCache` (per shard) so several attempts of
-// one problem pay for it once. Returns true iff anything was filled — shared
-// by the version-driven walk and the synced-entry fill, which count fills
+// availability-null counts (altAbove/altBelow) if missing and computable
+// (needsAltStats). One Range fetch brings the problem's WHOLE per-cell block,
+// memoized in `blockCache` (per shard) so several attempts of one problem pay
+// for it once. Returns true iff anything was filled — shared by the
+// version-driven walk and the synced-entry fill, which count fills
 // differently but fill identically.
 async function fillWrongAttemptFields(a, { indexPayload, zipFilename, size, blockCache }) {
     if (a.correct !== false) return false;
@@ -710,22 +705,12 @@ async function fillWrongAttemptFields(a, { indexPayload, zipFilename, size, bloc
         touched = true;
     }
     if (needAlt) {
-        const alt = computeAltStats(rows, {
-            correctIndex: typeof a.correctCellIndex === 'number' ? a.correctCellIndex : null,
-            correctVec: Array.isArray(a.embedding) ? a.embedding : null,
-        });
+        const alt = computeAltStats(rows, a.embedding);
         if (alt) {
-            a.altMean = alt.altMean;
-            a.altSd = alt.altSd;
             a.altAbove = alt.altAbove;
             a.altBelow = alt.altBelow;
-        } else {
-            // Degenerate problem (fewer than two usable alternatives): mark so
-            // the fill stops re-asking; readers treat a non-K-length array as
-            // "no null available".
-            a.altMean = [];
+            touched = true;
         }
-        touched = true;
     }
     return touched;
 }

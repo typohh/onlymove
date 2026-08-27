@@ -201,7 +201,7 @@ function rankBandCrossing(oldRank, isCorrect) {
 
 // Match (by problemId + creation date) the just-recorded answer entry and
 // fold the wrong-attempt embedding data into it after the network fetch
-// resolves: the picked-move vector and the availability-null moments
+// resolves: the picked-move vector and the availability-null counts
 // (computeAltStats), both from the same per-cell block. Idempotent — each
 // field is written only if absent. Skipped if the entry has been pruned away
 // by the time the fetch lands (the user may have moved on far enough that
@@ -222,9 +222,7 @@ function patchWrongAttemptStats(problemId, attemptDate, stats) {
                 a.pickedEmbedding = quantizeEmbedding(picked);
                 touched = true;
             }
-            if (a.altMean === undefined && alt) {
-                a.altMean = alt.altMean;
-                a.altSd = alt.altSd;
+            if (a.altAbove === undefined && alt) {
                 a.altAbove = alt.altAbove;
                 a.altBelow = alt.altBelow;
                 touched = true;
@@ -237,7 +235,6 @@ function patchWrongAttemptStats(problemId, attemptDate, stats) {
 
 export async function updateUserStats(isCorrect, {
     pickedCellIndex = null,
-    correctCellIndex = null,
     pickedEmbedding = null,
     wrongStatsPromise = null,
     // The event time minted in the click handler — the SAME ms sendReport put
@@ -343,13 +340,6 @@ export async function updateUserStats(isCorrect, {
         // or hasn't returned by the time the answer is logged.
         answer.pickedCellIndex = pickedCellIndex;
     }
-    if (typeof correctCellIndex === 'number' && correctCellIndex >= 0) {
-        // The answer node's variation index, same index space and same
-        // fit-independence as pickedCellIndex: a refill of the availability
-        // null needs to exclude the correct move from the alternatives, and
-        // this pins WHICH row that was without re-deriving it from the SGF.
-        answer.correctCellIndex = correctCellIndex;
-    }
     // The picked vector comes from the same shard the problem did, so it is
     // current exactly when the correct-move vector is — and the two must come from
     // ONE fit in any case, the tendency reading being a comparison between them
@@ -362,7 +352,7 @@ export async function updateUserStats(isCorrect, {
 
     // Defer-patch from the in-flight fetch. Never blocks the caller — if the
     // fetch fails or the entry gets evicted later, the next app-load backfill
-    // will pick this up using `pickedCellIndex`/`correctCellIndex`.
+    // will pick this up using `pickedCellIndex`.
     if (fitIsCurrent && wrongStatsPromise) {
         wrongStatsPromise.then(stats => patchWrongAttemptStats(problemId, answer.date, stats))
             .catch(_err => { /* swallowed; backfill handles retry */ });

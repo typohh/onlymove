@@ -19,16 +19,10 @@
 //                     the share of your wrong answers that erred TOWARD the
 //                     motif rather than away from it. The neutral point is the
 //                     AVAILABILITY NULL — the share a direction-blind error on
-//                     the same problems would have had (motif-stats.js) — so
-//                     the row's mid-mark sits at that null, per user, not at
-//                     50%: the menu's lean is subtracted before anything is
-//                     called a lean of the player's.
-//   aligned <-> inverted
-//                     the judgment reading: does the direction of the errors
-//                     FOLLOW the position (leaning toward the motif where it
-//                     is the answer) or run against it. Positive = inverted,
-//                     the both-directions-at-once deficit; 0 = errors lean the
-//                     way a typical error on those boards leans.
+//                     the same problems would have had (motif-stats.js) — and
+//                     the track is drawn as the deviation from it, so the
+//                     menu's lean is subtracted before anything is called a
+//                     lean of the player's.
 //
 // Why all motifs rather than only the credible ones: a row carrying a visible
 // interval makes no claim the interval does not support, so an unresolved axis
@@ -60,9 +54,6 @@ let exampleOpenInFlight = false;
 // The numeric value is always printed beside the bar, so a clamp costs the bar's
 // precision and nothing else.
 const RANK_FULL_SCALE = 2.0;
-// Same for the judgment slope's track (standard deviations of lean per unit of
-// answer loading — a display clamp only, like RANK_FULL_SCALE above).
-const CONDITION_FULL_SCALE = 1.0;
 // Same for the tendency track, in lean units (share − null share). The track is
 // drawn in DEVIATION space so the availability null is always the visual
 // centre: the null share varies per axis and per user, and a neutral mark
@@ -75,13 +66,12 @@ const TENDENCY_FULL_SCALE = 0.25;
 const TONE_FULL_Z = MOTIF_Z + 1;
 
 // Builds the motif table consumed by showDetailedStats.
-// One pane per READING, not one pane carrying all. `kind` is 'strength'
-// (weak <-> strong: how the user SCORES on motif-heavy problems), 'tendency'
+// One pane per READING, not one pane carrying both. `kind` is 'strength'
+// (weak <-> strong: how the user SCORES on motif-heavy problems) or 'tendency'
 // (underplay <-> overplay: which way their mistakes LEAN, against the
-// availability null) or 'condition' (aligned <-> inverted: whether that lean
-// FOLLOWS the position or runs against it). They answer different questions
-// and are read one at a time, so a reader comparing rows within a pane is
-// comparing like with like instead of scanning across several axes at once.
+// availability null). They answer different questions and are read one at a
+// time, so a reader comparing rows within a pane is comparing like with like
+// instead of scanning across two axes at once.
 export function buildMotifPane(kind, history = state.answerHistory) {
     const labelMap = state.embeddingLabels || {};
     const labelFor = (k, side) => localizedMotif(labelMap[String(k)], side);
@@ -107,7 +97,7 @@ export function buildMotifPane(kind, history = state.answerHistory) {
                    : (labelFor(st.k, 'negative') ? 'negative' : null);
         if (!side) continue;
         const flip = side === 'negative';
-        const t = st.tendency, g = st.strength, c = st.condition;
+        const t = st.tendency, g = st.strength;
         rows.push({
             k: st.k,
             side,
@@ -127,15 +117,6 @@ export function buildMotifPane(kind, history = state.answerHistory) {
                 hi: flip ? 1 - t.lo : t.hi,
                 z: flip ? -t.z : t.z,
                 n: t.n,
-            },
-            // The judgment slope is mirror-invariant (motif-stats.js): negating
-            // the axis negates both regression variables, so nothing flips.
-            condition: c && {
-                slope: c.slope,
-                lo: c.lo,
-                hi: c.hi,
-                z: c.z,
-                n: c.n,
             },
         });
     }
@@ -169,7 +150,6 @@ export function buildMotifPane(kind, history = state.answerHistory) {
 const POLES = {
     strength: ['statsMotifWeak', 'statsMotifStrong'],
     tendency: ['statsMotifUnder', 'statsMotifOver'],
-    condition: ['statsMotifAligned', 'statsMotifInverted'],
 };
 
 function buildHeaderRow(kind) {
@@ -274,21 +254,6 @@ function cellFor(kind, row) {
             valueText: getTerm('statsMotifRanks', { value: fmtRank(g.ranks) }),
             tone: g.z < 0 ? 'weak' : 'strong',
             weight: toneWeight(g.z),
-        };
-    }
-    if (kind === 'condition') {
-        const c = row.condition;
-        if (!c) return null;
-        const condFrac = (v) => clamp01(0.5 + v / (2 * CONDITION_FULL_SCALE));
-        // Valenced like strength — following the position is good, running
-        // against it is a deficit — so it reuses the same tone pair.
-        return {
-            frac: condFrac(c.slope),
-            loFrac: condFrac(c.lo),
-            hiFrac: condFrac(c.hi),
-            valueText: fmtRank(c.slope),
-            tone: c.z > 0 ? 'weak' : 'strong',
-            weight: toneWeight(c.z),
         };
     }
     const t = row.tendency;

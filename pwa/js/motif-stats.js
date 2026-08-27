@@ -7,16 +7,16 @@
 // centre averaged over users is really a statement about which problems that
 // user's rank gets served).
 //
-// Three independent readings per axis, answering different questions. The two
-// error-composition readings stand against the AVAILABILITY NULL: what a
-// direction-blind error on each served problem would have looked like, computed
-// per problem from the alternatives its board actually offered (uniform over
-// the non-answer variations — computeAltStats). That null is still a property
-// of the user's own served problems and nobody else's play; without it, the
-// composition statistics report the problem MENU as a property of the player
-// (the answer to a tsumego is by construction not a tenuki, so nearly every
-// alternative loads higher on that axis — a fixed 50% balance point flags
-// almost everyone).
+// Two independent readings per axis, answering different questions. The
+// error-composition reading (tendency) stands against the AVAILABILITY NULL:
+// what a direction-blind error on each served problem would have looked like,
+// computed per problem from the alternatives its board actually offered
+// (uniform over the non-answer variations — computeAltStats). That null is
+// still a property of the user's own served problems and nobody else's play;
+// without it, the composition statistic reports the problem MENU as a property
+// of the player (the answer to a tsumego is by construction not a tenuki, so
+// nearly every alternative loads higher on that axis — a fixed 50% balance
+// point flags almost everyone).
 //
 //   TENDENCY — of your wrong answers, what share erred TOWARD the motif rather
 //   than away from it, against the share a typical error on the same problems
@@ -29,17 +29,6 @@
 //   no model, no fitting, no prior — just with the balance point supplied by
 //   each problem instead of assumed at 50%.
 //
-//   JUDGMENT — does the direction of your errors FOLLOW the position, or run
-//   against it? Standardise each error's pick against its problem's null
-//   (t = (altMean - picked)/altSd, so t < 0 = leaned toward the motif more
-//   than a typical error), then regress t on the correct answer's own loading.
-//   A POSITIVE slope is the both-at-once deficit a single pooled share cannot
-//   represent: leaning toward the motif where it is NOT the answer AND away
-//   from it where it IS. A negative slope means the errors track the condition
-//   better than a typical error. The intercept is deliberately not reported —
-//   net lean is the tendency reading's job; fitting it here just keeps the
-//   slope orthogonal to it.
-//
 //   STRENGTH — does a problem loading on the motif cost you accuracy beyond
 //   what its DIFFICULTY already predicts? The shipped 3PL supplies the
 //   per-problem prediction, so difficulty is held fixed by construction; what is
@@ -49,7 +38,7 @@
 //   loading and outcome would score a user weak at whatever motif happens to
 //   live in hard problems.
 //
-// All are read on the SAME window the rest of the client models use, and all
+// Both are read on the SAME window the rest of the client models use, and both
 // are pure functions of that window, so two devices with the same history agree.
 
 import { state, getMergedAnswerHistory } from './state.js';
@@ -96,12 +85,11 @@ function tendencyTest(nOver, n, sumP, sumPQ) {
 }
 
 // Ordinary least squares of `y` on `x` with an intercept, returning the slope
-// and its standard error. Used for the residual-accuracy regression (x = motif
-// loading, y = 3PL residual) and the judgment regression (x = the answer's
-// loading, y = the pick's standardised excess lean).
-function olsSlope(x, y, minN = MIN_ATTEMPTS) {
+// and its standard error. Used for the residual-accuracy regression, where x is
+// the motif loading and y the 3PL residual.
+function olsSlope(x, y) {
     const n = x.length;
-    if (n < minN) return null;
+    if (n < MIN_ATTEMPTS) return null;
     let sx = 0, sy = 0;
     for (let i = 0; i < n; i++) { sx += x[i]; sy += y[i]; }
     const mx = sx / n, my = sy / n;
@@ -125,8 +113,7 @@ function olsSlope(x, y, minN = MIN_ATTEMPTS) {
 
 // Per-axis statistics over the user's own window. Returns null when there is no
 // usable embedding data at all; otherwise an array of K entries, each of which
-// may carry a null `tendency`, `condition` or `strength` if that reading lacks
-// data.
+// may carry a null `tendency` or `strength` if that half lacks data.
 export function computeMotifStats(history = null) {
     const theta = state.userRank;
     if (typeof theta !== 'number' || !Number.isFinite(theta)) return null;
@@ -147,19 +134,15 @@ export function computeMotifStats(history = null) {
         .slice(-MODEL_INPUT_HISTORY_LENGTH);
     if (rows.length < MIN_ATTEMPTS) return null;
 
-    // --- TENDENCY + JUDGMENT: error composition against the availability null.
-    // Rows without the null moments (a fill that hasn't landed yet) contribute
+    // --- TENDENCY: error composition against the availability null. Rows
+    // without the null counts (a fill that hasn't landed yet) contribute
     // nothing — no fixed-null fallback, which would mix two different neutral
     // points into one statistic.
     const nOver = new Array(K).fill(0);
     const nDir = new Array(K).fill(0);
     const sumP = new Array(K).fill(0);
     const sumPQ = new Array(K).fill(0);
-    const condX = Array.from({ length: K }, () => []);
-    const condT = Array.from({ length: K }, () => []);
     const altUsable = (a) =>
-        Array.isArray(a.altMean) && a.altMean.length === K &&
-        Array.isArray(a.altSd) && a.altSd.length === K &&
         Array.isArray(a.altAbove) && a.altAbove.length === K &&
         Array.isArray(a.altBelow) && a.altBelow.length === K;
     for (const a of rows) {
@@ -175,14 +158,6 @@ export function computeMotifStats(history = null) {
                 sumP[k] += p;
                 sumPQ[k] += p * (1 - p);
                 if (d < 0) nOver[k]++;
-            }
-            // Judgment: the pick standardised against the problem's null.
-            // t < 0 = leaned toward the motif more than a typical error here.
-            const sd = a.altSd[k];
-            if (sd > 0 && Number.isFinite(a.pickedEmbedding[k]) &&
-                Number.isFinite(a.embedding[k])) {
-                condT[k].push((a.altMean[k] - a.pickedEmbedding[k]) / sd);
-                condX[k].push(a.embedding[k]);
             }
         }
     }
@@ -214,23 +189,6 @@ export function computeMotifStats(history = null) {
     const out = [];
     for (let k = 0; k < K; k++) {
         const tendency = tendencyTest(nOver[k], nDir[k], sumP[k], sumPQ[k]);
-        // Judgment: the standardised excess lean regressed on the answer's own
-        // loading. Positive slope = leans toward the motif where it is not the
-        // answer AND away where it is — the condition-inversion deficit.
-        // Mirror-invariant: negating the axis negates both t and x, so the
-        // slope (and its z) is the same whichever tail names the motif.
-        let condition = null;
-        const cfit = condT[k].length ? olsSlope(condX[k], condT[k], MIN_ERRORS) : null;
-        if (cfit) {
-            condition = {
-                slope: cfit.slope,
-                // Same gate-width band as the other readings, same reason.
-                lo: cfit.slope - MOTIF_Z * cfit.se,
-                hi: cfit.slope + MOTIF_Z * cfit.se,
-                z: cfit.slope / cfit.se,
-                n: cfit.n,
-            };
-        }
         let strength = null;
         const fit = resid.length ? olsSlope(xs[k], resid) : null;
         if (fit && dpPerRank > 0) {
@@ -245,7 +203,7 @@ export function computeMotifStats(history = null) {
                 n: fit.n,
             };
         }
-        out.push({ k, tendency, condition, strength });
+        out.push({ k, tendency, strength });
     }
     return out;
 }

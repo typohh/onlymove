@@ -111,15 +111,15 @@ async function _handleIncorrectMoveSequence(moveIndex, x, y) {
 
     // Fire the wrong-attempt embedding fetch in the background — one Range
     // request for the problem's whole per-cell block, from which both the
-    // picked-move vector and the availability-null moments come. We never
+    // picked-move vector and the availability-null counts come. We never
     // block on it — the answer is recorded immediately with just the cell
     // indices, and updateUserStats attaches a defer-patch handler.
     // Embedding-backfill also re-fetches missing fields on the next app load,
     // so a failed/slow live fetch is recoverable.
     //
-    // The answer node's index is captured here, BEFORE the board advances:
-    // the null must exclude the correct move from the alternatives, and the
-    // stored index also lets a post-refit refill exclude it exactly.
+    // The answer node's index is captured here, BEFORE the board advances —
+    // the null's above/below counts are referenced to the correct move's own
+    // loading (a refill instead references the stored correct-move embedding).
     const currentProblem = state.currentProblem;
     const tsumegoId = tsumegoIdOf(currentProblem?.filename);
     const zipFilename = currentProblem?.zipFilename;
@@ -147,7 +147,6 @@ async function _handleIncorrectMoveSequence(moveIndex, x, y) {
     sendReport(buildReportPayload(false, x, y, at));
     const stats = await updateUserStats(false, {
         pickedCellIndex: moveIndex,
-        correctCellIndex: correctIndex,
         wrongStatsPromise,
         at,
     });
