@@ -16,11 +16,19 @@ For each SGF in tsumegos/<size>/:
     while leaving every array shape intact, i.e. silently.
   - Capture post-skip-add output of all 18 residual blocks (rconv1.out..rconv18.out).
   - Slice each block at every legal cell's (x, y); concatenate blocks
-    -> one 6912-float vector per cell.
-  - Save to activations/<size>/<id>.npz with:
-      candidates  (n_legal, 6912) float16  -- per-cell vector, board-scan order
-      xys         (n_legal, 2)    int32    -- KataGo (x, y) per row (scan order)
-      correct_idx ()              int32    -- scan-order index of the correct cell
+    -> one 6912-float raw vector per cell.
+  - Project each raw vector through the frozen activation encoder
+    (activations/encoder.npz — see pipeline.fit_activation_encoder) and save
+    to activations/<size>/<id>.npz with:
+      candidates  (n_legal, ACT_ENCODER_DIM) float16 -- encoded per-cell vector,
+                                                        board-scan order
+      xys         (n_legal, 2) int32   -- KataGo (x, y) per row (scan order)
+      correct_idx ()           int32   -- scan-order index of the correct cell
+      encoder_fp  ()           uint32  -- the encoder's 4-byte fingerprint
+
+The raw 6912-dim vectors never touch disk in this mode; --raw (which requires
+its own --out-dir, away from the encoded store) writes them unprojected, which
+is how an encoder REFRESH extracts its fitting subset.
 
 Downstream consumers: pipeline.train_mirt reads the correct-cell row (through utils.rating.features) via
 candidates[correct_idx]; package_for_pwa re-parses the SGF and remaps cells into
@@ -58,6 +66,8 @@ from katago.train.model_pytorch import ExtraOutputs
 from utils.katago.sgf_parsing import parse_tsumego_sgf
 from utils.constants import ALL_BOARD_SIZES, KOMI, RULES
 from utils.katago.coords import gtp_to_xy, sgf_to_gtp
+from utils.rating.activation_encoder import (
+    ENCODER_PATH, apply_encoder, fingerprint, load_encoder)
 
 DEFAULT_CKPT = os.path.join(
     PROJECT_ROOT, "models",
@@ -203,7 +213,28 @@ def main():
                         help="cuda or cpu (default: cuda if available).")
     parser.add_argument("--ckpt", default=DEFAULT_CKPT,
                         help="Path to KataGo PyTorch checkpoint.")
+    parser.add_argument("--raw", action="store_true",
+                        help="Store unprojected 6912-dim trunk vectors (an encoder "
+                             "refresh extracting its fitting subset). Requires "
+                             "--out-dir pointing away from the encoded store.")
+    parser.add_argument("--out-dir", default=os.path.join(PROJECT_ROOT, "activations"),
+                        help="Root to write <size>/<id>.npz under.")
     args = parser.parse_args()
+
+    if args.raw:
+        if os.path.realpath(args.out_dir) == os.path.realpath(
+                os.path.join(PROJECT_ROOT, "activations")):
+            raise SystemExit(
+                "--raw writes unprojected vectors and must not target the encoded "
+                "store; pass --out-dir somewhere else")
+        enc, enc_fp = None, None
+    else:
+        # Fail loud rather than quietly writing raw vectors into a store every
+        # reader expects to be one encoder's output.
+        enc = load_encoder(ENCODER_PATH)
+        enc_fp = fingerprint(enc)
+        print(f"encoder {ENCODER_PATH}: fingerprint {enc_fp:08x}, "
+              f"M={enc['C'].shape[0]}", flush=True)
 
     logging.disable(logging.CRITICAL)  # silence KataGo's verbose config dump
 
@@ -217,7 +248,7 @@ def main():
     totals = {"done": 0, "skipped": 0}
     for size in ALL_BOARD_SIZES:
         in_dir = os.path.join(PROJECT_ROOT, "tsumegos", str(size))
-        out_dir = os.path.join(PROJECT_ROOT, "activations", str(size))
+        out_dir = os.path.join(args.out_dir, str(size))
         if not os.path.isdir(in_dir):
             print(f"\n[size {size}] no tsumegos dir at {in_dir}; skipping", flush=True)
             continue
@@ -239,6 +270,18 @@ def main():
             tsumego_id = fname[:-4]
             out_path = os.path.join(out_dir, tsumego_id + ".npz")
             if not args.force and os.path.exists(out_path):
+                if enc is not None:
+                    # A resumed encoded run must never leave a file from another
+                    # encoder (or a raw leftover) sitting in the store — every
+                    # reader trusts the directory to be ONE encoder's output.
+                    with np.load(out_path) as d:
+                        old_fp = int(d["encoder_fp"]) if "encoder_fp" in d.files else None
+                    if old_fp != enc_fp:
+                        raise RuntimeError(
+                            f"{out_path}: written under encoder "
+                            f"{'none (raw)' if old_fp is None else f'{old_fp:08x}'}, "
+                            f"current is {enc_fp:08x} — re-encode or remove the "
+                            f"stale store before resuming")
                 n_skipped += 1
                 continue
             try:
@@ -251,11 +294,16 @@ def main():
                 # cache, correct_ids, the embedding — from the tsumego set).
                 raise RuntimeError(
                     f"[size {size}] failed to extract activations for {fname}") from e
+            extras = {}
+            if enc is not None:
+                vecs = apply_encoder(enc, vecs)
+                extras["encoder_fp"] = np.uint32(enc_fp)
             np.savez_compressed(
                 out_path,
                 candidates=vecs,
                 xys=xys,
                 correct_idx=np.int32(correct_idx),
+                **extras,
             )
             n_done += 1
             if n_done <= 3 or n_done % 500 == 0:

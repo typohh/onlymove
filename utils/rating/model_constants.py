@@ -23,6 +23,10 @@ EPS = 1e-6
 SIZES = list(ALL_BOARD_SIZES)
 SEED = 0
 PCA_DIM = 128                    # joint-PCA activation feature dimensionality
+ACT_ENCODER_DIM = 512            # frozen activation-encoder width (the stored
+                                 # per-cell encoding); chosen by the M-sweep in
+                                 # auxiliary/encoder_m_sweep.py — refit parity
+                                 # under a fit-set redesign saturates by here
 DIFF_HIDDEN = (128, 64)          # feature trunk hidden layers
 DROPOUT = 0.3                    # trunk dropout
 INPUT_DROPOUT = 0.3              # COLUMN dropout over the wide input region
