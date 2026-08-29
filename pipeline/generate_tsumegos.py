@@ -13,9 +13,10 @@ if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 from utils.katago.add_variations import (  # noqa: E402
-    CALM_UTILITY_OVERRIDE,
+    DEEP_ENTRY_PLAYOUTS,
     VariationDepthExceeded,
     add_shallow_variations,
+    deep_follow_playouts,
     first_move_is_well_formed,
     generate_variations_directly_to_sgf,
     promote_winning_first_move,
@@ -257,21 +258,27 @@ def worker_task(problem_finder: ProblemFinder, queries: KatagoQueries, threads_l
                     game,node,answer = construct_initial_sgf(moves, solution, queries.board_size)
 
                     STATS.set_state("deep_variations")
-                    answer_resolved = generate_variations_directly_to_sgf(
-                        queries, answer, moves + [solution], 1.0, True, None)
-                    answer_resolved |= generate_variations_directly_to_sgf(
-                        queries, answer, moves + [solution], 1.0, True, None,
-                        override_settings=CALM_UTILITY_OVERRIDE,
-                    )
-                    # The refuted first moves are built with mark_children off:
-                    # a mark on a decision-node child means "this is the move to
-                    # find", which only the answer may claim. Their deeper
-                    # branches are still marked normally.
+                    # TWO deep reads, both entered at DEEP_ENTRY_PLAYOUTS and
+                    # followed down by deep_follow_playouts.
+                    #
+                    # The first searches the position AFTER the answer, so the
+                    # budget lands entirely on the answer's own continuation, and
+                    # write_parent_eval puts that search's root evaluation on the
+                    # answer node — the only way the answer gets a number, since
+                    # the second read excludes it by construction.
+                    #
+                    # The second searches the decision node with the answer
+                    # excluded, so the budget goes to the refutations instead of
+                    # being swallowed by the move that wins.
                     generate_variations_directly_to_sgf(
-                        queries, node, moves, 1.0, True, solution,
-                        mark_children=False)
-                    if answer_resolved:
-                        answer.set("TE", 1)
+                        queries, answer, moves + [solution], True,
+                        playouts=DEEP_ENTRY_PLAYOUTS,
+                        playouts_fn=deep_follow_playouts,
+                        write_parent_eval=True)
+                    generate_variations_directly_to_sgf(
+                        queries, node, moves, True, solution,
+                        playouts=DEEP_ENTRY_PLAYOUTS,
+                        playouts_fn=deep_follow_playouts)
 
                     STATS.set_state("shallow_variations")
                     add_shallow_variations(queries, node, moves)

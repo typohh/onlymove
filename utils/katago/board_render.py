@@ -35,9 +35,11 @@ _STAR_POINTS = {
 _SETUP_MOVE_RE = re.compile(r";\s*([BW])\[([a-z]{0,2})\]")
 # A move inside a variation's first node (the leading ";" has been stripped).
 _VAR_MOVE_RE = re.compile(r"([BW])\[([a-z]{0,2})\]")
-# Embedded analysis comment: a Black-perspective "<winrate>%/<score>", e.g.
-# "86.4%/3.1". Every candidate first move carries one.
-_CMT_RE = re.compile(r"C\[(\d+\.?\d*)%/(-?\d+\.?\d*)\]")
+# Embedded analysis comment: a Black-perspective "<winrate>%/<score>/<visits>",
+# e.g. "86.4%/3.1/1000". Every candidate first move carries one. NOT anchored on
+# the closing bracket — the visit count was appended after this regex was
+# written, and anchoring is what would have made it silently match nothing.
+_CMT_RE = re.compile(r"C\[(\d+\.?\d*)%/(-?\d+\.?\d*)")
 
 
 def _top_level_variations(s):

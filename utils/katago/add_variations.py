@@ -49,6 +49,101 @@ def parse_eval_comment(comment):
     return float(m.group(1)), float(m.group(2))
 
 
+# A THIRD field records the VISIT COUNT the estimate rests on: "96.4%/1.3/1000".
+# It exists because the first two numbers alone cannot say how much search is
+# behind them, which is how a corpus-wide 30-visit annotation went unnoticed —
+# every value looked exactly like a deep one.
+#
+# Appending rather than restructuring is deliberate: every parser in the repo
+# (pipeline/benchmark_bots, pipeline/cache_rating_features, utils/rating/features,
+# pwa/js/sgf.js) matches the first two fields with an UNANCHORED search, so a
+# comment written before this field existed still reads identically.
+_EVAL_VISITS_RE = re.compile(r"-?[\d.]+%/-?[\d.]+/(\d+)")
+
+
+def format_eval_comment(winrate, score, visits):
+    """The "C" property for a node evaluated at `visits`, e.g. "96.4%/1.3/1000"."""
+    return f"{winrate * 100:.1f}%/{score:.1f}/{int(visits)}"
+
+
+def parse_eval_visits(comment):
+    """How many visits back a comment's estimate.
+
+    A comment carrying no third field predates the field, and nothing has ever
+    been written below the 30-visit floor, so it reports PLAYOUTS_SHALLOW — that
+    is a fact about the corpus, not a fallback. Anything that is not an
+    evaluation at all reports 0, so any real evaluation outranks it."""
+    if not comment:
+        return 0
+    m = _EVAL_VISITS_RE.search(comment)
+    if m:
+        return int(m.group(1))
+    return PLAYOUTS_SHALLOW if _EVAL_COMMENT_RE.search(comment) else 0
+
+
+def _is_pass(node):
+    """A pass node: sgfmill gives (colour, None) for a pass and (None, None) for
+    a node carrying no move at all, so the COLOUR is what tells them apart."""
+    colour, point = node.get_move()
+    return colour is not None and point is None
+
+
+def subtree_reaches_conclusion(node):
+    """True when THIS branch is one the writer played out to a DOUBLE PASS.
+
+    Follows `children[0]` — the writer appends children in `moveInfos` order and
+    always recurses into the first one, so the first child IS the continuation it
+    followed — and asks whether that chain ends in two consecutive passes.
+    Measured on rebuilt 13x13 files, it holds for 120/120 answers and 120/120
+    best refutations (the decision node's `children[1]`), and rejects the side
+    branches, which stop at the visit floor.
+
+    Two cheaper-looking tests are both wrong, and were measured to be:
+
+      * "a pass-pair appears anywhere in the subtree" over-accepts, because
+        add_shallow_variations writes a move AND its best response, so a pass
+        answered by a pass manufactures the shape without anything being played
+        out. Against the old TE marks it admitted 32,445 extra children.
+      * "follow the highest-visit child" drifts off the line entirely. KataGo
+        ranks moveInfos by LCB, not raw visits, so the followed move is not the
+        highest-visit one at 20.8% of multi-child nodes, and that walk found only
+        42.5% of the answer lines this one finds.
+
+    NOTE what this does NOT say: that the line resolves the way the problem
+    claims. 7.5% of principal lines end with the SOLVER LOSING — a tsumego whose
+    answer is +4.6 at 1000 visits can drift to -27.0 over a 108-ply tail played
+    at the 30-visit floor. Whether a resolved line is a WIN is a separate
+    question, answered by the evaluation the terminal node already carries.
+    """
+    n = node
+    prev_was_pass = _is_pass(node)
+    for _ in range(MAX_VARIATION_DEPTH + 2):
+        kids = [c for c in n if c.get_move()[0] is not None]
+        if not kids:
+            return False
+        n = kids[0]
+        is_pass = _is_pass(n)
+        if is_pass and prev_was_pass:
+            return True
+        prev_was_pass = is_pass
+    return False
+
+
+def set_eval_comment(node, winrate, score, visits):
+    """Write an evaluation onto `node`, but NEVER DOWNGRADE ONE.
+
+    A comment is replaced only by an estimate resting on MORE visits than the one
+    already there. That single rule replaces the pass-ordering the module used to
+    depend on: the deep passes overwrite the shallow values they find, the shallow
+    pass cannot undo them whatever order it runs in, and re-running any pass over
+    its own output is a no-op rather than a coin flip. Returns True if it wrote."""
+    existing = node.get("C") if node.has_property("C") else None
+    if int(visits) <= parse_eval_visits(existing):
+        return False
+    node.set("C", format_eval_comment(winrate, score, visits))
+    return True
+
+
 def _candidate_evals(node):
     """[(child, mover_winrate, mover_score)] for every candidate first move under
     `node` that carries a parseable evaluation comment, in variation order.
@@ -105,6 +200,27 @@ def first_move_is_well_formed(node):
     return winners == 1 and ambiguous == 0
 
 
+def winning_first_move(node):
+    """The child the client would accept as the answer, or None if nothing here
+    can be ranked.
+
+    The client's rule: highest winrate for the side to move, score breaking exact
+    ties, first-listed winning an exact tie on both. Split out from
+    promote_winning_first_move so a caller can ASK the question without the
+    answer being reordered as a side effect — a repair must never reorder, since
+    the id, the ratings and the attempt history are all tied to the answer the
+    file already has.
+    """
+    if node is None:
+        return None
+    candidates = _candidate_evals(node)
+    if not candidates:
+        return None
+    # max() returns the first maximal element, matching the client's strict-`>`
+    # scan, so an exact tie on both axes leaves the earlier variation in front.
+    return max(candidates, key=lambda c: (c[1], c[2]))[0]
+
+
 def promote_winning_first_move(node):
     """Reorder `node`'s children so the winning first move is variation index 0.
 
@@ -119,19 +235,10 @@ def promote_winning_first_move(node):
     findBestMoveFromChildren picks by evaluation), so the file is reordered here
     to agree with it rather than discarding an otherwise well-posed problem.
 
-    Selection is the client's rule: highest winrate for the side to move, score
-    breaking exact ties, first-listed winning an exact tie on both. Returns True
-    if a node was moved.
+    Selection is winning_first_move's. Returns True if a node was moved.
     """
-    if node is None:
-        return False
-    candidates = _candidate_evals(node)
-    if not candidates:
-        return False
-    # max() returns the first maximal element, matching the client's strict-`>`
-    # scan, so an exact tie on both axes leaves the earlier variation in front.
-    best = max(candidates, key=lambda c: (c[1], c[2]))[0]
-    if best is node[0]:
+    best = winning_first_move(node)
+    if best is None or best is node[0]:
         return False
     best.reparent(node, 0)
     return True
@@ -139,7 +246,31 @@ def promote_winning_first_move(node):
 
 PLAYOUTS_SHALLOW = 30
 PLAYOUTS = 30
-MIN_PLAYOUT_PERC = 0.01
+# The bar for "the engine already read this branch deeply enough to be worth
+# recording". SEPARATE FROM `PLAYOUTS` on purpose, though they share a value
+# today: PLAYOUTS is the default BUDGET and this is a QUALITY threshold, and they
+# only coincide under a flat budget. Tying them together makes a raised budget
+# widen the tree as a side effect — measured, a v+30 policy took the tree from
+# 146 to 764 queries because nearly every child then cleared a bar meant to admit
+# only well-searched ones.
+FREE_BRANCH_VISITS = 30
+
+# What a deep pass spends at the position it is ENTERED at — the answer's
+# continuation, or the decision node with the answer excluded. Everything below
+# that entry is budgeted by deep_follow_playouts off the parent's own visits.
+DEEP_ENTRY_PLAYOUTS = 1000
+
+
+def deep_follow_playouts(parent_visits):
+    """max(30, v) — the budget for a node the parent's search already spent v
+    visits on.
+
+    Never search a node less deeply than the engine has already read it: those
+    visits explored this very subtree, so their neural-net evaluations are still
+    cached and asking for them again is close to free. The floor is what does the
+    work; a sweep could not separate this from v+10 or v+20, so the increment is
+    dropped and the plain floor kept."""
+    return max(FREE_BRANCH_VISITS, int(parent_visits))
 
 # Stay well under Python's default recursion limit (1000). KataGo under Japanese
 # rules will sometimes refuse to pass in a settled position; this guard prevents
@@ -152,16 +283,6 @@ class VariationDepthExceeded(Exception):
     def __init__(self, moves):
         self.moves = list(moves)
         super().__init__(f"variation depth {len(self.moves)} exceeded; sequence: {self.moves}")
-
-# Utility reweighting that makes KataGo prefer preserving the score over flipping
-# the win/loss outcome. Used when generating the post-solution continuation so the
-# losing side plays calm capitulation moves instead of swindle attempts.
-CALM_UTILITY_OVERRIDE = {
-    "winLossUtilityFactor": 0.1,
-    "staticScoreUtilityFactor": 0.5,
-    "dynamicScoreUtilityFactor": 0.5,
-}
-
 
 def get_child_move(node: sgf.Tree_node, color, move: str, board_size, has_to_exist=False):
     """
@@ -204,18 +325,37 @@ def add_shallow_variations(queries: KatagoQueries, node: sgf.Tree_node, moves):
 
     # For each legal move, get its evaluation and optimal response
     for move in legal_moves:
+        var_node = get_child_move(node, player, move, queries.board_size)
+
+        # DECIDE BEFORE PAYING FOR THE QUERY. This pass never overwrites, so a
+        # move that already carries an evaluation AND a response under it has
+        # nothing to gain from a 30-visit search — running one and discarding it
+        # is what made this pass cost a query per legal move (a median 13x13
+        # problem has 96) when the deep passes had already covered the ones worth
+        # covering. What is left for it is exactly the moves the search declined
+        # to read to the floor, which is the whole point of a shallow sweep.
+        if var_node.has_property("C") and any(c.has_property("C") for c in var_node):
+            continue
+
         # Get the optimal response to this move
         response_moves = moves + [move]
         response_result = queries.query(response_moves, playouts=PLAYOUTS_SHALLOW)
         response_move, winrate, score, _ = queries.get_best_move(response_result)
 
-        # Add variation to SGF
-        var_node = get_child_move(node, player, move, queries.board_size)
-        var_node.set("C", f"{winrate * 100:.1f}%/{score:.1f}")
+        # Both nodes record PLAYOUTS_SHALLOW, because that is the depth the
+        # estimate rests on, and set_eval_comment will not let it displace a
+        # deeper one. This pass ran LAST and used to write unconditionally, so
+        # its 30-visit estimate replaced whatever the deep passes had found —
+        # including the answer's, which is a child of `node` like any other and
+        # which the deep pass never writes (that call passes exclude_move).
+        # Depth is the whole difference: measured at one decision node, the
+        # answer reads 87.4% at 30 visits and 96.6% at the 1000 generation
+        # verifies with.
+        set_eval_comment(var_node, winrate, score, PLAYOUTS_SHALLOW)
 
         response_player = "b" if player == "w" else "w"
         response_node = get_child_move(var_node, response_player, response_move, queries.board_size)
-        response_node.set("C", f"{winrate * 100:.1f}%/{score:.1f}")
+        set_eval_comment(response_node, winrate, score, PLAYOUTS_SHALLOW)
 
     return
 
@@ -224,36 +364,53 @@ def generate_variations_directly_to_sgf(
         queries: KatagoQueries,
         parent_sgf_node: sgf.Tree_node,
         current_moves: list,
-        cumulative_playout_perc: float,
         is_primary: bool,
         exclude_move=None,
-        override_settings=None,
-        mark_children=True,
+        playouts=None,
+        playouts_fn=None,
+        write_parent_eval=False,
 ):
     """
     Recursively generates variations and adds them directly as child nodes to the parent_sgf_node.
-    'is_first_level_branch_node' indicates if the node being added is the first move in a new variation branch.
 
-    override_settings is forwarded to KataGo (e.g. utility reweighting for the calm post-solution line).
-    Existing comments are left untouched so the first pass's numbers win on nodes shared between passes.
+    WHAT GETS RECORDED is every move the search read to FREE_BRANCH_VISITS,
+    whether or not it lies on the line being followed to a conclusion. Those
+    visits explored that subtree already and their neural-net evaluations are
+    cached, so keeping the branch costs a query that is served from cache —
+    measured, a re-query of an already-searched position costs 0.06s against
+    18.75s cold. Below the floor there is nothing worth keeping, and since
+    `moveInfos` is ordered best-first, the first move under it ends the loop.
+
+    HOW DEEP each branch is then searched is `playouts_fn(visits)` — a child's
+    budget follows from what the parent already spent on it, so a branch is never
+    re-read at less depth than the engine has already read it to. The PRIMARY
+    line is followed regardless of its share, because it is what carries the
+    variation to a conclusion.
+
+    `write_parent_eval` writes this search's ROOT evaluation onto the node the
+    variations hang off. It is how the answer gets an honest number: the answer
+    is nobody's `moveInfos` entry (the decision-node pass excludes it), so its
+    comment can only come from a search of the position it leads to — which is
+    what "how good is this move" means, and what the shallow pass was
+    approximating at 30 visits.
 
     Returns True when some line at or under this node was read all the way to a
-    DOUBLE PASS, and marks every child that was, with `TE[1]`.
+    DOUBLE PASS.
 
-    That mark is the whole point: it records which branches this function
-    actually finished, so no consumer has to guess afterwards. Guessing is what
-    the client used to do — it treated "a pass appears somewhere in the subtree"
-    as "this line was pursued to a conclusion", which is false for every branch
-    abandoned at the MIN_PLAYOUT_PERC cutoff below, and let it walk a solver
-    into a lost position. Only lines that reach the double pass are marked; the
-    abandoned ones are left bare precisely so they can be told apart.
+    NOTHING IS MARKED IN THE FILE, because the visit counts already say it. A
+    branch is followed to a conclusion exactly when it is the primary line, and
+    the primary line is `moveInfos[0]` — the HIGHEST-VISIT move, both here and in
+    MCTS generally. So "which branch was played out" and "which child has the
+    most visits" are the same question asked twice, and a reader answers it off
+    the comments it already has.
 
-    mark_children=False marks nothing at THIS level while still marking deeper
-    ones, and the caller that builds the refuted first moves passes it. A mark
-    on a decision-node child reads as "this is the move to find", so a refuted
-    first move must never carry one: were the answer's own lines to fail to
-    resolve, the client would find only refuted moves marked and offer one of
-    them as the solution. The answer is marked by the caller instead.
+    The one case that could separate them does not reach a file: a line the
+    engine will not play out raises VariationDepthExceeded, and every caller
+    discards the problem rather than writing a truncated one. This is NOT the
+    retired `TE[1]` marker's old fallback — the client used to treat "a pass
+    appears somewhere in the subtree" as a conclusion, which is false for every
+    branch abandoned at the visit floor, and that deduction caused two corpus
+    purges. Highest-visits-child is exact, not a heuristic standing in for it.
     """
     if len(current_moves) >= MAX_VARIATION_DEPTH:
         raise VariationDepthExceeded(current_moves)
@@ -261,56 +418,53 @@ def generate_variations_directly_to_sgf(
     if current_moves[-1] == 'pass' and current_moves[-2] == 'pass':
         return True
 
-    if cumulative_playout_perc < MIN_PLAYOUT_PERC and not is_primary:
-        return False
-
     current_pos_analysis = queries.query(
         current_moves,
-        playouts=PLAYOUTS,
+        playouts=PLAYOUTS if playouts is None else playouts,
         exclude_move=exclude_move,
-        override_settings=override_settings,
     )
-    if not current_pos_analysis or "moveInfos" not in current_pos_analysis:
+    if not current_pos_analysis or not current_pos_analysis.get("moveInfos"):
         return False
 
-    total_visits = sum(info.get("visits", 0) for info in current_pos_analysis["moveInfos"])
-    if total_visits == 0:
-        return False
+    if write_parent_eval:
+        root_info = current_pos_analysis.get("rootInfo") or {}
+        if "winrate" in root_info:
+            set_eval_comment(parent_sgf_node, root_info["winrate"],
+                             root_info["scoreLead"], root_info.get("visits", 0))
 
     reached_end = False
 
     for move_info in current_pos_analysis["moveInfos"]:
         visits = move_info.get("visits", 0)
-        if visits == 0:
-            continue
-
-        current_branch_perc = visits / total_visits
-        new_cumulative_perc = cumulative_playout_perc * current_branch_perc
+        if visits < FREE_BRANCH_VISITS and not is_primary:
+            break
 
         # Create a new child node for this variation
         var_node = get_child_move(parent_sgf_node, "b" if (len(current_moves) % 2 == 0) else "w", move_info["move"], queries.board_size)
-
-        if not var_node.has_property("C"):
-            var_node.set("C", f"{move_info['winrate'] * 100:.1f}%/{move_info['scoreLead']:.1f}")
+        set_eval_comment(var_node, move_info["winrate"], move_info["scoreLead"],
+                         visits)
 
         # Recursively add deeper variations from this new node
         child_reached_end = generate_variations_directly_to_sgf(
             queries,
             var_node,  # The new child node becomes the parent for the next level
             current_moves + [move_info["move"]],  # Extend the move list for deeper analysis
-            new_cumulative_perc,
             is_primary,
-            override_settings=override_settings,
+            playouts=(None if playouts_fn is None else playouts_fn(visits)),
+            playouts_fn=playouts_fn,
+            # Let the child's own search upgrade the comment just written from
+            # the parent's view of it. On the thin end of the primary line the
+            # parent may have spent only a handful of visits on a move that is
+            # then searched at the floor, so the better estimate is the one the
+            # recursion is about to produce anyway. set_eval_comment refuses a
+            # downgrade, so where the two are equal this writes nothing.
+            write_parent_eval=True,
         )
 
         if child_reached_end:
-            if mark_children:
-                var_node.set("TE", 1)
             reached_end = True
 
         is_primary = False
 
-        if cumulative_playout_perc < MIN_PLAYOUT_PERC:
-            break
-
     return reached_end
+

@@ -142,7 +142,7 @@ There are **no migration ladders**. `js/state-epoch.js` runs at import time: a s
 
 ### 4.3. SGF format
 
-Each branch comment in a problem SGF is `"<winrate>%/<score>"` (e.g. `"86.4%/3.1"`). `js/sgf.js` reads this to identify the correct move without needing a "Correct" marker. The starting position is tagged with a `"Q"` comment. The module also reorients recalls randomly so a repeat can't be recognised by its visual pattern; novel and linked problems are served at the identity orientation, which the share-link and picked-move contracts depend on.
+Each branch comment in a problem SGF is `"<winrate>%/<score>/<visits>"` (e.g. `"86.4%/3.1/1000"`; the visit count is a later addition, and comments predating it carry only the first two fields). `js/sgf.js` reads this to identify the correct move without needing a "Correct" marker. The starting position is tagged with a `"Q"` comment. The module also reorients recalls randomly so a repeat can't be recognised by its visual pattern; novel and linked problems are served at the identity orientation, which the share-link and picked-move contracts depend on.
 
 ### 4.4. Problem selection (`js/problem-loader.js` + `js/recall-model.js`)
 

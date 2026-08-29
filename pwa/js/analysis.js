@@ -18,15 +18,39 @@ import { onEnterReview as onboardingEnterReview } from './onboarding.js';
 // Pipeline-baked variations terminate with a pass once the position is fully
 // resolved; subtrees with no pass anywhere are dead-end engine evaluations
 // that weren't pursued to a conclusion.
-function subtreeReachesPass(node) {
+/**
+ * Whether `node` is a branch the pipeline played out to a DOUBLE PASS.
+ *
+ * Follows children[0]: the pipeline appends children in its candidate order and
+ * always recurses into the first, so the first child IS the continuation it
+ * followed. Measured on rebuilt 13x13 files this holds for 120/120 answers and
+ * 120/120 best refutations, and accepts 0 of 10,645 other root variations.
+ *
+ * Two cheaper-looking tests are both wrong, and were measured to be. "A pass
+ * appears somewhere in the subtree" is the deduction behind two corpus purges.
+ * "A pass-PAIR appears somewhere" is not much better: the pipeline's shallow
+ * sweep writes a move and its best response, so a pass answered by a pass
+ * manufactures the shape with nothing played out — 32,445 extra children. And
+ * following the highest-visit child drifts off the line entirely, because the
+ * engine ranks its candidates by LCB rather than raw visits.
+ *
+ * This says the line was PLAYED OUT, not that it resolves the way the problem
+ * claims — 7.5% of principal lines end with the solver losing. Whether a
+ * resolved line is a win is read from the evaluation, not from here.
+ */
+function subtreeReachesConclusion(node) {
     if (!node) return false;
-    const stack = [node];
-    while (stack.length > 0) {
-        const n = stack.pop();
-        if (n.move && n.move.pass) return true;
-        if (n.children && n.children.length > 0) {
-            for (const c of n.children) stack.push(c);
-        }
+    const isPass = (n) => !!(n.move && n.move.pass);
+    let n = node;
+    let prevWasPass = isPass(node);
+    // The pipeline caps a variation at MAX_VARIATION_DEPTH = 800 plies.
+    for (let step = 0; step < 802; step++) {
+        const kids = (n.children || []).filter(c => c.move);
+        if (kids.length === 0) return false;
+        n = kids[0];
+        const cur = isPass(n);
+        if (cur && prevWasPass) return true;
+        prevWasPass = cur;
     }
     return false;
 }
@@ -172,44 +196,37 @@ async function requestAndDisplayAnalysis() {
         //   - Black to play: show only the best move (the move the user is being asked
         //     to find).
         //   - White to play: waterfall —
-        //       1. SGF moves whose subtree reaches a pass → among those, show the move
+        //       1. SGF moves whose line was played out to a conclusion → among those, show the move
         //          with the highest winrate and the move with the highest score, both
         //          from white's perspective (i.e. lowest stored values, since
         //          bots/analysis.cfg reports from black). One or two ghost stones.
         //       2. Otherwise, any SGF move at all → show only the best SGF move.
         //       3. Otherwise (only API additions exist) → show the best API move.
-        //     Pipeline-baked variations terminate with a pass once solved, so a subtree
-        //     with no pass anywhere is a dead-end engine evaluation that wasn't pursued
-        //     to a conclusion.
+        //     Pipeline-baked variations terminate in a DOUBLE pass once solved, and
+        //     subtreeReachesConclusion follows the highest-visit chain to check for one,
+        //     so a branch it rejects is a dead-end evaluation that wasn't pursued to a
+        //     conclusion.
         // The API-cache check still uses *all* %/ children so we don't re-query the
         // API for a position we've already evaluated this session.
         const allEvaluatedCandidates = [];
-        const sgfChildrenLeadingToEnd = [];
-        const markedChildren = [];   // TE — branches the pipeline played out to a double pass
+        const resolvedChildren = [];  // branches the pipeline played out to a double pass
         let bestChild = null;        // first %/ child of any origin (best overall)
         let bestSgfChild = null;     // first %/ child that isn't an API addition
         for (const child of children) {
             if (!child.move || !child.comment || !child.comment.match(/%\//)) continue;
             allEvaluatedCandidates.push({ x: child.move.x, y: child.move.y });
             const isApi = child._origin === 'api';
-            if (!isApi && child.TE) {
-                markedChildren.push(child);
-            }
-            if (!isApi && subtreeReachesPass(child)) {
-                sgfChildrenLeadingToEnd.push(child);
+            if (!isApi && subtreeReachesConclusion(child)) {
+                resolvedChildren.push(child);
             }
             if (!bestChild) bestChild = child;
             if (!bestSgfChild && !isApi) bestSgfChild = child;
         }
 
-        // Prefer the marked branches wherever the SGF has them. TE means the
-        // pipeline drove that branch to a DOUBLE pass and it resolved the way
-        // the problem claims, which is what subtreeReachesPass was standing in
-        // for and could not express: a single pass anywhere in a subtree is not
-        // a conclusion, so the fallback can offer a line that ends with the
-        // solver losing. Selection below is unchanged — only the pool narrows,
-        // so a node marking two white moves still draws two ghosts.
-        const displayPool = markedChildren.length > 0 ? markedChildren : null;
+        // Prefer the branches that were played out to a conclusion wherever the
+        // SGF has them. Selection below is unchanged — only the pool narrows, so
+        // a node with two resolved white moves still draws two ghosts.
+        const displayPool = resolvedChildren.length > 0 ? resolvedChildren : null;
 
         if (allEvaluatedCandidates.length > 0) {
             const isBlackToPlay = state.kifuReader.game.turn === WGo.B;
@@ -225,15 +242,15 @@ async function requestAndDisplayAnalysis() {
                 // trusting document order marked that losing move as the solution —
                 // disagreeing with what isCorrectMove would accept.
                 //
-                // The pool narrows to the marked branches when there are any,
+                // The pool narrows to the resolved branches when there are any,
                 // but the RULE stays findBestMoveFromChildren so that display
                 // and isCorrectMove cannot diverge. Correctness itself is never
-                // read off the mark: a data annotation must not redefine what
-                // counts as the right answer.
+                // read off resolution: how far a line was searched must not
+                // redefine what counts as the right answer.
                 displayChild = findBestMoveFromChildren(displayPool || children)
                     || findBestMoveFromChildren(children) || bestChild;
                 candidatesToShow = [{ x: displayChild.move.x, y: displayChild.move.y }];
-            } else if (displayPool || sgfChildrenLeadingToEnd.length > 0) {
+            } else if (displayPool) {
                 // Comments are reported with reportAnalysisWinratesAs = BLACK, so
                 // white's best = lowest winrate / lowest score among the candidates.
                 let bestWinrateChild = null;
@@ -263,9 +280,8 @@ async function requestAndDisplayAnalysis() {
                 }
                 if (picks.length === 0) {
                     // Fall back to the SGF order when neither metric was
-                    // parseable — from the same pool we just scanned, since a
-                    // marked node need not have any subtreeReachesPass child.
-                    picks.push((displayPool || sgfChildrenLeadingToEnd)[0]);
+                    // parseable, from the same pool we just scanned.
+                    picks.push(displayPool[0]);
                 }
                 displayChild = picks[0];
                 candidatesToShow = picks.map(c => ({ x: c.move.x, y: c.move.y }));

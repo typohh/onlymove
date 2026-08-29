@@ -29,6 +29,28 @@ export function getScoreFromComment(comment) {
 }
 
 /**
+ * Parses the visit count an SGF comment's estimate rests on, from the third
+ * field of "<winrate>%/<score>/<visits>".
+ *
+ * A comment carrying only the first two fields predates the field, and nothing
+ * was ever written below the 30-visit floor, so it reports 30 — that is a fact
+ * about the corpus, not a fallback. Anything that is not an evaluation reports
+ * null. Mirrors parse_eval_visits in utils/katago/add_variations.py.
+ * @param {string} comment - The comment string.
+ * @returns {number|null} - Visits behind the estimate, or null if absent.
+ */
+export function getVisitsFromComment(comment) {
+  if (!comment) {
+    return null;
+  }
+  const match = comment.match(/[\d.-]+%\/[\d.-]+\/(\d+)/);
+  if (match) {
+    return parseInt(match[1], 10);
+  }
+  return comment.match(/%\//) ? 30 : null;
+}
+
+/**
  * Parses the winrate from an SGF comment. Always Black's perspective
  * (bots/analysis.cfg sets reportAnalysisWinratesAs = BLACK).
  * @param {string} comment - The comment string.

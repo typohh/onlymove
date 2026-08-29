@@ -95,7 +95,7 @@ CONT_MOVES = 4
 CONT_TRIES = 3
 CONT_ANSWERS = 3
 # ...plus one column per node/try-group holding how many children the generator actually explored.
-# A node's children are the branches whose visit share cleared MIN_PLAYOUT_PERC, so a MISSING move
+# A node's children are the branches the search read to FREE_BRANCH_VISITS, so a MISSING move
 # is one the search declined to spend visits on — evidence that the best move dominates, not that
 # the move is unknown. Measured on the principal line: the best-vs-second gap shrinks monotonically
 # as children multiply (9x9 solver nodes 2.87 -> 0.89 mover-logit from 2 to 7 children; opponent
@@ -207,8 +207,8 @@ def _slots(ranked, width, pad, solver_to_move):
     the extreme that DISFAVOURS THE MOVER — solver to move: the solver loses; opponent to move:
     the opponent's try fails and the solver wins.
 
-    A move absent from the SGF is one whose visit share never cleared MIN_PLAYOUT_PERC, i.e. one
-    the search judged not worth pursuing, so its absence says the moves present dominate it. The
+    A move absent from the SGF is one the search never read to FREE_BRANCH_VISITS, i.e. one
+    it judged not worth pursuing, so its absence says the moves present dominate it. The
     rejected alternative is forward-filling the worst real child (the convention the root block
     uses, where every legal move IS evaluated and nothing is missing): here it would claim the
     unexplored moves are as good as the worst explored one — a gap of zero, in the one direction

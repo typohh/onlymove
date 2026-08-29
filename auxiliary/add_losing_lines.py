@@ -94,13 +94,6 @@ from utils.katago.coords import sgf_to_gtp  # noqa: E402
 from utils.katago.models import get_model  # noqa: E402
 from utils.katago.queries import KatagoQueries  # noqa: E402
 
-# The cumulative playout share the new branch starts from, which is what
-# generate_variations_directly_to_sgf spends on side variations: it expands a
-# sibling only while the share stays above its MIN_PLAYOUT_PERC cutoff, and
-# always follows the primary line regardless. Starting at zero therefore buys
-# the principal line and nothing else — one query per ply.
-BRANCH_SHARE = 0.0
-
 # Threads per unit of KataGo's batch size. Same ratio as
 # pipeline.generate_tsumegos: python workers have to keep the analysis queue
 # full despite the GIL serializing their own SGF work.
@@ -207,8 +200,11 @@ def process_one(path, queries, out_dir):
     _colour, raw = node.get_raw_move()
     move = sgf_to_gtp(raw.decode(), queries.board_size)
 
+    # Default budget, no playouts_fn: every node's own search is PLAYOUTS, so
+    # only its top child clears FREE_BRANCH_VISITS. That buys the principal line
+    # and nothing else — one query per ply, which is all this pass wants.
     reached_end = generate_variations_directly_to_sgf(
-        queries, node, moves + [move], BRANCH_SHARE, True)
+        queries, node, moves + [move], True)
     # The return value and the file's own tree have to agree, and it is the
     # file that every consumer reads. A branch KataGo would not play out to a
     # conclusion is left as it was rather than written back half-explored.

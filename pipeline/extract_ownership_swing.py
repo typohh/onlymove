@@ -13,7 +13,7 @@ Method, per problem:
   - Parse the SGF; the correct move is variation_nodes[0] (generator convention,
     enforced by promote_winning_first_move) and its colour is the solver.
   - Collect the RESOLVED refutations: root variations whose subtree carries a
-    TE[1] mark, i.e. lines the generator drove to a double pass. Everything else
+    resolved continuation, i.e. lines the generator drove to a double pass. Everything else
     is an abandoned stub, and an ownership map read off one of those is the net's
     opinion about a line nobody finished rather than a scored result.
 
@@ -31,7 +31,7 @@ Method, per problem:
   - Score the swing at the ROOT board's occupied points (the root board is the
     common reference; a child board differs from it wherever the move captured).
 
-Restricting to TE-marked refutations is what makes the baseline well defined.
+Restricting to RESOLVED refutations is what makes the baseline well defined.
 Ranking all ~50 legal moves instead is an argmax over near-ties — most
 refutations lose by indistinguishable margins, and which one wins is then
 numerical noise (measured: the two backends agreed on the move only 25 times in
@@ -162,7 +162,8 @@ from katago.game.board import Board
 from katago.game.gamestate import GameState
 
 from utils.constants import ALL_BOARD_SIZES, DEFAULT_MODEL, KOMI, RULES
-from utils.katago.add_variations import parse_eval_comment
+from utils.katago.add_variations import (  # noqa: E402
+    parse_eval_comment, subtree_reaches_conclusion)
 from utils.katago.controller import KatagoController
 from utils.katago.coords import gtp_to_xy, sgf_to_gtp, xy_to_gtp
 from utils.katago.models import get_model
@@ -270,15 +271,9 @@ def root_masks(board, pla, size):
     return ours, theirs
 
 
-def _subtree_has_te(node):
-    """TE[1] anywhere at or under `node`."""
-    stack = [node]
-    while stack:
-        n = stack.pop()
-        if n.has_property("TE"):
-            return True
-        stack.extend(list(n))
-    return False
+def _subtree_is_resolved(node):
+    """Whether the line under `node` was played out to a conclusion."""
+    return subtree_reaches_conclusion(node)
 
 
 def variation_move(node, size):
@@ -323,7 +318,7 @@ def variation_score(node):
 def te_marked_alternatives(variation_nodes, size):
     """Refuted first moves the generator READ OUT TO SCORING, as [(move, score)] —
     root variations (excluding the answer at index 0) whose subtree contains a
-    TE[1] mark, i.e. a line driven to a double pass. A resolved PASS is one of
+    resolved continuation, i.e. a line driven to a double pass. A resolved PASS is one of
     them; see the module docstring for why it is not held out.
 
     A variation with no parseable evaluation comment is DROPPED rather than
@@ -333,17 +328,17 @@ def te_marked_alternatives(variation_nodes, size):
     back to the candidates that can be ranked, and if none can the row is emitted
     baseline-less exactly as it is for a problem with no resolved refutation.
 
-    Why the mark must be looked for DEEPER and never on the variation itself:
-    at the decision node the generator marks only the ANSWER (`mark_children=False`
-    on the refuted-first-move call), because a root mark reads as "this is the
-    move to find". So a refutation is recognised by a resolved CONTINUATION,
-    which is the property wanted here anyway — an unresolved stub is a line
-    nobody played out, and its ownership map is an opinion rather than a result.
+A refutation is recognised by a resolved CONTINUATION — its own highest-visit
+    line reaching a double pass — which is the property wanted here anyway: an
+    unresolved stub is a line nobody played out, and its ownership map is an
+    opinion rather than a result. Only the best refutation is played out, because
+    the writer follows one primary line and stops every sibling at the visit
+    floor.
     """
     out = []
     for node in variation_nodes[1:]:
         mv = variation_move(node, size)
-        if mv is None or not _subtree_has_te(node):
+        if mv is None or not _subtree_is_resolved(node):
             continue
         sc = variation_score(node)
         if sc is None:
