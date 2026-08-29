@@ -141,7 +141,7 @@ Three things that look like they should be tracked and are not:
 
 ## Remote execution
 
-`python vast_orchestration.py` with no arguments prints its subcommands. Only `tune`, `generate` and `benchmark` are remoted; everything else stays local. `run <step> <size>` forwards the size verbatim, validated locally against `ALL_BOARD_SIZES`. The remote gets a CUDA KataGo build uploaded as `bots/katago_cuda` with `KATAGO_PATH` pointed at it — see `corpus_and_engine.md` for why the binary path is never hardcoded.
+`python vast_orchestration.py` with no arguments prints its subcommands. Only `tune`, `generate` and `benchmark` are remoted; everything else stays local. `run <step> <size>` forwards the size verbatim, validated locally against `ALL_BOARD_SIZES`. The remote gets a CUDA KataGo build uploaded as `bots/katago_cuda12` with `KATAGO_PATH` pointed at it — see `corpus_and_engine.md` for why the binary path is never hardcoded.
 
 ## Working with large artifact directories
 

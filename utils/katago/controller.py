@@ -10,7 +10,7 @@ from utils.paths import PROJECT_ROOT
 CONFIG_FILE = os.path.join(PROJECT_ROOT, "bots", "analysis.cfg")
 # KATAGO_PATH defaults to the OpenCL build at bots/katago. Override via the
 # KATAGO_PATH environment variable on hosts that need a different binary
-# (e.g. bots/katago_cuda on a vast.ai NVIDIA instance).
+# (e.g. bots/katago_cuda12 on a vast.ai NVIDIA instance).
 KATAGO_PATH = os.environ.get("KATAGO_PATH") or os.path.join(PROJECT_ROOT, "bots", "katago")
 
 # How long a single send_query blocks before giving up on a stuck/crashed engine.

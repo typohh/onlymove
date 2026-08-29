@@ -47,9 +47,15 @@ SIZE_REQUIRED_STEPS = {"tune", "generate", "benchmark", "losing_lines"}
 # Files uploaded from the local repo. We ship the CUDA katago build to the
 # remote (vast.ai NVIDIA GPUs); the local repo's bots/katago is OpenCL and is
 # not uploaded. utils/katago_controller.py reads KATAGO_PATH from the
-# environment, so we set that to bots/katago_cuda when launching the step.
+# environment, so we set that to bots/katago_cuda12 when launching the step.
+# THE CUDA VERSION IS IN THE NAME because the binary is not portable across
+# them: it links libcublas.so.<major>, so a host whose runtime is a different
+# major cannot load it at all, and a host with a PARTIAL install of the right
+# major fails later and less obviously (cuBLASLt dlopens libnvJitLink of the
+# same major at init, so a missing one surfaces as "Cannot load symbol
+# cublasLtCreate" with nothing missing in ldd).
 LOCAL_UPLOAD_FILES = [
-    "bots/katago_cuda",
+    "bots/katago_cuda12",
 ]
 # bots/analysis.cfg is special: it's hardware-tuned (numAnalysisThreads,
 # nnMaxBatchSize) by the remote tune step. Uploading from local would clobber
@@ -57,7 +63,7 @@ LOCAL_UPLOAD_FILES = [
 SETUP_ONLY_UPLOAD_FILES = [
     "bots/analysis.cfg",
 ]
-REMOTE_KATAGO_PATH = "bots/katago_cuda"
+REMOTE_KATAGO_PATH = "bots/katago_cuda12"
 LOCAL_UPLOAD_DIRS = ["pipeline", "utils", "auxiliary"]
 
 # Network weights — fetched on the remote (faster than uploading hundreds of MB).
@@ -617,17 +623,22 @@ def setup_instance(inst):
 
     base_ssh, base_rsync = get_ssh_cmds(host, port)
 
-    # System packages: python, rsync, tmux, curl for model downloads.
-    # The CUDA katago build links against libcublas.so.13 (CUDA 13) and
-    # libzip.so.4 — neither is present in the vast.ai CUDA-12.8 base image,
-    # so install them explicitly. libcudnn.so.9 already ships in the image.
-    # --allow-change-held-packages: the image holds the CUDA 12.8 metapackage
-    # to prevent accidental upgrades; libcublas-13-0 doesn't conflict with the
-    # 12.8 install (they coexist under /usr/local/cuda-{12.8,13.0}/) but apt
-    # still wants to nudge the held packages, so we whitelist that.
+    # System packages: python, rsync, tmux, curl for model downloads, plus
+    # libzip.so.4, which the katago build needs and the image lacks. cuBLAS and
+    # cuDNN are NOT installed: bots/katago_cuda12 links the CUDA 12.8 runtime
+    # that this image already ships complete.
+    #
+    # IT USED TO INSTALL libcublas-13-0 for a CUDA 13 build, and that broke when
+    # NVIDIA's repo moved libcublas-13-0 to 13.1.x while its newest
+    # libnvjitlink-13-0 stayed at 13.0.88. cuBLASLt dlopens nvJitLink of its own
+    # minor at init, so the pair no longer satisfied each other and every query
+    # died with "Cannot load symbol cublasLtCreate" — with nothing missing in
+    # ldd, since the load is at runtime. Pinning cuBLAS back to 13.0.2.14 did not
+    # help either. Building against the image's own CUDA removes the whole
+    # dependency rather than chasing a version pairing that NVIDIA controls.
     apt_cmd = ("bash -l -c 'apt-get update && apt-get install -y "
                "--allow-change-held-packages "
-               "python3-pip rsync tmux curl libcublas-13-0 libzip4t64'")
+               "python3-pip rsync tmux curl libzip4t64'")
     for attempt in range(3):
         res = subprocess.run(base_ssh + [apt_cmd])
         if res.returncode == 0:
@@ -694,13 +705,17 @@ def cmd_add():
     #  * num_gpus=1 — every remoted step drives one card (parallelism comes
     #    from multiple KataGo processes on it, see the auto-tuner above), so a
     #    multi-GPU offer is paid for and left idle.
-    #  * cuda_max_good>=13.0 — bots/katago_cuda links against CUDA 13, and
-    #    forward compat is unavailable on consumer GPUs.
+    #  * cuda_max_good>=12.8 — bots/katago_cuda12 links against CUDA 12.8, and
+    #    forward compat is unavailable on consumer GPUs. This is the DRIVER's
+    #    maximum, which is necessary but NOT sufficient: it says nothing about
+    #    which toolkit the image ships, and the binary needs a matching RUNTIME.
+    #    Pairing this filter with the CUDA-12.8 template below is what makes it
+    #    sufficient.
     #  * reliability>0.99 — a full run takes hours with no checkpointing, so a
     #    host that drops offline mid-run costs the whole run.
     query = ("rented=False rentable=True num_gpus=1 "
-             "cuda_max_good>=13.0 reliability>0.99")
-    print("Searching offers (single GPU, CUDA >= 13.0, reliability > 99%)...")
+             "cuda_max_good>=12.8 reliability>0.99")
+    print("Searching offers (single GPU, CUDA >= 12.8, reliability > 99%)...")
     offers = run_vast_cmd(["search", "offers", query])
     if not offers:
         print("No offers found.")

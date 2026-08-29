@@ -30,7 +30,7 @@ The repository is complete as source and deliberately incomplete as a deployment
 
 ### KataGo
 
-- **The binary is not in the repository** — `bots/` is gitignored apart from `analysis.cfg`, which is tuned state rather than an artifact. Build or download a KataGo yourself and put it at `bots/katago`, or point the `KATAGO_PATH` environment variable at it. The default assumption is an OpenCL build; `vast_orchestration.py` uploads a CUDA build as `bots/katago_cuda` when running remotely.
+- **The binary is not in the repository** — `bots/` is gitignored apart from `analysis.cfg`, which is tuned state rather than an artifact. Build or download a KataGo yourself and put it at `bots/katago`, or point the `KATAGO_PATH` environment variable at it. The default assumption is an OpenCL build; `vast_orchestration.py` uploads a CUDA build as `bots/katago_cuda12` when running remotely — the CUDA major version is part of the filename because the binary links `libcublas.so.<major>` and is not portable across majors.
 - **Network weights fetch themselves.** `utils.katago.models.get_model` downloads the `.bin.gz` that the analysis engine reads on first use, so the generation steps need no manual model setup.
 - **Activation extraction is the exception.** Step 5 runs the vendored PyTorch copy of KataGo, which loads a `model.ckpt` — a different artifact from the `.bin.gz`, and not derivable from it, since KataGo's own tooling converts PyTorch → binary and not back. Extract it from the matching checkpoint `.zip` to `models/kata1-b18c384nbt-s9996604416-d4316597426/model.ckpt`, or pass `--ckpt`.
 
