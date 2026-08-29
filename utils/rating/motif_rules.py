@@ -50,6 +50,32 @@ LD_MIN_STONES = 5.0    # the winning part must move at least this many stones
 # comes close to the thing being decided.
 LD_TRADE_RATIO = 0.20  # every OTHER directional part, as a fraction of the winner
 
+# semeai: BOTH focus parts at once. The answer saves your group AND kills theirs,
+# and neither is a footnote to the other, so the position is a capturing race
+# rather than one status change with drift beside it.
+#
+# The bar is on the pair's SPLIT, not on either part, so the rule does not ask
+# the two groups to be the same SIZE — a race is about both being at stake, and
+# 0.25 admits up to a 1:3 mismatch between them.
+#
+# STAYING UNDER 1/3 IS WHAT KEEPS THIS DISJOINT FROM `life and death`, and it is
+# LD_TRADE_RATIO that puts the boundary there: a rule judging every other part
+# against a fraction of the largest one holds the smaller focus part at or under
+# ratio/(1+ratio) of the pair, i.e. a split at least 1/3 away from even. So the
+# two rules cannot both fire while this bar sits below that, and the gap between
+# them — a split between 1/6 and 1/4 — deliberately labels as NEITHER rather than
+# letting the two meet at a shared edge, where a hair of drift decides which
+# motif a problem seeds. Moving LD_TRADE_RATIO moves that boundary.
+SEMEAI_BALANCE = 0.25
+# The PAIR analogue of LD_MIN_STONES: life and death asks one decisive group to
+# be worth 5 stones, and a race is decided by two, so the bar goes on their sum.
+# With the balance bar it also floors the smaller side at (0.5 - balance) * this,
+# which is what stops a one-stone throw-in beside a large group reading as a
+# race. 10 takes ~9% of the corpus; 8 -> 11.3%, 6 -> 14.9%, 12 -> 6.7%. Narrow is
+# the safe side: the fit SPREADS a narrow rule outward from its core and takes a
+# ~20% rule as written (see rule_territory, narrowed for the same reason).
+SEMEAI_MIN_STONES = 10.0
+
 # counting: the top two first moves finish within a hair of each other on score
 # while the win probability separates hard — the position turns on a margin you
 # have to count rather than on a status you can see.
@@ -142,7 +168,7 @@ TERR_PER_STONE = 8.0 # points of swing each flipped stone must be beaten by
 # not have: it holds several directions called `ko` from different fits, which is
 # why that path is keyed by an `ax_<hex>` content hash instead of by name.)
 LABEL_SET = ["life and death", "counting", "ko", "opening", "territory",
-             "shape", "tenuki", "sente"]
+             "shape", "tenuki", "sente", "semeai"]
 if len(set(LABEL_SET)) != len(LABEL_SET):
     raise ValueError(f"duplicate rule name in LABEL_SET: {LABEL_SET}")
 
@@ -167,6 +193,7 @@ RULE_LABELS = {
     "shape":          {"zh": "棋形", "ja": "形",   "ko": "모양"},
     "tenuki":         {"zh": "脱先", "ja": "手抜き", "ko": "손빼기"},
     "sente":          {"zh": "先手", "ja": "先手", "ko": "선수"},
+    "semeai":         {"zh": "对杀", "ja": "攻め合い", "ko": "수상전"},
 }
 _unknown = sorted(set(RULE_LABELS) - set(LABEL_SET))
 if _unknown:
@@ -254,6 +281,39 @@ def rule_life_and_death(own, min_stones=None, trade_ratio=None):
         return False
     bar = trade_ratio * parts[top]
     return all(v <= bar for k, v in parts.items() if k != top)
+
+
+def rule_semeai(own, balance=None, min_stones=None, trade_ratio=None):
+    """A capturing race: the answer saves your own group AND kills the
+    opponent's, and neither of the two is a footnote to the other.
+
+    The COMPLEMENT of rule_life_and_death over the same two ownership parts, and
+    disjoint from it by construction (see SEMEAI_BALANCE). Where that rule wants
+    one status change with nothing near it, this one wants both, which is what a
+    semeai is: two groups whose fates are the same question. A rule that only
+    asks for a dominant part cannot express that — it reads the second group as
+    the trade that disqualifies the first.
+
+    Judged on the pair's SPLIT and on the pair's SIZE, never on either part
+    alone, so the two groups need not match in size. The trade bar is inherited
+    from rule_life_and_death and referred to the PAIR, since the pair is what is
+    being decided here: a race you win by letting a third group die is a trade
+    like any other.
+
+    `own` is the raw ownership row, in stones (see rule_life_and_death on why a
+    threshold in stones needs the pre-standardization values).
+    """
+    balance = SEMEAI_BALANCE if balance is None else balance
+    min_stones = SEMEAI_MIN_STONES if min_stones is None else min_stones
+    trade_ratio = LD_TRADE_RATIO if trade_ratio is None else trade_ratio
+    save, kill = (abs(float(own[k])) for k in LD_FOCUS)
+    pair = save + kill
+    if pair <= 0.0 or pair < min_stones:
+        return False
+    if abs(save / pair - 0.5) > balance:
+        return False
+    bar = trade_ratio * pair
+    return all(abs(float(own[k])) <= bar for k in LD_OTHER)
 
 
 def rule_territory(own, base=None, per_stone=None):

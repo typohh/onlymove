@@ -69,8 +69,8 @@ from utils.rating.model_constants import SIZES  # noqa: E402
 from utils.rating.motif_rules import (  # noqa: E402
     LABEL_SET, OWNERSHIP_CSV, _mover_eval, _subtree_has_te,
     answer_opponent_distance, best_refuted_node, reply_distance,
-    rule_counting, rule_ko, rule_life_and_death, rule_opening, rule_sente,
-    rule_shape, rule_tenuki, rule_territory)
+    rule_counting, rule_ko, rule_life_and_death, rule_opening, rule_semeai,
+    rule_sente, rule_shape, rule_tenuki, rule_territory)
 
 OUT = os.path.join(PROJECT_ROOT, "axes", "motif_proxies.npz")
 # The ownership columns the rules read. A projection, not the whole row — the CSV
@@ -135,6 +135,10 @@ def label_one(args):
                             if _subtree_has_te(n)) if e is not None]
     hit = {
         "life and death": rule_life_and_death(own),
+        # The complement of `life and death` over the same two ownership parts —
+        # both statuses decided together rather than one of them — and disjoint
+        # from it by construction, so no problem seeds both.
+        "semeai": rule_semeai(own),
         "counting": rule_counting(evals),
         "ko": True if root_ko else rule_ko(setup_sgf, variation_nodes, size),
         "opening": rule_opening(ph[1], size),

@@ -79,7 +79,7 @@ from utils.rating.motif_rules import (  # noqa: E402,F401
     COUNT_SCORE_MAX, COUNT_WR_MIN, KO_DEPTH, OPENING_MAX_PREFIX,
     SHAPE_WR_GAP, TERR_BASE, TERR_PER_STONE, OWNERSHIP_CSV, SIGNAL_CACHE,
     _subtree_has_te, _mover_eval, _line_moves,
-    rule_life_and_death, rule_territory, rule_shape, rule_counting,
+    rule_life_and_death, rule_semeai, rule_territory, rule_shape, rule_counting,
     rule_ko, rule_opening)
 
 def _sgf_facts(args):
@@ -125,6 +125,8 @@ def build(pool, ownership, phase, workers):
         hits = []
         if rule_life_and_death(own):
             hits.append("life and death")
+        if rule_semeai(own):
+            hits.append("semeai")
         if rule_counting(evals):
             hits.append("counting")
         if rule_territory(own):
