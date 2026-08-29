@@ -44,8 +44,11 @@ the tsumego set.
 import argparse
 import logging
 import os
+import queue
 import sys
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import sgfmill.sgf
@@ -67,7 +70,7 @@ from utils.katago.sgf_parsing import parse_tsumego_sgf
 from utils.constants import ALL_BOARD_SIZES, KOMI, RULES
 from utils.katago.coords import gtp_to_xy, sgf_to_gtp
 from utils.rating.activation_encoder import (
-    ENCODER_PATH, apply_encoder, fingerprint, load_encoder)
+    ENCODER_PATH, fingerprint, load_encoder)
 
 DEFAULT_CKPT = os.path.join(
     PROJECT_ROOT, "models",
@@ -117,14 +120,19 @@ def build_state(setup_moves, size: int) -> GameState:
     return state
 
 
-def extract_block_activations(state: GameState, model, block_names):
-    features = Features(model.config, model.pos_len)
-    bin_input, global_input = state.get_input_features(features)
+def batch_forward(model, block_names, bins, globs):
+    """One forward pass for a BATCH of problems; returns the captured block
+    outputs as device tensors, (B, C, H, W) each. Batching is the first of the
+    three things that make extraction GPU-bound instead of CPU-bound (with
+    on-device slicing/projection and threaded parse/write): a b18 forward is
+    milliseconds, so per-problem calls spend the run in Python overhead."""
     extra = ExtraOutputs(block_names)
     with torch.no_grad():
         model(
-            torch.tensor(bin_input, dtype=torch.float32, device=model.device),
-            torch.tensor(global_input, dtype=torch.float32, device=model.device),
+            torch.tensor(np.concatenate(bins), dtype=torch.float32,
+                         device=model.device),
+            torch.tensor(np.concatenate(globs), dtype=torch.float32,
+                         device=model.device),
             input_meta=None,
             extra_outputs=extra,
         )
@@ -134,23 +142,52 @@ def extract_block_activations(state: GameState, model, block_names):
             f"Block outputs not captured: {missing}. "
             f"First few available: {extra.available[:6]}"
         )
-    return {name: extra.returned[name][0].cpu().numpy() for name in block_names}
+    return [extra.returned[name] for name in block_names]
 
 
-def vecs_at_cells(activations_by_name, block_names, xys) -> np.ndarray:
-    """Returns (n_cells, sum_C) float16: per-cell vector with block channels
-    concatenated in `block_names` order (same layout as the previous
-    single-cell vec_at_cell so PCA loadings stay compatible). fp16 halves
-    disk relative to fp32; precision loss is well below the z-scoring noise
-    in pipeline.train_mirt.
-    """
-    xs = np.array([x for x, _ in xys], dtype=np.int64)
-    ys = np.array([y for _, y in xys], dtype=np.int64)
-    parts = []
-    for name in block_names:
-        a = activations_by_name[name]  # (C, H, W); H=y, W=x
-        parts.append(a[:, ys, xs])  # (C, n_cells)
-    return np.concatenate(parts, axis=0).T.astype(np.float16)  # (n_cells, sum_C)
+def vecs_at_cells_gpu(block_acts, j, xys, enc_t) -> np.ndarray:
+    """Problem j's per-cell vectors, sliced and (when enc_t is set) projected
+    ON DEVICE, so what crosses to the CPU is the stored row width rather than
+    the full trunk. Returns float16 (n_cells, N) in the same block-concat
+    layout as always. fp16 precision loss is well below the z-scoring noise
+    in pipeline.train_mirt."""
+    dev = block_acts[0].device
+    xs = torch.tensor([x for x, _ in xys], dtype=torch.long, device=dev)
+    ys = torch.tensor([y for _, y in xys], dtype=torch.long, device=dev)
+    X = torch.cat([a[j][:, ys, xs] for a in block_acts], dim=0).T.float()
+    if enc_t is not None:
+        m1, s1, pmean, Ct = enc_t
+        X = ((X - m1) / s1 - pmean) @ Ct
+    return X.half().cpu().numpy()
+
+
+def prepare_problem(sgf_path: str, model_config, pos_len):
+    """The CPU half of one problem — parse, replay, enumerate cells, build the
+    net inputs. Runs in reader threads; the Python-heavy work here overlaps
+    the GPU batch and the zlib writes."""
+    with open(sgf_path, "rb") as f:
+        game = sgfmill.sgf.Sgf_game.from_bytes(f.read())
+    size = game.get_size()
+    setup_moves, variation_nodes = parse_tsumego_sgf(game)
+
+    correct_color, correct_mb = variation_nodes[0].get_raw_move()
+    pla = Board.BLACK if correct_color.lower() == "b" else Board.WHITE
+    correct_xy = gtp_to_xy(sgf_to_gtp(correct_mb.decode("utf-8"), size))
+    if correct_xy is None:
+        raise ValueError(f"{sgf_path}: correct variation is a pass; cannot embed")
+
+    state = build_state(setup_moves, size)
+    candidate_xys = enumerate_legal_cells(state.board, pla, size)
+    try:
+        correct_idx = candidate_xys.index(correct_xy)
+    except ValueError:
+        raise ValueError(
+            f"{sgf_path}: correct move {correct_xy} is not a legal cell "
+            f"(setup-replay or coordinate mismatch)")
+
+    bin_input, global_input = state.get_input_features(
+        Features(model_config, pos_len))
+    return bin_input, global_input, candidate_xys, correct_idx
 
 
 def enumerate_legal_cells(board, pla, size):
@@ -168,39 +205,10 @@ def enumerate_legal_cells(board, pla, size):
     return cells
 
 
-def process_one_sgf(sgf_path: str, model, block_names):
-    with open(sgf_path, "rb") as f:
-        game = sgfmill.sgf.Sgf_game.from_bytes(f.read())
-    size = game.get_size()
-    setup_moves, variation_nodes = parse_tsumego_sgf(game)
-
-    # variation_nodes[0] is the correct move by generator convention; its color
-    # is the player to move for the whole problem (and thus whose legal moves
-    # define the candidate cells).
-    correct_color, correct_mb = variation_nodes[0].get_raw_move()
-    pla = Board.BLACK if correct_color.lower() == "b" else Board.WHITE
-    correct_xy = gtp_to_xy(sgf_to_gtp(correct_mb.decode("utf-8"), size))
-    if correct_xy is None:
-        raise ValueError(f"{sgf_path}: correct variation is a pass; cannot embed")
-
-    state = build_state(setup_moves, size)
-
-    # Embed EVERY legal cell (a superset of the SGF variations), in scan order,
-    # and record where the correct move lands in that scan. Note this is
-    # independent of the SGF's variation set/order — the client recovers a
-    # picked move's cell via its (x, y), and the backend via correct_idx.
-    candidate_xys = enumerate_legal_cells(state.board, pla, size)
-    try:
-        correct_idx = candidate_xys.index(correct_xy)
-    except ValueError:
-        raise ValueError(
-            f"{sgf_path}: correct move {correct_xy} is not a legal cell "
-            f"(setup-replay or coordinate mismatch)")
-
-    activations = extract_block_activations(state, model, block_names)
-    vecs = vecs_at_cells(activations, block_names, candidate_xys)  # (n_legal, 6912)
-    xys = np.array(candidate_xys, dtype=np.int32)
-    return vecs, xys, correct_idx, size
+BATCH = 16                       # problems per forward pass
+PARSE_WORKERS = 4                # SGF parse + input-feature threads
+WRITE_WORKERS = 4                # compressed-npz writer threads
+PREFETCH = 64                    # prepared problems the readers may run ahead
 
 
 def main():
@@ -240,6 +248,13 @@ def main():
 
     device = torch.device(args.device) if args.device else torch.device(
         "cuda" if torch.cuda.is_available() else "cpu")
+    # The encoder as device tensors, once: slicing and projection happen on
+    # the GPU so only the stored row width crosses back to the host.
+    enc_t = None
+    if enc is not None:
+        enc_t = tuple(torch.tensor(enc[k], dtype=torch.float32, device=device)
+                      for k in ("m1", "s1", "pca_mean")) + (
+            torch.tensor(enc["C"].T.copy(), dtype=torch.float32, device=device),)
 
     block_names = [f"rconv{i}.out" for i in range(1, 19)]
     print(f"Capturing {len(block_names)} block outputs (rconv1..rconv18)", flush=True)
@@ -264,65 +279,127 @@ def main():
                                  pos_len=size, verbose=False)
         model.eval()
 
-        n_done = n_skipped = 0
-        t0 = time.time()
+        # Split the worklist by existence up front, then fingerprint-verify the
+        # existing files in a background thread WHILE extraction runs: a
+        # resumed encoded run must never leave a file from another encoder (or
+        # a raw leftover) in the store — every reader trusts the directory to
+        # be ONE encoder's output — but the check is pure reading and need not
+        # serialize with the GPU.
+        todo, existing = [], []
         for fname in sgf_files:
-            tsumego_id = fname[:-4]
-            out_path = os.path.join(out_dir, tsumego_id + ".npz")
+            out_path = os.path.join(out_dir, fname[:-4] + ".npz")
             if not args.force and os.path.exists(out_path):
-                if enc is not None:
-                    # A resumed encoded run must never leave a file from another
-                    # encoder (or a raw leftover) sitting in the store — every
-                    # reader trusts the directory to be ONE encoder's output.
-                    with np.load(out_path) as d:
-                        old_fp = int(d["encoder_fp"]) if "encoder_fp" in d.files else None
-                    if old_fp != enc_fp:
-                        raise RuntimeError(
-                            f"{out_path}: written under encoder "
-                            f"{'none (raw)' if old_fp is None else f'{old_fp:08x}'}, "
-                            f"current is {enc_fp:08x} — re-encode or remove the "
-                            f"stale store before resuming")
-                n_skipped += 1
-                continue
-            try:
-                vecs, xys, correct_idx, _ = process_one_sgf(
-                    os.path.join(in_dir, fname), model, block_names)
-            except Exception as e:
-                # A malformed / unembeddable problem is a hard error: abort the
-                # whole run rather than silently dropping it from the activation
-                # corpus (a missing id desyncs every downstream cache — the move
-                # cache, correct_ids, the embedding — from the tsumego set).
-                raise RuntimeError(
-                    f"[size {size}] failed to extract activations for {fname}") from e
-            extras = {}
-            if enc is not None:
-                vecs = apply_encoder(enc, vecs)
-                extras["encoder_fp"] = np.uint32(enc_fp)
-            np.savez_compressed(
-                out_path,
-                candidates=vecs,
-                xys=xys,
-                correct_idx=np.int32(correct_idx),
-                **extras,
-            )
-            n_done += 1
-            if n_done <= 3 or n_done % 500 == 0:
-                elapsed = time.time() - t0
-                rate = n_done / elapsed if elapsed > 0 else 0.0
-                # Accumulate stats in fp32 — reducing fp16 directly overflows.
-                stat_mean = vecs.mean(dtype=np.float32)
-                stat_std = vecs.std(dtype=np.float32)
-                print(f"  [size {size}] {n_done} done, {n_skipped} skipped "
-                      f"({rate:.1f}/s); last: {fname} -> "
-                      f"{vecs.shape[0]} cells × {vecs.shape[1]} feats "
-                      f"correct_idx={correct_idx} "
-                      f"sample stats mean={stat_mean:+.3f} std={stat_std:.3f}",
-                      flush=True)
+                existing.append(out_path)
+            else:
+                todo.append(fname)
+        verify_err = []
 
-        print(f"[size {size}] Done: {n_done} extracted, {n_skipped} skipped.",
+        def _verify_existing():
+            for path in existing:
+                with np.load(path) as d:
+                    old_fp = int(d["encoder_fp"]) if "encoder_fp" in d.files else None
+                if old_fp != enc_fp:
+                    verify_err.append(
+                        f"{path}: written under encoder "
+                        f"{'none (raw)' if old_fp is None else f'{old_fp:08x}'}, "
+                        f"current is {enc_fp:08x} — re-encode or remove the "
+                        f"stale store before resuming")
+                    return
+
+        verifier = None
+        if enc is not None and existing:
+            verifier = threading.Thread(target=_verify_existing, daemon=True)
+            verifier.start()
+        print(f"[size {size}] {len(todo)} to extract, {len(existing)} existing"
+              + (" (fingerprints verifying in background)" if verifier else ""),
               flush=True)
+
+        # Reader threads run the CPU half (parse, replay, input features) ahead
+        # of the GPU; a writer pool compresses and renames behind it. Any
+        # failure anywhere is a hard abort, never a skipped problem — a missing
+        # id desyncs every downstream cache from the tsumego set.
+        q = queue.Queue(maxsize=PREFETCH)
+
+        def _read_all():
+            try:
+                with ThreadPoolExecutor(max_workers=PARSE_WORKERS) as ex:
+                    for fname, item in zip(todo, ex.map(
+                            lambda f: prepare_problem(
+                                os.path.join(in_dir, f), model.config,
+                                model.pos_len),
+                            todo, chunksize=4)):
+                        q.put((fname, item))
+                q.put(None)
+            except BaseException as e:  # surfaces in the consumer, fail-loud
+                q.put(e)
+
+        threading.Thread(target=_read_all, daemon=True).start()
+
+        n_done = 0
+        t0 = time.time()
+        with ThreadPoolExecutor(max_workers=WRITE_WORKERS) as writers:
+            pending = []
+
+            def _write(out_path, vecs, xys, correct_idx):
+                extras = ({"encoder_fp": np.uint32(enc_fp)}
+                          if enc is not None else {})
+                tmp = out_path + ".tmp.npz"
+                np.savez_compressed(tmp, candidates=vecs,
+                                    xys=np.array(xys, dtype=np.int32),
+                                    correct_idx=np.int32(correct_idx), **extras)
+                os.replace(tmp, out_path)
+
+            batch = []
+            drained = False
+            while not drained or batch:
+                if not drained and len(batch) < BATCH:
+                    got = q.get()
+                    if isinstance(got, BaseException):
+                        raise RuntimeError(
+                            f"[size {size}] failed to prepare a problem") from got
+                    if got is None:
+                        drained = True
+                    else:
+                        batch.append(got)
+                        continue
+                if not batch:
+                    break
+                acts = batch_forward(
+                    model, block_names,
+                    [b[1][0] for b in batch], [b[1][1] for b in batch])
+                for j, (fname, (_, _, xys, ci)) in enumerate(batch):
+                    vecs = vecs_at_cells_gpu(acts, j, xys, enc_t)
+                    out_path = os.path.join(out_dir, fname[:-4] + ".npz")
+                    pending.append(writers.submit(_write, out_path, vecs, xys, ci))
+                    n_done += 1
+                    if n_done <= 3 or n_done % 500 == 0:
+                        rate = n_done / max(time.time() - t0, 1e-9)
+                        stat_mean = vecs.mean(dtype=np.float32)
+                        stat_std = vecs.std(dtype=np.float32)
+                        print(f"  [size {size}] {n_done}/{len(todo)} "
+                              f"({rate:.1f}/s); last: {fname} -> "
+                              f"{vecs.shape[0]} cells × {vecs.shape[1]} feats "
+                              f"correct_idx={ci} "
+                              f"sample stats mean={stat_mean:+.3f} "
+                              f"std={stat_std:.3f}", flush=True)
+                batch = []
+                if verify_err:
+                    raise RuntimeError(verify_err[0])
+                done, pending = [f for f in pending if f.done()], \
+                    [f for f in pending if not f.done()]
+                for f in done:
+                    f.result()      # re-raise a writer failure promptly
+            for f in pending:
+                f.result()
+        if verifier is not None:
+            verifier.join()
+            if verify_err:
+                raise RuntimeError(verify_err[0])
+
+        print(f"[size {size}] Done: {n_done} extracted, {len(existing)} "
+              f"skipped.", flush=True)
         totals["done"] += n_done
-        totals["skipped"] += n_skipped
+        totals["skipped"] += len(existing)
 
         # Free GPU memory before loading the next size's model.
         del model
