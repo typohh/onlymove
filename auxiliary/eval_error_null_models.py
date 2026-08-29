@@ -145,7 +145,10 @@ def _first_node(text, i):
             comment = val
     winrate = score = None
     if comment:
-        mm = re.match(r"\s*([\d.]+)%/(-?[\d.]+)", comment)
+        # UNANCHORED, like every other parser in the repo (parse_eval_comment in
+        # utils/katago/add_variations.py): a comment may carry text before the
+        # fields, and the third "/<visits>" field simply falls outside the match.
+        mm = re.search(r"(-?[\d.]+)%/(-?[\d.]+)", comment)
         if mm:
             winrate = float(mm.group(1))
             score = float(mm.group(2))

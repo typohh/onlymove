@@ -69,9 +69,50 @@ export function getWinrateFromComment(comment) {
 }
 
 /**
+ * Formats an evaluation as an SGF branch comment: "<winrate>%/<score>/<visits>".
+ *
+ * `winrate` is a fraction in [0, 1] from BLACK's perspective, which is how both
+ * engines report it (bots/analysis.cfg and analysis_server/analysis.cfg both set
+ * reportAnalysisWinratesAs = BLACK), so nothing here converts a frame. Mirrors
+ * format_eval_comment in utils/katago/add_variations.py — the two must agree,
+ * because a comment written here is read back by the same parsers that read the
+ * pipeline's.
+ * @param {number} winrate - Black-perspective winrate in [0, 1].
+ * @param {number} score - Black-perspective score lead.
+ * @param {number} visits - Visits the estimate rests on.
+ * @returns {string} - The comment.
+ */
+export function formatEvalComment(winrate, score, visits) {
+  return `${(winrate * 100).toFixed(1)}%/${score.toFixed(1)}/${Math.trunc(visits)}`;
+}
+
+/**
+ * Writes an evaluation onto `node`, but NEVER DOWNGRADES one.
+ *
+ * A comment is replaced only by an estimate resting on MORE visits than the one
+ * already there, so a shallow answer can never overwrite a deeper one and
+ * re-running a shallower pass over the same node does nothing. A node carrying
+ * no evaluation counts as zero visits, so a first write always lands. Mirrors
+ * set_eval_comment in utils/katago/add_variations.py, which is the pipeline's
+ * only writer; this is the client's.
+ * @param {object} node - The node to write onto.
+ * @param {number} winrate - Black-perspective winrate in [0, 1].
+ * @param {number} score - Black-perspective score lead.
+ * @param {number} visits - Visits the estimate rests on.
+ * @returns {boolean} - Whether the comment was written.
+ */
+export function setEvalComment(node, winrate, score, visits) {
+  if (Math.trunc(visits) <= (getVisitsFromComment(node.comment) ?? 0)) {
+    return false;
+  }
+  node.comment = formatEvalComment(winrate, score, visits);
+  return true;
+}
+
+/**
  * Finds the winning move among a node's children by their actual evaluation —
- * NOT by SGF child order. Comments are "<winrate>%/<score>" with both numbers
- * reported from BLACK's perspective (bots/analysis.cfg sets
+ * NOT by SGF child order. Comments are "<winrate>%/<score>/<visits>" with both
+ * numbers reported from BLACK's perspective (bots/analysis.cfg sets
  * reportAnalysisWinratesAs = BLACK), so the best move for the side to play is:
  *   - Black to play -> the HIGHEST winrate (score breaks exact ties)
  *   - White to play -> the LOWEST  winrate (score breaks exact ties)

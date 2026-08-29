@@ -8,16 +8,12 @@ import { loadSgf, playMoveOnBranch, undoMove, getCurrentNode, redraw } from './b
 import { updateAnalysisUI, updateAllUI } from './ui.js';
 import { playStoneSound } from './audio.js';
 import { getTerm } from './i18n.js';
-import { getScoreFromComment, getWinrateFromComment, findBestMoveFromChildren } from './sgf.js';
+import { getScoreFromComment, getWinrateFromComment, findBestMoveFromChildren, formatEvalComment, setEvalComment } from './sgf.js';
 import { APP_MODES, ANALYSIS_STATUS } from './constants.js';
 import { populateMotifBubble } from './motif-bubble.js';
 import { onEnterReview as onboardingEnterReview } from './onboarding.js';
 
 
-// Iterative DFS — true if the subtree rooted at `node` contains a pass move.
-// Pipeline-baked variations terminate with a pass once the position is fully
-// resolved; subtrees with no pass anywhere are dead-end engine evaluations
-// that weren't pursued to a conclusion.
 /**
  * Whether `node` is a branch the pipeline played out to a DOUBLE PASS.
  *
@@ -203,7 +199,7 @@ async function requestAndDisplayAnalysis() {
         //       2. Otherwise, any SGF move at all → show only the best SGF move.
         //       3. Otherwise (only API additions exist) → show the best API move.
         //     Pipeline-baked variations terminate in a DOUBLE pass once solved, and
-        //     subtreeReachesConclusion follows the highest-visit chain to check for one,
+        //     subtreeReachesConclusion follows the first-child chain to check for one,
         //     so a branch it rejects is a dead-end evaluation that wasn't pursued to a
         //     conclusion.
         // The API-cache check still uses *all* %/ children so we don't re-query the
@@ -306,12 +302,12 @@ async function requestAndDisplayAnalysis() {
         updateAnalysisUI(getTerm('analyzing'), null);
 
         const sgf = getCurrentSgf();
-        let { bestMove: bestMoveSgf, score, visits } = await fetchAnalysis(sgf);
+        let { bestMove: bestMoveSgf, winrate, score, visits } = await fetchAnalysis(sgf);
 
         if (score === ANALYSIS_STATUS.RETRY) {
             const currentSgfCheck = getCurrentSgf();
             if (currentSgfCheck === sgf) {
-                ({ bestMove: bestMoveSgf, score, visits } = await fetchAnalysis(sgf));
+                ({ bestMove: bestMoveSgf, winrate, score, visits } = await fetchAnalysis(sgf));
             }
         }
 
@@ -344,8 +340,19 @@ async function requestAndDisplayAnalysis() {
                 // 'api' either way: the move-selection waterfall above keys on it
                 // to tell server answers from the SGF's own.
                 const searched = typeof visits === 'number' && visits > 1;
+                // Record the server's OWN numbers in the corpus comment format,
+                // so an API node reads back through the same parsers as an
+                // SGF-baked one — including the visit count, which is what tells
+                // a policy opinion from a reading. Both engines report from
+                // BLACK (analysis_server/analysis.cfg, bots/analysis.cfg), so
+                // there is no frame to convert. A response missing any of the
+                // three carries no comment rather than an invented one: the
+                // cache check above then re-queries this position later, and the
+                // score shown below comes from the response itself either way.
+                const evaluated = Number.isFinite(winrate) && Number.isFinite(score)
+                    && Number.isFinite(visits);
                 if (existingChild) {
-                    existingChild.comment = `100%/${score}`;
+                    if (evaluated) setEvalComment(existingChild, winrate, score, visits);
                     existingChild._origin = 'api';
                     existingChild._searched = searched;
                     const index = children.indexOf(existingChild);
@@ -354,10 +361,9 @@ async function requestAndDisplayAnalysis() {
                         children.unshift(existingChild);
                     }
                 } else {
-                    const newNode = new WGo.KNode({
-                        move: bestMove,
-                        comment: `100%/${score}`
-                    });
+                    const newNode = new WGo.KNode(evaluated
+                        ? { move: bestMove, comment: formatEvalComment(winrate, score, visits) }
+                        : { move: bestMove });
                     newNode._origin = 'api';
                     newNode._searched = searched;
                     currentNode.children.unshift(newNode);
