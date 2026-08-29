@@ -212,3 +212,6 @@ dev_runs/
 todo.md
 .*.swp
 *.swp
+
+# Derived work-splitting list, regenerated from the corpus on each fleet run.
+tsumegos/exclude_*.txt

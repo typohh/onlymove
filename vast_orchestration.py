@@ -187,16 +187,52 @@ def get_all_instances():
     return instances if instances else []
 
 
+# get_ssh_details probes, and remembers what answered.
+_SSH_PORT_CACHE = {}
+
+
+def _ssh_port_answers(host, port):
+    try:
+        return subprocess.run(
+            ["ssh", "-q", "-o", "LogLevel=ERROR", "-o", "StrictHostKeyChecking=no",
+             "-o", "UserKnownHostsFile=/dev/null", "-o", "ConnectTimeout=8",
+             "-p", str(port), f"root@{host}", "true"],
+            capture_output=True, timeout=20).returncode == 0
+    except Exception:
+        return False
+
+
 def get_ssh_details(inst):
-    proxy_host = inst.get("ssh_proxy_host")
-    proxy_port = inst.get("ssh_proxy_port")
-    if proxy_host and proxy_port:
-        return proxy_host, int(proxy_port) + 1
-    host = inst.get("ssh_host")
-    port = inst.get("ssh_port")
-    if host and port:
-        return host, int(port) + 1
-    return host, port
+    """(host, port) for an instance, choosing the port that actually answers.
+
+    The proxy port is NOT a fixed offset from the API's ssh_port. Some instances
+    answer on ssh_port + 1 and others on ssh_port itself — measured on one fleet,
+    49060174 wanted +1 while 49127840 wanted the raw port, and assuming either
+    one leaves the other permanently "SSH not ready". Both are tried, +1 first
+    because that is the older and more common case, and the answer is cached so
+    this costs one probe per instance.
+    """
+    host = inst.get("ssh_proxy_host") or inst.get("ssh_host")
+    port = inst.get("ssh_proxy_port") or inst.get("ssh_port")
+    if not host or not port:
+        return host, port
+    key = (host, int(port))
+    if key in _SSH_PORT_CACHE:
+        return _SSH_PORT_CACHE[key]
+    # The DIRECT route is a third candidate, not a fallback of last resort: one
+    # instance answered only there, with both proxy ports refusing. Its port is
+    # whatever the instance maps to 22/tcp — NOT direct_port_start, which on this
+    # image is container port 1111.
+    candidates = [(host, int(port) + 1), (host, int(port))]
+    direct_host = inst.get("public_ipaddr")
+    for binding in (inst.get("ports") or {}).get("22/tcp") or []:
+        if binding.get("HostPort") and direct_host:
+            candidates.append((direct_host, int(binding["HostPort"])))
+    for cand_host, cand_port in candidates:
+        if _ssh_port_answers(cand_host, cand_port):
+            _SSH_PORT_CACHE[key] = (cand_host, cand_port)
+            return cand_host, cand_port
+    return host, int(port) + 1        # nothing answered yet; keep the old default
 
 
 def get_ssh_cmds(host, port):
