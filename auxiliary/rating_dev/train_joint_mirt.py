@@ -1039,6 +1039,18 @@ def main():
                     help="trunk activation. SwiGLU by default; it doubles the "
                          "trunk's parameters at a given width, so read it "
                          "against the relu control rather than alone.")
+    ap.add_argument("--features", choices=("production", "activations"),
+                    default="production",
+                    help="WHICH per-problem blocks the trunk sees. `production` is "
+                         "the shipped layout (activation PCA + bot winrate + move "
+                         "evals + ownership swing + game phase + the board-size "
+                         "flag); `activations` keeps the activation PCA and the "
+                         "size flag and drops every wide block. The ablation is "
+                         "selected inside utils.rating.features, not by slicing "
+                         "the matrix here, so neither arm restates where the "
+                         "activation block ends. Both arms keep the size flag "
+                         "outside the dropout region, so INPUT_DROPOUT masks the "
+                         "same fraction of what each is given.")
     ap.add_argument("--global-slope", action="store_true",
                     help="one discrimination for the whole corpus on dimension "
                          "1 (the Rasch reduction), difficulty still per-problem. "
@@ -1149,10 +1161,13 @@ def main():
     # nothing in the output says so. The problem set moves with it — the copy
     # used activations ∩ bot winrate, which resolves a missing block by dropping
     # the problem, while the corpus set raises.
-    feat, keys, key_idx, input_dim = load_joint_mirt_features(SIZES, PCA_DIM, SEED)
+    feat, keys, key_idx, input_dim = load_joint_mirt_features(
+        SIZES, PCA_DIM, SEED,
+        blocks=("all" if args.features == "production" else "activations"))
     fdim = feat.shape[1]
     print(f"loaded in {time.time() - t0:.0f}s: {len(keys)} problems, feat "
-          f"{fdim} (dropout region {input_dim})", flush=True)
+          f"{fdim} (dropout region {input_dim}), blocks={args.features}",
+          flush=True)
 
     # --- attempts, with BOTH groupings: profiles for ability (it drifts),
     # whole-user for the axis positions (a skill profile should not, and a

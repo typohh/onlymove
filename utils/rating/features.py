@@ -1130,14 +1130,14 @@ def joint_feature_tail(key, wide):
     return np.concatenate(parts)
 
 
-def load_joint_mirt_features(sizes, pca_dim, seed):
+def load_joint_mirt_features(sizes, pca_dim, seed, blocks="all"):
     """THE per-problem feature matrix the MIRT trunk sees — activations, bot winrate,
     move evals, ownership swing, game phase, board size — assembled once here so every
     consumer sees the same columns in the same order.
 
     Returns (feat (n_problems, fdim) float32, keys [(size, tid)], key_idx {key: row},
-    input_dim). `input_dim` is the leading block INPUT_DROPOUT masks: the wide
-    per-problem blocks, excluding game phase and the size flag.
+    input_dim). `input_dim` is the leading block INPUT_DROPOUT masks: the activation
+    block plus every wide per-problem block, excluding only the board-size flag.
 
     THE PROBLEM SET IS THE CORPUS, and EVERY block must cover it — activations
     included. A tsumego with no activation vector is missing data exactly like one with
@@ -1151,10 +1151,22 @@ def load_joint_mirt_features(sizes, pca_dim, seed):
     the trunk can represent, so the axis bank it builds would be teaching the fit
     something unreachable. Copying the assembly there would let the two drift silently,
     which is the failure this single source exists to prevent.
+
+    `blocks` selects WHICH per-problem blocks are assembled, and exists so a feature
+    ablation is expressed HERE rather than by slicing the returned matrix at a caller —
+    a slice has to restate where the activation block ends, which is the one number this
+    function exists to state once. "all" is the shipped layout and the only value any
+    production stage passes; "activations" drops every wide block, leaving the activation
+    PCA and the board-size flag. The size flag is NOT a block and stays in both (it is
+    the board the problem is on, not a property measured about it), and it stays outside
+    the dropout region in both, so the two arms differ in columns and in nothing else.
     """
+    if blocks not in ("all", "activations"):
+        raise ValueError(f"blocks must be 'all' or 'activations', got {blocks!r}")
     tids_by_size = corpus_tids_by_size(sizes)
     act, k_act = load_joint_activations(sizes, tids_by_size, pca_dim, seed)
-    wide, n_wide = load_joint_tail_blocks(sizes, tids_by_size)
+    wide, n_wide = (load_joint_tail_blocks(sizes, tids_by_size)
+                    if blocks == "all" else ((), 0))
     keys = [(s, t) for s in sizes for t in tids_by_size[s]]
     key_idx = {key: i for i, key in enumerate(keys)}
     input_dim = k_act + n_wide

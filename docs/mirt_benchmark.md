@@ -955,6 +955,32 @@ counting 0.3%, ko 25.0%, opening 0.4%. Essentially disjoint from counting — th
 rule, and the one it could most easily have duplicated — and the 25% with ko is barely above ko's
 19.3% base rate.
 
+### A ninth rule: semeai — the balanced pair `life and death` cannot express
+
+`rule_life_and_death` judges every other ownership part against a fraction of the LARGEST one, so the second FOCUS part — the kill, when the save is bigger, or the save when the kill is — is scored by the same bar as a sacrifice. A capturing race therefore fails it: both groups' fates are the one question, and the rule reads the second group as the trade that disqualifies the first. Measured over the 215,341-row ownership sweep, that case is **11.04% of the corpus against the 4.01% the rule itself takes** — the balanced pair is rejected nearly three times as often as the rule fires. A genuine trade (a sacrifice or a let-out above the bar) accounts for a further 6.94%, which is the exclusion the rule is actually for.
+
+`rule_semeai` takes exactly that rejected region: `save + kill >= SEMEAI_MIN_STONES`, the split `|save/(save+kill) - 0.5| <= SEMEAI_BALANCE`, and the two non-focus parts under `LD_TRADE_RATIO` of the PAIR rather than of one part.
+
+**The bar is on the split, not on either part, because a race does not need two groups of equal size.** What a semeai is about is both groups being at stake; their stone counts are whatever the position gives. At 0.25 a 1:3 mismatch still fires, and a tighter bar would turn the rule into "two groups the same size", which names nothing in Go.
+
+**The two rules are disjoint by construction, and `LD_TRADE_RATIO` is what puts the boundary there.** Judging every other part against `ratio` of the largest holds the smaller focus part at or under `ratio/(1+ratio)` = 1/6 of the pair, i.e. a split at least 1/3 from even. Any balance bar below 1/3 is therefore mutually exclusive with `life and death`; 0.25 keeps a margin so the region between 1/6 and 1/4 labels as NEITHER, rather than two rules meeting at a shared edge where a hair of drift decides which motif a problem seeds. Measured on the corpus: 0 problems carry both labels. **Moving `LD_TRADE_RATIO` moves that boundary**, so the two constants are one decision.
+
+**`SEMEAI_MIN_STONES` is the pair analogue of `LD_MIN_STONES`.** One decisive group is worth labelling at 5 stones; a race is decided by two, so the bar goes on their sum at 10. It also floors the smaller side at `(0.5 - balance) * min_stones` = 2.5 stones, which is what stops a throw-in beside a large group reading as a race — a floor a bar on the sum alone does not provide. The sweep, with the trade guard on:
+
+```
+  min_stones   share    9x9     13x13   smaller side p5 / median (stones)
+       6      14.93%   11.54%   18.69%      2.2 /  4.3
+       8      11.31%    8.51%   14.42%      2.8 /  5.2
+      10       8.67%    6.42%   11.17%      3.4 /  6.1
+      12       6.67%    4.83%    8.71%      4.0 /  7.0
+```
+
+10 lands the rule between `counting` (6.3%) and `territory` (8.6%), and narrow is the safe side by the width evidence above: the fit spreads a narrow rule outward from its core, while a ~20% rule is taken as written and must already BE the concept. Dropping the trade guard raises the share to 10.81% by admitting races won at the cost of a third group.
+
+Overlap at the shipped setting, as a share of semeai's own 18,676 positives: life and death 0.0%, counting 0.1%, territory 0.0%, shape 0.9%, opening 5.3%, sente 11.9%, tenuki 24.8%, ko 28.8%. The only substantial one is `ko`, at 1.7x its 16.6% base rate and covering 15.0% of ko — a race that comes down to a ko is a real overlap of concepts rather than a duplicated column.
+
+**It is a CANDIDATE, not a shipped axis.** What decides that is split-half reliability (`auxiliary/rating_dev/split_half.py`), which needs a fit with the rule taught; `components` in `axes/labels.json` and `K_AXES` are untouched until it clears the working tier. The exploratory store holds a `semeai` direction found by a free fit (`ax_cc62e376`, the negative pole taught from legacy `killing` at 0.43 and renamed on inspection), which says the model does land on this concept unprompted — a reason to test the rule, not evidence that it ships.
+
 ### TEACH_DECAY_EPOCHS is an interior optimum at 1000
 
 Swept on converged-axis banks under ortho-b, one seed each, scored on tail-weighted agreement.
