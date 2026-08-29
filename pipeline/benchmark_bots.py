@@ -403,11 +403,25 @@ def main():
     parser = argparse.ArgumentParser(description='Benchmark bots on generated tsumegos')
     parser.add_argument('size', type=int, choices=ALL_BOARD_SIZES,
                         help='Board size to benchmark (one of %(choices)s)')
+    parser.add_argument('--corpus-dir', default=None,
+                        help="directory of SGFs to benchmark (default "
+                             "tsumegos/<size>). Point it at tsumegos/new/<size> "
+                             "to cover freshly generated problems BEFORE they are "
+                             "promoted. Attempts still go to attempts/<size>, and "
+                             "each bot file is read before it is written, so the "
+                             "new results merge into the existing set rather than "
+                             "replacing it — which is also why that directory has "
+                             "to be present before the run.")
     args = parser.parse_args()
 
     global TSUMEGO_DIR, ATTEMPTS_DIRECTORY
-    TSUMEGO_DIR = os.path.join(PROJECT_ROOT, "tsumegos", str(args.size))
+    TSUMEGO_DIR = args.corpus_dir or os.path.join(PROJECT_ROOT, "tsumegos", str(args.size))
+    if not os.path.isabs(TSUMEGO_DIR):
+        TSUMEGO_DIR = os.path.join(PROJECT_ROOT, TSUMEGO_DIR)
+    if not os.path.isdir(TSUMEGO_DIR):
+        sys.exit(f"no such corpus directory: {TSUMEGO_DIR}")
     ATTEMPTS_DIRECTORY = os.path.join(PROJECT_ROOT, "attempts", str(args.size))
+    print(f"benchmarking {TSUMEGO_DIR} -> {ATTEMPTS_DIRECTORY}", flush=True)
 
     os.makedirs(ATTEMPTS_DIRECTORY, exist_ok=True)
 
