@@ -41,16 +41,31 @@ def fingerprint_hex(enc) -> str:
 
 
 def fit_encoder(rows: np.ndarray, m: int, seed: int = 0) -> dict:
-    """Fit the encoder on (n_rows, raw_dim) float rows. Returns the encoder
-    dict plus the fit's cumulative explained-variance at m under "evr"."""
+    """Fit the encoder on (n_rows, raw_dim) rows (any float dtype; fp16 input
+    stays fp16 — one fp32 working buffer is the only full-size allocation, so
+    peak memory is rows + that buffer, not the several transient copies the
+    naive astype/standardize/PCA chain makes). Returns the encoder dict plus
+    the fit's cumulative explained-variance at m under "evr"."""
     from sklearn.decomposition import PCA
 
-    X = rows.astype(np.float32, copy=False)
-    m1 = X.mean(axis=0)
-    s1 = X.std(axis=0)
+    n, d = rows.shape
+    chunk = 4096
+    total = np.zeros(d, dtype=np.float64)
+    total_sq = np.zeros(d, dtype=np.float64)
+    for i in range(0, n, chunk):
+        c = rows[i:i + chunk].astype(np.float32)
+        total += c.sum(axis=0, dtype=np.float64)
+        total_sq += np.square(c, out=c).sum(axis=0, dtype=np.float64)
+    m1 = (total / n).astype(np.float32)
+    s1 = np.sqrt(np.maximum(total_sq / n - (total / n) ** 2, 0.0)).astype(np.float32)
     s1[s1 < 1e-6] = 1e-6
-    Z = (X - m1) / s1
-    pca = PCA(n_components=m, random_state=seed, svd_solver="randomized").fit(Z)
+
+    Z = np.empty((n, d), dtype=np.float32)
+    for i in range(0, n, chunk):
+        Z[i:i + chunk] = (rows[i:i + chunk].astype(np.float32) - m1) / s1
+    pca = PCA(n_components=m, random_state=seed, svd_solver="randomized",
+              copy=False).fit(Z)
+    del Z
     return {
         "m1": m1.astype(np.float32),
         "s1": s1.astype(np.float32),
@@ -72,7 +87,9 @@ def apply_encoder(enc, X_raw: np.ndarray) -> np.ndarray:
 
 
 def save_encoder(enc, path: str = ENCODER_PATH):
-    tmp = path + ".tmp"
+    # np.savez appends ".npz" to any filename that lacks it, so the temp name
+    # must already end in .npz or the atomic rename finds nothing.
+    tmp = path + ".tmp.npz"
     np.savez(tmp, fingerprint=np.uint32(fingerprint(enc)),
              **{k: enc[k] for k in _ARRAYS})
     os.replace(tmp, path)

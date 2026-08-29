@@ -103,7 +103,10 @@ def read_rows(act_dirs, manifest):
     for size, tid, xy in manifest:
         by_file.setdefault((size, tid), []).append(xy)
 
-    rows, unresolved = [], 0
+    # Fill a single preallocated fp16 matrix — a list of row arrays doubles the
+    # footprint at the worst moment, exactly when the machine can least afford it.
+    X = None
+    n_rows = unresolved = 0
     t0 = time.time()
     for n_done, ((size, tid), wants) in enumerate(by_file.items()):
         path = os.path.join(act_dirs[size], f"{tid}.npz")
@@ -113,15 +116,19 @@ def read_rows(act_dirs, manifest):
                 raise SystemExit(
                     f"{path}: candidates width {cand.shape[1]} <= {ACT_ENCODER_DIM} — "
                     f"this is an ENCODED store; the encoder fits on raw activations only")
+            if X is None:
+                X = np.empty((len(manifest), cand.shape[1]), dtype=np.float16)
             for xy in wants:
                 if xy is None:
-                    rows.append(cand[ci])
+                    X[n_rows] = cand[ci]
+                    n_rows += 1
                 else:
                     hit = np.where((xys[:, 0] == xy[0]) & (xys[:, 1] == xy[1]))[0]
                     if len(hit) == 0:
                         unresolved += 1
                     else:
-                        rows.append(cand[int(hit[0])])
+                        X[n_rows] = cand[int(hit[0])]
+                        n_rows += 1
         if (n_done + 1) % 5000 == 0:
             rate = (n_done + 1) / (time.time() - t0)
             print(f"  read {n_done + 1}/{len(by_file)} files ({rate:.0f}/s, "
@@ -134,7 +141,7 @@ def read_rows(act_dirs, manifest):
     if unresolved:
         print(f"skipped {unresolved} picked coordinates with no legal cell "
               f"(reports predating corpus surgery)")
-    return np.array(rows, dtype=np.float16)
+    return X[:n_rows]
 
 
 def main():
@@ -154,7 +161,7 @@ def main():
     X = read_rows(act_dirs, manifest)
     print(f"fit matrix: {X.shape[0]} x {X.shape[1]}; fitting M={ACT_ENCODER_DIM}...",
           flush=True)
-    enc = fit_encoder(X.astype(np.float32), ACT_ENCODER_DIM, seed=SEED)
+    enc = fit_encoder(X, ACT_ENCODER_DIM, seed=SEED)
     save_encoder(enc, args.out)
     print(f"wrote {args.out}")
     print(f"  fingerprint: {fingerprint_hex(enc)}")
