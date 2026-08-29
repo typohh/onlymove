@@ -78,15 +78,16 @@ from utils.rating.motif_rules import (  # noqa: E402,F401
     LABEL_SET, LD_FOCUS, LD_OTHER, LD_MIN_STONES, LD_TRADE_RATIO,
     COUNT_SCORE_MAX, COUNT_WR_MIN, KO_DEPTH, OPENING_MAX_PREFIX,
     SHAPE_WR_GAP, TERR_BASE, TERR_PER_STONE, OWNERSHIP_CSV, SIGNAL_CACHE,
-    _subtree_has_te, _mover_eval, _line_moves,
+    _subtree_is_resolved, _mover_eval, _line_moves,
     rule_life_and_death, rule_semeai, rule_territory, rule_shape, rule_counting,
     rule_ko, rule_opening)
 
 def _sgf_facts(args):
     """Everything the SGF-side rules need, from ONE read of the file.
 
-    Two parsers on purpose: sgfmill for the variation TREE (the TE marks and the
-    evaluation comments live on nodes), and board_render.parse_sgf for the setup,
+    Two parsers on purpose: sgfmill for the variation TREE (the variation
+    ORDERING and the evaluation comments are what the rules read off nodes), and
+    board_render.parse_sgf for the setup,
     because it yields SGF coordinates in the form `simulate` consumes."""
     size, tid = args
     path = os.path.join(PROJECT_ROOT, "tsumegos", str(size), f"{tid}.sgf")

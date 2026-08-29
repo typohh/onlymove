@@ -67,7 +67,7 @@ from utils.katago.board_render import parse_sgf  # noqa: E402
 from utils.katago.sgf_parsing import parse_tsumego_sgf  # noqa: E402
 from utils.rating.model_constants import SIZES  # noqa: E402
 from utils.rating.motif_rules import (  # noqa: E402
-    LABEL_SET, OWNERSHIP_CSV, _mover_eval, _subtree_has_te,
+    LABEL_SET, OWNERSHIP_CSV, _mover_eval, _subtree_is_resolved,
     answer_opponent_distance, best_refuted_node, reply_distance,
     rule_counting, rule_ko, rule_life_and_death, rule_opening, rule_semeai,
     rule_sente, rule_shape, rule_tenuki, rule_territory)
@@ -132,7 +132,7 @@ def label_one(args):
     # `shape` ranks only RESOLVED alternatives: an abandoned line is not a rival,
     # it is a line nobody played out.
     resolved = [e for e in (_mover_eval(n) for n in variation_nodes
-                            if _subtree_has_te(n)) if e is not None]
+                            if _subtree_is_resolved(n)) if e is not None]
     hit = {
         "life and death": rule_life_and_death(own),
         # The complement of `life and death` over the same two ownership parts —

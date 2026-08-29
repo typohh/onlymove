@@ -202,22 +202,18 @@ if _unknown:
 
 # ---------------------------------------------------------------- helpers
 
-def _subtree_has_te(node):
-    """Was this root variation RESOLVED — i.e. does anything BELOW it carry TE.
+def _subtree_is_resolved(node):
+    """Was this root variation played out to a CONCLUSION.
 
-    The node's own mark is deliberately not counted. At the decision node a TE
-    mark means "this is the move to find", not "this line was played out to a
-    conclusion"; only the answer is marked there, and marking a refuted move
-    would read as naming it the solution. So a root variation's own TE says
-    nothing about whether its continuation was resolved, and the question here is
-    only ever about the continuation."""
-    stack = list(node)
-    while stack:
-        n = stack.pop()
-        if n.has_property("TE"):
-            return True
-        stack.extend(list(n))
-    return False
+    `subtree_reaches_conclusion` follows the writer's own first-child chain and
+    asks whether it ends in two consecutive passes. That is exact rather than
+    heuristic: the writer creates the second pass only where its recursion
+    reached the terminal, so the tree carries the fact and nothing in the file is
+    annotated. Don't weaken it to "a pass anywhere in the subtree" — that
+    over-accepts on refuted first moves, which is how a solver ends up offered a
+    line that loses."""
+    from utils.katago.add_variations import subtree_reaches_conclusion
+    return subtree_reaches_conclusion(node)
 
 
 def _mover_eval(node):
@@ -240,12 +236,13 @@ def _line_moves(node, depth):
     """The first `depth` plies at and under `node`, as (COLOR, sgf_coord) pairs in
     board_render's setup format.
 
-    Follows the TE-MARKED child at each step, falling back to the first child only
-    when no child carries a mark. TE is what says a branch was driven to a double
-    pass, so it names the line the generator actually read; the first child is
-    merely the first one written and is not guaranteed to be that line. Where a
-    node has several marked children the first marked one is taken — they are
-    alternatives the generator resolved, and one line has to be picked."""
+    Follows the FIRST child at each step, which is the line the generator
+    actually read: the writer appends children in `moveInfos` order and always
+    recurses into the first one, so the first child IS the continuation it
+    followed. This is the same walk `subtree_reaches_conclusion` makes, and the
+    two must stay on the same child for a line judged resolved to be the line
+    measured here. Don't switch to the highest-visit child — KataGo ranks
+    `moveInfos` by LCB, not raw visits, so that walk drifts off the line."""
     out = []
     cur = node
     while cur is not None and len(out) < depth:
@@ -255,8 +252,7 @@ def _line_moves(node, depth):
         kids = list(cur)
         if not kids:
             break
-        marked = [k for k in kids if k.has_property("TE")]
-        cur = marked[0] if marked else kids[0]
+        cur = kids[0]
     return out
 
 
@@ -388,7 +384,7 @@ def rule_counting(evals):
 def rule_ko(base, variation_nodes, size):
     """A ko shape stands within KO_DEPTH plies of a line the generator resolved.
 
-    Checked at the ROOT first, then along each TE-marked root variation — the
+    Checked at the ROOT first, then along each RESOLVED root variation — the
     root case is the position that already sits in a ko, the line case is the
     position that becomes one once the fight starts. Only resolved branches are
     walked, for the same reason the ownership baseline only uses them: an
@@ -404,7 +400,7 @@ def rule_ko(base, variation_nodes, size):
     if KO_DEPTH <= 0:
         return False
     for node in variation_nodes:
-        if not _subtree_has_te(node):
+        if not _subtree_is_resolved(node):
             continue
         moves = _line_moves(node, KO_DEPTH)
         for i in range(1, len(moves) + 1):
@@ -451,9 +447,8 @@ def reply_distance(node):
     try without either needing a notion of its own. Returns None when the line
     has no reply to measure.
 
-    The reply is taken along the TE-marked line (see _line_moves): TE is what
-    says the generator drove a branch to a conclusion, so it names the line that
-    was actually read, where the first child is merely the first one written."""
+    The reply is taken along the line the generator read (see _line_moves),
+    which is the first-child chain."""
     if node is None:
         return None
     colour, raw = node.get_raw_move()
@@ -483,7 +478,7 @@ def best_refuted_node(variation_nodes, correct):
             continue
         if raw.decode("utf-8") == amove:
             continue                      # the answer, not a refuted move
-        if not _subtree_has_te(n):
+        if not _subtree_is_resolved(n):
             continue
         ev = _mover_eval(n)
         if ev is None:

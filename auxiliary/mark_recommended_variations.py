@@ -1,13 +1,24 @@
-"""Mark the recommended continuation in each tsumego SGF, as `TE[1]`.
+"""RETIRED -- the `TE[1]` marker this wrote is gone. Only `--unmark` still runs.
 
-WHY
----
-The client currently DEDUCES which stones to offer in review mode, and its test
-for "this line was played out" is `subtreeReachesPass` -- a single pass anywhere
-in the subtree. That is not the same as a line that finished, so the client can
-offer a continuation that resolves to the solver losing. Marking the branches
-here removes the deduction: the client reads the mark and falls back to its
-existing logic only where no mark exists.
+WHY IT IS RETIRED
+-----------------
+The mark existed to stop the client DEDUCING which continuations were played
+out, back when its test was a single pass anywhere in the subtree -- a test that
+could offer a line resolving to the solver losing. Both the deduction and the
+mark are now replaced by an exact structural test: walk first children and ask
+whether the chain ends in TWO CONSECUTIVE PASSES
+(utils/katago/add_variations.subtree_reaches_conclusion, mirrored by
+subtreeReachesConclusion in pwa/js/analysis.js). The writer creates the second
+pass only where its recursion reached the terminal, so the mark recorded nothing
+the file did not already say, and the corpus carries no `TE` any more.
+
+The marking path below therefore REFUSES to run: re-introducing marks would put
+a second, divergent source of truth beside the structure. `--unmark --apply` is
+kept, to strip marks from any file still holding them (tsumegos/broken/).
+
+The historical rationale for what got marked is kept below, because
+auxiliary/apply_solution_line_surgery.py still describes its inputs in these
+terms.
 
 WHAT GETS MARKED
 ----------------
@@ -284,10 +295,17 @@ def main():
     ap.add_argument('--apply', action='store_true',
                     help='write the files (default is a dry run)')
     ap.add_argument('--unmark', action='store_true',
-                    help='remove every TE property instead of adding any')
+                    help='remove every TE property (the only mode still live)')
     ap.add_argument('--dirs', nargs='+', default=['tsumegos', 'tsumegos/broken'])
     ap.add_argument('--workers', type=int, default=os.cpu_count())
     args = ap.parse_args()
+
+    if not args.unmark:
+        raise SystemExit(
+            "RETIRED: the TE[1] marker is no longer part of the corpus, and "
+            "writing it back would stand a second source of truth beside the "
+            "structural test that replaced it (subtree_reaches_conclusion, "
+            "utils/katago/add_variations.py). Only --unmark --apply still runs.")
 
     paths = gather(args.dirs)
     print(f"{len(paths)} SGFs from {', '.join(args.dirs)}", flush=True)
