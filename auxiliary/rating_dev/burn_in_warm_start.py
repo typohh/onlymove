@@ -74,7 +74,7 @@ def burn_in_directions(m, tfeat, tp, tprof, tu, ty, tr, k, n_users,
             "the axis-free baseline")
         for i in range(0, len(tr), batch):
             bi = tr[i:i + batch]
-            pred, _g = m.forward(tprof[bi], tu[bi], tfeat[tp[bi]])
+            pred, _g, _rsf = m.forward(tprof[bi], tu[bi], tfeat[tp[bi]])
             resid = (ty[bi] - pred).double()
             x = xf[tp[bi]].double()
             S.index_add_(0, tu[bi], resid[:, None] * x)
