@@ -952,8 +952,8 @@ def load_joint_ownership(sizes, tids_by_size):
     against the best REFUTATION THAT WAS READ TO SCORING — pooled and z-scored across
     boards like the other blocks. Returns {(size, tid): vec}, n_cols.
 
-    A row whose `alt_move` is blank (no TE-marked refutation, so the swing is
-    undefined) is NOT emitted, and is therefore missing rather than zero: a zero swing
+    A row whose `alt_move` is blank (no refutation was read to a conclusion, so
+    the swing is undefined) is NOT emitted, and is therefore missing rather than zero: a zero swing
     positively asserts the problem has no life-and-death content, which is a different
     claim from having failed to measure it. joint_feature_tail turns that absence into
     a hard error for any problem still in the rated set.

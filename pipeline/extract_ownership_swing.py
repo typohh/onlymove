@@ -130,8 +130,8 @@ came from. A partial trailing line from a kill mid-write is truncated on restart
 `n_te_alts` = 0 marks a problem with no resolved refutation of ANY kind — every
 refuted first move, the pass included, was abandoned at the generator's playout
 cutoff. That is a real gap rather than a failure: the swing columns are left
-empty instead of being filled against an unfinished line, and such a problem is
-not unmarked (its answer carries TE like every other). Coverage is complete on
+empty instead of being filled against an unfinished line, and the problem's own
+ANSWER is unaffected — it is played out to a conclusion like every other. Coverage is complete on
 9x9 (auxiliary/add_losing_lines.py gave every problem a played-out losing line)
 and a floor on 13x13, where the generator pursues refutations less often, so the
 count there tracks whatever it happened to resolve.

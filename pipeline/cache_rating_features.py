@@ -2,7 +2,8 @@
 the rating model.
 
 Every tsumego SGF embeds, on each candidate first-move node, a KataGo evaluation comment
-"<winrate>%/<score>" (Black-perspective win rate, Black-minus-White score lead) — see the
+"<winrate>%/<score>/<visits>" (Black-perspective win rate, Black-minus-White score lead, and the
+search depth behind them; only the first two are read here) — see the
 "PWA SGF format carries embedded analysis" note in CLAUDE.md. The generator evaluates (almost)
 every legal first move, so a problem carries dozens of these. This script reads them for every
 problem, orients each to the SIDE TO MOVE (so "win prob" means "the solver's win prob" on either
@@ -76,7 +77,9 @@ N_FEATS = 2 * N_MOVES                 # = 20
 WP_CLIP = 1e-3                        # win-prob clip before the logit (KataGo emits exact 0/100%)
 SCORE_CLIP = 50.0                     # tame the rare blow-out leads before pooled z-scoring
 CHUNK = 500                           # SGFs per worker task (amortizes pickling over the parse)
-# "100.0%/34.1" / "44.6%/-0.3" — Black-perspective win rate %, then Black−White score lead.
+# "100.0%/34.1/1000" / "44.6%/-0.3/30" — Black-perspective win rate %, then Black−White score
+# lead, then the visits behind the estimate. Unanchored and reading the first two fields only:
+# the trailing "/<visits>" falls outside the match, and a pre-field comment still reads.
 CMT_RE = re.compile(r"(\d+\.?\d*)%/([-]?\d+\.?\d*)")
 
 # Continuation layout: the principal line AFTER the answer, CONT_PLIES deep, each ply's
@@ -370,7 +373,7 @@ def _process_chunk(task):
         if f is None or c is None:
             raise RuntimeError(
                 f"size {size}: {tid}.sgf has no usable move evaluations "
-                f"(missing '<winrate>%/<score>' comments)")
+                f"(missing '<winrate>%/<score>/<visits>' comments)")
         out[i] = f
         cont[i] = c
         axy[i] = a

@@ -1,6 +1,6 @@
 # analysis_server
 
-KataGo behind a small HTTP server, serving `https://api.onlymove.net`. The PWA calls it only as a **fallback**: a tsumego SGF normally carries its own evaluation in each branch comment (`"<winrate>%/<score>"`), and `pwa/js/analysis.js` reads that directly. The server is asked only when a position has no embedded number — a line the user explored themselves.
+KataGo behind a small HTTP server, serving `https://api.onlymove.net`. The PWA calls it only as a **fallback**: a tsumego SGF normally carries its own evaluation in each branch comment (`"<winrate>%/<score>/<visits>"`), and `pwa/js/analysis.js` reads that directly. The server is asked only when a position has no embedded number — a line the user explored themselves.
 
 Two programs, and only the first is required:
 

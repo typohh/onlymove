@@ -3,8 +3,7 @@
 WHAT IS MISSING
 ---------------
 A problem's decision node lists the answer plus every refuted first move. The
-answer is driven to a DOUBLE PASS at generation time and marked `TE[1]`; the
-refutations are not. On 9x9 the generator pursued a refutation to a conclusion
+answer is driven to a DOUBLE PASS at generation time; the refutations are not. On 9x9 the generator pursued a refutation to a conclusion
 in only 57% of problems, so in the rest a solver who plays a losing move is
 shown a refutation that stops mid-line, and the client falls back to querying
 the analysis server for every ply after it.
@@ -25,10 +24,10 @@ Only the PRINCIPAL line is added (see BRANCH_SHARE): one conclusion is what the
 problem lacks, and a branching subtree costs both engine time and shard bytes on
 a branch the solver reaches only by being wrong.
 
-The added nodes are marked `TE[1]` exactly as generation marks the answer's, so
-the client reads the refutation off the mark instead of deducing it. The losing
-first move ITSELF is never marked: at the decision node a mark reads as "this is
-the move to find", which only the answer may claim.
+The added line terminates in a DOUBLE PASS exactly as generation ends the
+answer's, which is what `subtree_reaches_conclusion` (and its client twin
+`subtreeReachesConclusion`) reads to tell a played-out refutation from an
+abandoned stub. Nothing is annotated: the structure carries the fact.
 
 WHAT IT LEAVES ALONE
 --------------------
@@ -38,9 +37,10 @@ lines up with the SGF root variations. Nothing upstream of the decision node is
 touched, so the problem's identity hash is unchanged.
 
 The file is rewritten through sgfmill, which orders each node's properties its
-own way (`TE[1]B[cc]C[..]` comes back as `B[cc]C[..]TE[1]`). SGF property order
-is not significant and every reader here is order-blind — verified for WGo, the
-client's parser, as well as sgfmill and the regex reader in audit_solution_lines.
+own way. SGF property order is not significant and every reader here is
+order-blind — verified for WGo, the client's parser, as well as sgfmill and the
+regex reader in audit_solution_lines. What IS significant is the order of the
+decision node's CHILDREN, which this script leaves untouched.
 
 USAGE
 -----

@@ -24,7 +24,7 @@ package_for_pwa still use — is reported, as is a census of the stricter
 "exactly one first move with winrate > 50% AND score > 0" rule that
 utils.katago.add_variations.first_move_is_well_formed gates new problems on.
 
-PERSPECTIVE.  Every "{winrate}%/{score}" comment is BLACK-perspective
+PERSPECTIVE.  Every "{winrate}%/{score}/{visits}" comment is BLACK-perspective
 (bots/analysis.cfg sets reportAnalysisWinratesAs = BLACK; pwa/js/sgf.js reads
 them the same way), so the values do NOT alternate with the side to move.  The
 report prints a self-check of exactly that — the mean gap between consecutive

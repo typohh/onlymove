@@ -1,9 +1,14 @@
 """Apply the solution-line audit to the corpus: remove the broken, restore the sound.
 
-The sets come from the TE marks written by auxiliary/mark_recommended_variations.py.
+RETIRED INPUT FORMAT. The sets came from the TE marks written by
+auxiliary/mark_recommended_variations.py, and those marks no longer exist in the
+corpus: resolution is now read structurally, by walking first children to a
+double pass (utils/katago/add_variations.subtree_reaches_conclusion). Rebuild the
+sets from that predicate before running this again.
+
 A problem is BROKEN when either:
 
-  a) its answer carries no root mark -- the answer does not resolve to a win
+  a) its answer does not resolve to a win
   b) SOME incorrect first move resolves, and every outcome it resolves to is a
      WIN for black -- that move is not actually refuted
 

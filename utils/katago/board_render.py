@@ -82,7 +82,7 @@ def _select_correct_move(variations_region):
     findBestMoveFromChildren (pwa/js/sgf.js), NOT trusting children[0].
 
     Each top-level variation is a candidate first move whose first node carries a
-    Black-perspective "<winrate>%/<score>" comment. The correct move is the
+    Black-perspective "<winrate>%/<score>/<visits>" comment. The correct move is the
     highest winrate for Black to play (lowest for White), score breaking an exact
     tie. A handful of problems have a mis-ordered variation list where the first
     branch is NOT the solution — which is exactly why this can't be children[0].

@@ -32,15 +32,19 @@ def construct_initial_sgf(moves, solution, board_size):
     return game, node, answer
 
 
-# Parses a variation comment written as "{winrate}%/{score}" (e.g. "60.6%/-0.5")
-# back into its two numbers. Both are stored from BLACK's perspective
+# Parses the first two fields of a variation comment written as
+# "{winrate}%/{score}/{visits}" (e.g. "60.6%/-0.5/1000") back into their numbers;
+# the third field is read separately by parse_eval_visits. Both are stored from
+# BLACK's perspective
 # (bots/analysis.cfg sets reportAnalysisWinratesAs = BLACK), matching the format
 # set on every var_node's "C" property below.
 _EVAL_COMMENT_RE = re.compile(r"(-?[\d.]+)%/(-?[\d.]+)")
 
 
 def parse_eval_comment(comment):
-    """(winrate, score) from a "{winrate}%/{score}" comment, or None if unparseable."""
+    """(winrate, score) from a "{winrate}%/{score}/{visits}" comment, or None if
+    unparseable. UNANCHORED, so a comment carrying text before the fields still
+    reads, and the trailing visits field simply falls outside the match."""
     if not comment:
         return None
     m = _EVAL_COMMENT_RE.search(comment)
@@ -397,20 +401,25 @@ def generate_variations_directly_to_sgf(
     Returns True when some line at or under this node was read all the way to a
     DOUBLE PASS.
 
-    NOTHING IS MARKED IN THE FILE, because the visit counts already say it. A
+    NOTHING IS MARKED IN THE FILE, because the STRUCTURE already says it. A
     branch is followed to a conclusion exactly when it is the primary line, and
-    the primary line is `moveInfos[0]` — the HIGHEST-VISIT move, both here and in
-    MCTS generally. So "which branch was played out" and "which child has the
-    most visits" are the same question asked twice, and a reader answers it off
-    the comments it already has.
+    the primary line is `moveInfos[0]` — the FIRST child appended here, and the
+    one this function recurses into. So "which branch was played out" is answered
+    by walking first children to a double pass, which is exactly what
+    `subtree_reaches_conclusion` above does.
 
-    The one case that could separate them does not reach a file: a line the
-    engine will not play out raises VariationDepthExceeded, and every caller
-    discards the problem rather than writing a truncated one. This is NOT the
-    retired `TE[1]` marker's old fallback — the client used to treat "a pass
-    appears somewhere in the subtree" as a conclusion, which is false for every
-    branch abandoned at the visit floor, and that deduction caused two corpus
-    purges. Highest-visits-child is exact, not a heuristic standing in for it.
+    Do NOT restate that as "the highest-visit child". KataGo ranks `moveInfos` by
+    LCB rather than raw visits, so the followed move is frequently not the
+    highest-visit one, and a max-visit walk drifts off the line — measured, in
+    `subtree_reaches_conclusion`'s own docstring.
+
+    The one case that could separate the primary line from a conclusion does not
+    reach a file: a line the engine will not play out raises
+    VariationDepthExceeded, and every caller discards the problem rather than
+    writing a truncated one. Note this is a statement about the PRIMARY LINE, not
+    a licence to treat "a pass appears somewhere in the subtree" as a conclusion:
+    that is false for every branch abandoned at the visit floor, and it caused
+    two corpus purges.
     """
     if len(current_moves) >= MAX_VARIATION_DEPTH:
         raise VariationDepthExceeded(current_moves)
