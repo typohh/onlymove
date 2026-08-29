@@ -24,6 +24,7 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 
+from utils.rating.model_constants import ACT_ENCODER_DIM
 from utils.rating.ratings_io import FLOOR_CSV, RATINGS_CSV, SLOPE_CSV
 
 from utils.constants import RETIRED_IDS_PATH, read_retired_ids
@@ -34,9 +35,11 @@ SQLITE_PATH = DB_SQLITE
 
 # Raw KataGo trunk activation layout (18 residual blocks × 384 channels), captured at
 # the correct move by pipeline.extract_activations. Feature index = layer*384 + channel.
-N_LAYERS = 18
-CHANNELS_PER_LAYER = 384
-N_FEATS = N_LAYERS * CHANNELS_PER_LAYER  # 6912
+# The activation store holds the frozen encoder's output, not raw trunk
+# channels (18 blocks x 384 = 6912 exist only transiently inside extraction —
+# see utils.rating.activation_encoder). Every buffer and shape check below
+# follows this width, so a stale raw-width cache fails validation and rebuilds.
+N_FEATS = ACT_ENCODER_DIM
 
 # Number of contrastive blocks: per-channel [mean, std, max, zscore] aggregates over the
 # OTHER legal moves (N_CONTRAST_BLOCKS × N_FEATS), id-aligned with the correct-vec cache.
@@ -487,7 +490,7 @@ def load_joint_activations(sizes, tids_by_size, pca_dim, seed, cache=True):
     PCA, z-scores. Returns {(size, tid): vec}, k. (Distinct from axes/, which
     residualises rating OUT — useless as a difficulty feature.)
 
-    The randomized-PCA fit over the stacked ~N×6912 activation matrix is the dominant
+    The randomized-PCA fit over the stacked ~N×N_FEATS activation matrix is the dominant
     startup cost and is fully determined by its inputs, so the reduced output is memoized to
     joint_pca_<hash>.npz (atomic write, fingerprinted on the raw-cache files). cache=False
     forces a recompute (e.g. to rebuild a corrupt cache)."""
@@ -505,7 +508,7 @@ def load_joint_activations(sizes, tids_by_size, pca_dim, seed, cache=True):
 
 
 def load_joint_activation_basis(sizes, tids_by_size, pca_dim, seed):
-    """The full joint-PCA TRANSFORM (not just the projected values): raw 6912-dim
+    """The full joint-PCA TRANSFORM (not just the projected values): stored N_FEATS-dim
     activation vector -> standardize (m1, s1) -> PCA components C -> standardize
     (m2, s2). Needed to project arbitrary (non-correct) CELLS into the same
     activation space — pipeline.write_mirt_per_cell. Reads the basis from
