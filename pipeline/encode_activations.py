@@ -31,6 +31,12 @@ import os
 import sys
 from multiprocessing import Pool
 
+# One BLAS thread per worker, set BEFORE numpy loads OpenBLAS: the per-file
+# GEMMs are small, and N workers each spawning a full team of spinning BLAS
+# threads oversubscribes every core into a measured order-of-magnitude stall.
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+
 import numpy as np
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -65,7 +71,9 @@ def _encode_one(job):
         enc_cand = apply_encoder(_ENC, np.asarray(z["candidates"]))
         xys = np.asarray(z["xys"])
         ci = np.int32(z["correct_idx"])
-    tmp = dst + ".tmp"
+    # The temp name must end in .npz — np.savez appends it to a name that
+    # lacks it, and the atomic rename then targets a file never created.
+    tmp = dst + ".tmp.npz"
     np.savez_compressed(tmp, candidates=enc_cand, xys=xys, correct_idx=ci,
                         encoder_fp=np.uint32(_FP))
     os.replace(tmp, dst)
