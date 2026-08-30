@@ -4,7 +4,7 @@
 // .embeddings.bin sidecar. Used on wrong attempts so the answer history
 // records what the user *should* have played (the correct-move embedding in
 // metadata.json), what they actually picked, and the availability null — the
-// direction a typical error on THIS problem would lean, counted from the
+// direction a typical error on THIS problem would lean, weighed over the
 // alternatives the board actually offered (computeAltStats below).
 //
 // Wire protocol:
@@ -29,6 +29,12 @@
 import { state, embeddingsIndexCache } from './state.js';
 import { DATA_VERSION, EMBEDDING_META_INLINE } from './data-version.js';
 import { quantizeEmbedding } from './math-utils.js';
+import { variationVisitWeights } from './sgf.js';
+
+// One availability-null quantity is a little-endian uint32 (ALTSTATS_DTYPE in
+// pipeline/package_for_pwa.py). A mass is (visits per variation) x (variations
+// on the board), so it is not bounded by the cell count the way a count was.
+const ALTSTATS_BYTES_PER_QUANTITY = 4;
 
 // Convert one fp16 (uint16 representation) to a JS number, per IEEE 754 half-
 // precision. JS doesn't ship a native Float16Array yet (Stage 3 proposal), and
@@ -138,71 +144,110 @@ async function fetchProblemCellsFromIndexEntry({
     }
 }
 
-// The uniform-over-available error null for one problem, from its bin block:
-// per axis, how many of the moves a click could pick load strictly above /
+// The availability null for one problem, from its bin block: per axis, the
+// summed VISITS of the moves a click could pick that load strictly above /
 // below the CORRECT move's loading (`correctVec`). Their ratio is the null
-// probability that an error leans TOWARD the motif, which is what the
-// tendency test compares the observed direction against.
+// probability that an error leans TOWARD the motif, which is what the tendency
+// test compares the observed direction against.
 //
-// Ties carry no direction and are outside both counts, mirroring the
-// observed-side tie drop — which is also why the correct row needs no
-// special exclusion: it ties with itself on every axis and falls out of the
-// strict comparisons. The pass placeholder (all-zeros row) is skipped — a
-// click cannot select the pass. Everything is compared in quantizeEmbedding's
-// own resolution, so a stored pick compared against a stored correct vector
-// resolves ties exactly as the counts here did.
-export function computeAltStats(rows, correctVec) {
+// The quantities are MASSES, not counts. An alternative is weighed by the
+// visits its own evaluation rests on (`weights[i]`, parallel to `rows`) rather
+// than counted, because the moves a click could pick are not equally pickable
+// and the search spent its depth where the position invited it.
+//
+// EXACT-AGREEMENT INVARIANT: for one problem this must return what
+// `alt_stat_masses` (pipeline/package_for_pwa.py) writes into
+// lookup.altstats.bin for it — not nearly, exactly. Both sides sum the same
+// integer visit counts over the same quantized comparisons, so no rounding
+// stands between them and the two producers can only agree or differ. That is
+// what lets a live attempt's own quartet sit in the same window as one filled
+// from the published sidecar. Which means the weights are not optional: a
+// caller with no weights gets null rather than a count-shaped quartet, since a
+// count and a mass are the same shape and mean different things.
+//
+// Ties carry no direction and are outside both masses, mirroring the
+// observed-side tie drop — a tie drops WITH its weight rather than being split
+// between the sides — which is also why the correct row needs no special
+// exclusion: it ties with itself on every axis and falls out of the strict
+// comparisons. The pass placeholder (all-zeros row) is skipped — a click cannot
+// select the pass. Everything is compared in quantizeEmbedding's own
+// resolution, so a stored pick compared against a stored correct vector
+// resolves ties exactly as the masses here did.
+export function computeAltStats(rows, correctVec, weights) {
     if (!Array.isArray(rows) || rows.length === 0) return null;
     if (!Array.isArray(correctVec) || correctVec.length === 0) return null;
+    // A length disagreement means the weights belong to different variations
+    // than the block rows — every weight would then be on the wrong cell while
+    // both sides stayed individually well-formed, which is the one failure the
+    // packaging producer also refuses rather than ships.
+    if (!Array.isArray(weights) || weights.length !== rows.length) return null;
+    if (!weights.every((w) => Number.isInteger(w) && w >= 0)) return null;
     const K = correctVec.length;
     const correctQ = quantizeEmbedding(correctVec);
     const altAbove = new Array(K).fill(0);
     const altBelow = new Array(K).fill(0);
-    for (const row of rows) {
+    for (let r = 0; r < rows.length; r++) {
+        const row = rows[r];
         if (!Array.isArray(row) || row.length !== K) continue;
         const q = quantizeEmbedding(row);
         if (q.every((v) => v === 0)) continue;   // pass placeholder
+        const w = weights[r];
         for (let k = 0; k < K; k++) {
-            if (q[k] > correctQ[k]) altAbove[k]++;
-            else if (q[k] < correctQ[k]) altBelow[k]++;
+            if (q[k] > correctQ[k]) altAbove[k] += w;
+            else if (q[k] < correctQ[k]) altBelow[k] += w;
         }
     }
     return { altAbove, altBelow };
 }
 
 function getMeta() {
-    let meta = state.embeddingMeta;
-    if (!meta || typeof meta.K !== 'number' || typeof meta.bytes_per_cell !== 'number') {
-        // state.embeddingMeta is populated by backfillMissingEmbeddings, which
-        // runs AFTER the account-adoption synced fill — fall back to the
-        // build-time inlined meta (data-version.js) so fills that run earlier
-        // in boot aren't silently skipped. Same K/dtype/bytes_per_cell values.
-        const m = EMBEDDING_META_INLINE;
-        meta = (m && typeof m.K === 'number') ? {
-            K: m.K,
-            dtype: typeof m.dtype === 'string' ? m.dtype : 'float16',
-            bytes_per_cell: typeof m.bytes_per_cell === 'number' ? m.bytes_per_cell : m.K * 2,
-        } : null;
-    }
-    if (!meta) return null;
-    if (meta.dtype && meta.dtype !== 'float16') {
-        console.warn(`picked-embedding: unsupported dtype ${meta.dtype}; skipping`);
+    // state.embeddingMeta is populated by backfillMissingEmbeddings, which runs
+    // AFTER the account-adoption synced fill — fall back to the build-time
+    // inlined meta (data-version.js) so fills that run earlier in boot aren't
+    // silently skipped. Same values either way; normalized here so every reader
+    // below gets the same shape whichever source answered.
+    const m = (state.embeddingMeta && typeof state.embeddingMeta.K === 'number')
+        ? state.embeddingMeta : EMBEDDING_META_INLINE;
+    if (!m || typeof m.K !== 'number' || m.K <= 0) return null;
+    const dtype = typeof m.dtype === 'string' ? m.dtype : 'float16';
+    if (dtype !== 'float16') {
+        console.warn(`picked-embedding: unsupported dtype ${dtype}; skipping`);
         return null;
     }
-    return meta;
+    return {
+        K: m.K,
+        dtype,
+        bytes_per_cell: typeof m.bytes_per_cell === 'number' ? m.bytes_per_cell : m.K * 2,
+        // lookup.altstats.bin's row layout: K above-masses then K below-masses.
+        // Read from the manifest rather than hardcoded so a width change is a
+        // packaging fact and not a second constant to keep in step.
+        altstats_bytes_per_row: typeof m.altstats_bytes_per_row === 'number'
+            ? m.altstats_bytes_per_row
+            : 2 * m.K * ALTSTATS_BYTES_PER_QUANTITY,
+        altstats_dtype: typeof m.altstats_dtype === 'string' ? m.altstats_dtype : 'uint32',
+    };
 }
 
 // Live path: called from game-logic on a wrong attempt. Looks up the shard's
 // in-memory embeddings_index (loaded alongside metadata.json by problem-loader),
 // Range-fetches the problem's whole bin block ONCE, and returns both what the
 // motif statistics need from it: the picked cell's vector and the
-// availability-null counts (computeAltStats, referenced to the correct cell's
+// availability-null masses (computeAltStats, referenced to the correct cell's
 // own row). Returns Promise<{ picked, alt } | null>; either half may be null;
 // never throws.
+//
+// This is the one path that COMPUTES the null rather than reading the published
+// one, and it may because the problem is on the board: `variationNodes` is the
+// decision node's children, so the visit weights come off the same SGF comments
+// packaging weighed, and the reference is the block's own row 0 exactly as
+// packaging's is. Without them the null is not computed at all — a caller that
+// cannot name the variations gets `alt: null` and the published masses fill the
+// row later.
 export async function fetchWrongAttemptStats({
     tsumegoId,
     pickedIndex,       // SGF variation index from handleBoardClick (children.indexOf)
     correctIndex,      // same index space, the answer node — the null's reference
+    variationNodes,    // the decision node's children, SGF order — the weights' source
     zipFilename,       // e.g. "00be9212.zip"; sidecar at "00be9212.embeddings.bin"
     boardSize,         // for URL composition: tsumegos/<size>/<zipFilename>
 }) {
@@ -220,92 +265,142 @@ export async function fetchWrongAttemptStats({
         ? rows[pickedIndex] : null;
     const correctVec = (Number.isInteger(correctIndex) && correctIndex >= 0 && correctIndex < rows.length)
         ? rows[correctIndex] : null;
-    const alt = correctVec ? computeAltStats(rows, correctVec) : null;
+    const weights = variationVisitWeights(variationNodes);
+    const alt = (correctVec && weights) ? computeAltStats(rows, correctVec, weights) : null;
     return { picked, alt };
 }
 
-// Correct-move sidecar: tsumegos/lookup.embeddings.bin — row i is the K-dim
-// fp16 correct-cell embedding of lookup.txt line i (both sizes; emitted
-// row-aligned by package_for_pwa.emit_correct_embeddings). Range-fetches one
-// row so backfills never need the shard zip for a correct-move embedding.
+// One ROW out of a lookup-aligned sidecar. Both files served this way —
+// lookup.embeddings.bin (the correct-move vectors) and lookup.altstats.bin (the
+// availability null) — are row i == lookup.txt line i, so a row is a fixed-width
+// slice at rowIndex * bytesPerRow and a backfill never opens a shard zip for
+// either. Their failure modes are identical too, which is why one reader serves
+// both:
 //
-// `expectedRows` (the caller's lookup.txt line count) guards row alignment:
-// the 206's Content-Range total must equal expectedRows * bytes_per_cell.
-// data_version cache-busting already pins lookup.txt and the sidecar to the
-// same packaging run, so a mismatch means a half-updated server mid-session —
-// every row address would be garbage, so the sidecar is poisoned for the rest
-// of the session rather than retried. Returns null for a missing/absent row
-// (an all-zeros row is the packaging placeholder for an id with no embedding).
-let correctSidecarBroken = false;
-let correctSidecarFull = null;   // whole-file ArrayBuffer when the host ignores Range
-let correctSidecarProbe = null;  // first request in flight; later calls wait on it
-export async function fetchCorrectEmbedding(rowIndex, expectedRows) {
-    if (correctSidecarBroken) return null;
-    const meta = getMeta();
-    if (!meta) return null;
-    if (!Number.isInteger(rowIndex) || rowIndex < 0) return null;
-    const bpc = meta.bytes_per_cell;
-    const byteStart = rowIndex * bpc;
+//   - a 206 for some OTHER range (a misbehaving cache/proxy) would make every
+//     decoded row garbage, so it is rejected rather than mis-sliced;
+//   - a host that ignores Range (wrangler dev's asset server; Cloudflare assets
+//     on a cache miss) serves the whole file, which is then kept and every later
+//     row read from memory — and the first request is held as a PROBE so such a
+//     host costs ONE download rather than one per row;
+//   - a byte length that is not `expectedRows * bytesPerRow` means the file and
+//     lookup.txt came from different packaging runs, so every row address is
+//     wrong. data_version cache-busting already pins them to the same run, so
+//     this is a half-updated server mid-session: the file is poisoned for the
+//     rest of it rather than retried.
+//
+// State (poison flag, whole-file copy, in-flight probe) is per file.
+function makeSidecarRowReader(filename) {
+    let broken = false;
+    let whole = null;
+    let probe = null;
 
-    const rowFromWhole = () => {
-        if (!correctSidecarFull || byteStart + bpc > correctSidecarFull.byteLength) return null;
-        return correctSidecarFull.slice(byteStart, byteStart + bpc);
+    const rowFromWhole = (byteStart, bytesPerRow) => {
+        if (!whole || byteStart + bytesPerRow > whole.byteLength) return null;
+        return whole.slice(byteStart, byteStart + bytesPerRow);
     };
 
-    const fetchRow = async () => {
-        const resp = await fetch(`tsumegos/lookup.embeddings.bin?v=${DATA_VERSION}`, {
-            headers: { Range: `bytes=${byteStart}-${byteStart + bpc - 1}` },
+    const fetchRow = async (byteStart, bytesPerRow, expectedRows) => {
+        const resp = await fetch(`tsumegos/${filename}?v=${DATA_VERSION}`, {
+            headers: { Range: `bytes=${byteStart}-${byteStart + bytesPerRow - 1}` },
         });
         if (!resp.ok && resp.status !== 206) return null;
         const cr = resp.status === 206 ? parseContentRange(resp.headers.get('Content-Range')) : null;
         if (resp.status === 206 && (!cr || cr.start !== byteStart)) {
-            // A 206 for some other range (misbehaving cache/proxy) would make
-            // every decoded row garbage — reject rather than mis-slice.
-            console.warn(`picked-embedding: sidecar 206 range mismatch (asked ${byteStart}, got ${cr ? cr.start : 'unparseable'})`);
+            console.warn(`picked-embedding: ${filename} 206 range mismatch (asked ${byteStart}, got ${cr ? cr.start : 'unparseable'})`);
             return null;
         }
         const body = await resp.arrayBuffer();
-        // Row-alignment guard: the sidecar's byte length must equal lookup.txt's
-        // line count x row size, else the two files are from different packaging
-        // runs and every row address is wrong — poison it for the session.
         const total = resp.status === 206 ? (cr ? cr.total : null) : body.byteLength;
-        if (Number.isFinite(expectedRows) && Number.isFinite(total) && total !== expectedRows * bpc) {
-            console.warn('picked-embedding: lookup.embeddings.bin size mismatches lookup.txt — skipping correct-move fills this session');
-            correctSidecarBroken = true;
+        if (Number.isFinite(expectedRows) && Number.isFinite(total)
+                && total !== expectedRows * bytesPerRow) {
+            console.warn(`picked-embedding: ${filename} size mismatches lookup.txt — skipping its fills this session`);
+            broken = true;
             return null;
         }
-        if (resp.status === 200 && body.byteLength > bpc) {
-            // Host ignored Range (wrangler dev's asset server does; Cloudflare
-            // assets on a cache miss) — keep the whole file and serve every
-            // later row from memory.
-            correctSidecarFull = body;
-            return rowFromWhole();
+        if (resp.status === 200 && body.byteLength > bytesPerRow) {
+            whole = body;
+            return rowFromWhole(byteStart, bytesPerRow);
         }
         return body;
     };
 
-    try {
-        let buf;
-        if (correctSidecarFull) {
-            buf = rowFromWhole();
-        } else if (correctSidecarProbe) {
-            // First request probes Range support; waiting on it means a
-            // Range-less host costs ONE full download, not one per row.
-            await correctSidecarProbe;
-            buf = correctSidecarFull ? rowFromWhole()
-                : (correctSidecarBroken ? null : await fetchRow());
-        } else {
-            const p = fetchRow();
-            correctSidecarProbe = p.then(() => {}, () => {});
-            buf = await p;
+    return async function readRow(rowIndex, bytesPerRow, expectedRows) {
+        if (broken) return null;
+        if (!Number.isInteger(rowIndex) || rowIndex < 0) return null;
+        if (!Number.isInteger(bytesPerRow) || bytesPerRow <= 0) return null;
+        const byteStart = rowIndex * bytesPerRow;
+        try {
+            if (whole) return rowFromWhole(byteStart, bytesPerRow);
+            if (probe) {
+                await probe;
+                if (whole) return rowFromWhole(byteStart, bytesPerRow);
+                return broken ? null : await fetchRow(byteStart, bytesPerRow, expectedRows);
+            }
+            const p = fetchRow(byteStart, bytesPerRow, expectedRows);
+            probe = p.then(() => {}, () => {});
+            return await p;
+        } catch (_err) {
+            return null;
         }
-        if (!buf) return null;
-        const vec = decodeFp16Buffer(buf, meta.K);
-        if (!vec || vec.every((v) => v === 0)) return null;
-        return vec;
-    } catch (_err) {
+    };
+}
+
+const readCorrectRow = makeSidecarRowReader('lookup.embeddings.bin');
+const readAltStatsRow = makeSidecarRowReader('lookup.altstats.bin');
+
+// Correct-move sidecar: row i is the K-dim fp16 correct-cell embedding of
+// lookup.txt line i (both sizes; emitted row-aligned by
+// package_for_pwa.emit_correct_embeddings). `expectedRows` is the caller's
+// lookup.txt line count. Returns null for a missing/absent row (an all-zeros row
+// is the packaging placeholder for an id with no embedding).
+export async function fetchCorrectEmbedding(rowIndex, expectedRows) {
+    const meta = getMeta();
+    if (!meta) return null;
+    const buf = await readCorrectRow(rowIndex, meta.bytes_per_cell, expectedRows);
+    if (!buf) return null;
+    const vec = decodeFp16Buffer(buf, meta.K);
+    if (!vec || vec.every((v) => v === 0)) return null;
+    return vec;
+}
+
+// Availability-null sidecar: row i is lookup.txt line i's PUBLISHED masses — K
+// little-endian uint32 above-masses then K below-masses, written by
+// package_for_pwa.emit_alt_stats.
+//
+// This is what every path that does NOT have the problem's SGF in hand reads.
+// The masses are integer sums of the variations' visit counts, referenced to row
+// 0 of the problem's own per-cell block, so a row filled from here and a row the
+// live path computed for itself are the same quartet rather than two nearly-equal
+// ones — and rediscovering them per device would mean reading the whole per-cell
+// block, hence the shard, for a fact that depends on nothing about the player.
+//
+// Returns null for the absent sentinel (an all-zero row, which packaging writes
+// for an id whose shard carries no block and which already fails motif-stats'
+// nAvail guard).
+export async function fetchAltStatMasses(rowIndex, expectedRows) {
+    const meta = getMeta();
+    if (!meta) return null;
+    if (meta.altstats_dtype !== 'uint32') {
+        console.warn(`picked-embedding: unsupported altstats dtype ${meta.altstats_dtype}; skipping`);
         return null;
     }
+    const bytesPerRow = meta.altstats_bytes_per_row;
+    if (bytesPerRow !== 2 * meta.K * ALTSTATS_BYTES_PER_QUANTITY) {
+        console.warn(`picked-embedding: altstats row width ${bytesPerRow} does not match K=${meta.K}; skipping`);
+        return null;
+    }
+    const buf = await readAltStatsRow(rowIndex, bytesPerRow, expectedRows);
+    if (!buf || buf.byteLength < bytesPerRow) return null;
+    const dv = new DataView(buf);
+    const altAbove = new Array(meta.K);
+    const altBelow = new Array(meta.K);
+    for (let k = 0; k < meta.K; k++) {
+        altAbove[k] = dv.getUint32(k * ALTSTATS_BYTES_PER_QUANTITY, true);
+        altBelow[k] = dv.getUint32((meta.K + k) * ALTSTATS_BYTES_PER_QUANTITY, true);
+    }
+    if (!altAbove.some((v, k) => v + altBelow[k] > 0)) return null;
+    return { altAbove, altBelow };
 }
 
 // Backfill path: called from backfill.js when iterating shards. The

@@ -201,7 +201,7 @@ function rankBandCrossing(oldRank, isCorrect) {
 
 // Match (by problemId + creation date) the just-recorded answer entry and
 // fold the wrong-attempt embedding data into it after the network fetch
-// resolves: the picked-move vector and the availability-null counts
+// resolves: the picked-move vector and the availability-null masses
 // (computeAltStats), both from the same per-cell block. Idempotent — each
 // field is written only if absent. Skipped if the entry has been pruned away
 // by the time the fetch lands (the user may have moved on far enough that

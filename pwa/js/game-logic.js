@@ -100,7 +100,7 @@ const handleCorrectAnswer = async (x, y) => {
     }, stats);
 }
 
-async function _handleIncorrectMoveSequence(moveIndex, x, y) {
+async function _handleIncorrectMoveSequence(moveIndex, x, y, variationNodes) {
     Sentry.addBreadcrumb({
         category: 'flow',
         message: '_handleIncorrectMoveSequence started',
@@ -111,15 +111,18 @@ async function _handleIncorrectMoveSequence(moveIndex, x, y) {
 
     // Fire the wrong-attempt embedding fetch in the background — one Range
     // request for the problem's whole per-cell block, from which both the
-    // picked-move vector and the availability-null counts come. We never
+    // picked-move vector and the availability-null masses come. We never
     // block on it — the answer is recorded immediately with just the cell
     // indices, and updateUserStats attaches a defer-patch handler.
     // Embedding-backfill also re-fetches missing fields on the next app load,
     // so a failed/slow live fetch is recoverable.
     //
-    // The answer node's index is captured here, BEFORE the board advances —
-    // the null's above/below counts are referenced to the correct move's own
-    // loading (a refill instead references the stored correct-move embedding).
+    // `variationNodes` is the decision node's children as the click saw them,
+    // handed down rather than re-read so nothing depends on where the board has
+    // advanced to by now. It is the only reason this path may COMPUTE the null
+    // instead of reading the published one: the visit weight of each alternative
+    // is the third field of its own SGF comment, which is on the board here and
+    // nowhere else in the client.
     const currentProblem = state.currentProblem;
     const tsumegoId = tsumegoIdOf(currentProblem?.filename);
     const zipFilename = currentProblem?.zipFilename;
@@ -132,6 +135,7 @@ async function _handleIncorrectMoveSequence(moveIndex, x, y) {
             tsumegoId,
             pickedIndex: moveIndex,
             correctIndex,
+            variationNodes,
             zipFilename,
             boardSize: state.boardSize,
         });
@@ -247,7 +251,7 @@ export function handleBoardClick(x, y) {
         playStoneSound();
         handleCorrectAnswer(x, y);
     } else {
-        _handleIncorrectMoveSequence(moveIndex, x, y);
+        _handleIncorrectMoveSequence(moveIndex, x, y, children);
     }
     return true;
 }

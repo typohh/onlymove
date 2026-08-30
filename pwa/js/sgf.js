@@ -51,6 +51,24 @@ export function getVisitsFromComment(comment) {
 }
 
 /**
+ * The VISIT WEIGHTS of a problem's root variations, in SGF order — one integer
+ * per node, for the availability null's mass arithmetic.
+ *
+ * The whole weight rule lives here rather than at the call site: the comment
+ * regex belongs to getVisitsFromComment above, and the "a node carrying no
+ * evaluation weighs nothing" half belongs beside it, so neither can be restated
+ * differently somewhere else. Mirrors what package_for_pwa's
+ * _read_shard_variation_visits builds from the same SGFs through
+ * parse_eval_visits, which likewise reports 0 for a non-evaluation comment.
+ * @param {Array} nodes - The decision node's children, in SGF document order.
+ * @returns {Array<number>|null} - One non-negative integer per node.
+ */
+export function variationVisitWeights(nodes) {
+  if (!Array.isArray(nodes)) return null;
+  return nodes.map((n) => getVisitsFromComment(n && n.comment) ?? 0);
+}
+
+/**
  * Parses the winrate from an SGF comment. Always Black's perspective
  * (bots/analysis.cfg sets reportAnalysisWinratesAs = BLACK).
  * @param {string} comment - The comment string.

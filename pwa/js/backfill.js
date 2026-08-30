@@ -8,11 +8,12 @@
 //      Wipes any stale embeddings, then fills `embedding` from the
 //      lookup-aligned correct-move sidecar (tsumegos/lookup.embeddings.bin,
 //      one ~130-byte Range per problem — no shard zips), plus, for wrong
-//      attempts, `pickedEmbedding` and the availability-null counts
-//      (altAbove/altBelow) via each shard's per-cell bin (byte offsets live
-//      in the zip's embeddings_index.json, so only shards carrying a need
-//      are downloaded). Older entries get their embedding fields stripped to
-//      keep localStorage bounded.
+//      attempts, the availability-null masses (altAbove/altBelow) from the
+//      lookup-aligned tsumegos/lookup.altstats.bin and `pickedEmbedding` via
+//      each shard's per-cell bin (byte offsets live in the zip's
+//      embeddings_index.json, so only shards carrying a need are downloaded).
+//      Older entries get their embedding fields stripped to keep localStorage
+//      bounded.
 //
 //   2. Rating refresh (all history entries, no keep-window cap)
 //      Triggered by `ratings_version` change. Reads the single
@@ -38,7 +39,7 @@ import {
 } from './state.js';
 import { MODEL_INPUT_HISTORY_LENGTH, EMBEDDING_VECTOR_FIELDS, EMBEDDING_ALL_FIELDS,
          EMBEDDING_VERSION_KEY, RATINGS_VERSION_KEY, RANK_CURVE_VERSION_KEY } from './constants.js';
-import { fetchProblemCellsWithIndexEntry, fetchCorrectEmbedding, computeAltStats } from './picked-embedding.js';
+import { fetchProblemCellsWithIndexEntry, fetchCorrectEmbedding, fetchAltStatMasses } from './picked-embedding.js';
 import { fillViaRefitEndpoint } from './refit-endpoint.js';
 import { fetchLookupLines } from './problem-loader.js';
 import { rankForSize, ratingRankCurveVersion, problemInfoWeight } from './rank-decomposition.js';
@@ -562,6 +563,10 @@ async function pruneRemovedProblems(embeddingVersion, ratingsVersion) {
 // the per-size metadata.json (zip hash → zip filename). Shared by the
 // version-driven walk below and the synced-entry fill. Null on any fetch
 // failure so callers can bail without partial work.
+// The lines themselves come back alongside the maps because a shard walk also
+// needs the problem's lookup ROW — the address of its published availability
+// null — and re-fetching the multi-megabyte manifest per walk to recover an
+// index the locator already read would be the same file twice.
 async function buildShardLocator(size) {
     const lookupLines = await fetchLookupLines();
     if (!lookupLines) return null;
@@ -580,7 +585,7 @@ async function buildShardLocator(size) {
     for (const z of zipMeta) {
         zipFilenameByHash.set(z.filename.split('.')[0], z.filename);
     }
-    return { lookupMap, zipFilenameByHash };
+    return { lookupLines, lookupMap, zipFilenameByHash };
 }
 
 // Shard-walk concurrency. All the walks below (the version-driven rating/
@@ -635,15 +640,16 @@ function groupIdsByZip(lookupMap, ids) {
 // Shared shard-walk prologue for the three walks in this file (version-driven
 // embedding refresh, synced-entry fill, cold-tail fill): build the locator,
 // group the wanted problem ids by shard zip, then fetch + open each shard
-// (SHARD_WALK_CONCURRENCY-wide) and hand `{ zip, items, zipFilename, shardIds }`
-// to `perShard`. A per-shard failure goes to `onShardError` (each walk logs
-// under its own tag) and never aborts the walk. Returns false ONLY when the
-// shard locator couldn't be built (offline / fetch failure) — no shard was
-// touched — so a caller can distinguish "walked" from "retry later".
+// (SHARD_WALK_CONCURRENCY-wide) and hand
+// `{ zip, items, zipFilename, shardIds, lookupLines }` to `perShard`. A
+// per-shard failure goes to `onShardError` (each walk logs under its own tag)
+// and never aborts the walk. Returns false ONLY when the shard locator couldn't
+// be built (offline / fetch failure) — no shard was touched — so a caller can
+// distinguish "walked" from "retry later".
 async function walkShards(size, ids, perShard, onShardError) {
     const locator = await buildShardLocator(size);
     if (!locator) return false;
-    const { lookupMap, zipFilenameByHash } = locator;
+    const { lookupLines, lookupMap, zipFilenameByHash } = locator;
     const zipToIds = groupIdsByZip(lookupMap, ids);
     await mapWithConcurrency([...zipToIds.entries()], SHARD_WALK_CONCURRENCY, async ([zipHash, shardIds]) => {
         const zipFilename = zipFilenameByHash.get(zipHash);
@@ -651,7 +657,7 @@ async function walkShards(size, ids, perShard, onShardError) {
         try {
             const shard = await loadShard(size, zipFilename);
             if (!shard) return;
-            await perShard({ zip: shard.zip, items: shard.items, zipFilename, shardIds });
+            await perShard({ zip: shard.zip, items: shard.items, zipFilename, shardIds, lookupLines });
         } catch (err) {
             onShardError(zipFilename, err);
         }
@@ -674,32 +680,61 @@ async function parseEmbeddingsIndex(zip, onParseError) {
     }
 }
 
-// Does this wrong attempt still need the availability-null counts? The counts
-// are referenced to the correct move's loadings, read here from the stored
-// correct-move `embedding` — so the correct fill must run BEFORE this walk,
-// which both callers already order.
+// Does this wrong attempt still want the availability-null masses? The stored
+// correct-move `embedding` is the condition because the tendency reading forms
+// its direction as `embedding[k] − pickedEmbedding[k]`: a row that will never
+// have the first half can never use a null, so filling one there would spend
+// localStorage on a quartet no reader reads.
 function needsAltStats(a) {
     return a.altAbove === undefined && Array.isArray(a.embedding);
 }
 
-// Fill one entry's wrong-attempt embedding fields from the shard's per-cell
-// sidecar, when it's an eligible wrong attempt (known pickedCellIndex, and the
-// shard's index knows the problem): `pickedEmbedding` if missing, and the
-// availability-null counts (altAbove/altBelow) if missing and computable
-// (needsAltStats). One Range fetch brings the problem's WHOLE per-cell block,
-// memoized in `blockCache` (per shard) so several attempts of one problem pay
-// for it once. Returns true iff anything was filled — shared by the
-// version-driven walk and the synced-entry fill, which count fills
-// differently but fill identically.
-async function fillWrongAttemptFields(a, { indexPayload, zipFilename, size, blockCache }) {
+// Fill one entry's wrong-attempt fields, when it's an eligible wrong attempt
+// (known pickedCellIndex): the availability-null masses (altAbove/altBelow) if
+// missing, and `pickedEmbedding` if missing and the shard's index knows the
+// problem. Returns true iff anything was filled — shared by the version-driven
+// walk and the synced-entry fill, which count fills differently but fill
+// identically.
+//
+// The two halves come from different places, and deliberately. `pickedEmbedding`
+// is user-dependent — which cell THIS player clicked — so it is read out of the
+// problem's per-cell block, one Range fetch for the WHOLE block memoized in
+// `blockCache` (per shard) so several attempts of one problem pay for it once.
+// The null is not user-dependent at all, so it is READ rather than recomputed,
+// from the published lookup.altstats.bin row (memoized the same way in
+// `altCache`): computing it here would need each alternative's visit weight,
+// which lives in the SGF comments this walk does not parse, and would land a
+// quartet referenced to the stored correct-move vector rather than to row 0 of
+// the block — the same quantity from a second projection, differing on a small
+// fraction of problems. Reading the published masses puts this path in exact
+// agreement with both packaging and the live click path.
+async function fillWrongAttemptFields(a, { indexPayload, zipFilename, size, blockCache, altCache, lookupLines }) {
     if (a.correct !== false) return false;
     if (typeof a.pickedCellIndex !== 'number') return false;
     const needPicked = !a.pickedEmbedding;
     const needAlt = needsAltStats(a);
     if (!needPicked && !needAlt) return false;
-    if (!indexPayload || !indexPayload.problems) return false;
+
+    let touched = false;
+
+    if (needAlt && Array.isArray(lookupLines)) {
+        if (!altCache.has(a.problemId)) {
+            const row = lookupLineIndex(lookupLines, a.problemId);
+            altCache.set(a.problemId, row < 0 ? Promise.resolve(null)
+                : fetchAltStatMasses(row, lookupLines.length));
+        }
+        const alt = await altCache.get(a.problemId);
+        if (alt) {
+            a.altAbove = alt.altAbove;
+            a.altBelow = alt.altBelow;
+            touched = true;
+        }
+    }
+
+    if (!needPicked) return touched;
+    if (!indexPayload || !indexPayload.problems) return touched;
     const indexEntry = indexPayload.problems[a.problemId];
-    if (!indexEntry) return false;
+    if (!indexEntry) return touched;
     if (!blockCache.has(a.problemId)) {
         blockCache.set(a.problemId, fetchProblemCellsWithIndexEntry({
             zipFilename,
@@ -708,19 +743,10 @@ async function fillWrongAttemptFields(a, { indexPayload, zipFilename, size, bloc
         }));
     }
     const rows = await blockCache.get(a.problemId);
-    if (!Array.isArray(rows)) return false;
-    let touched = false;
-    if (needPicked && a.pickedCellIndex >= 0 && a.pickedCellIndex < rows.length) {
+    if (!Array.isArray(rows)) return touched;
+    if (a.pickedCellIndex >= 0 && a.pickedCellIndex < rows.length) {
         a.pickedEmbedding = quantizeEmbedding(rows[a.pickedCellIndex]);
         touched = true;
-    }
-    if (needAlt) {
-        const alt = computeAltStats(rows, a.embedding);
-        if (alt) {
-            a.altAbove = alt.altAbove;
-            a.altBelow = alt.altBelow;
-            touched = true;
-        }
     }
     return touched;
 }
@@ -1170,10 +1196,11 @@ async function tailHasRowsForSize(size) {
 
 // Wrong-attempt embedding needs: in-window wrong attempts with a stored
 // pickedCellIndex that are missing the picked-move vector or the
-// availability-null moments. These are the only embedding fills that still
-// drive a shard-zip walk — the per-problem byte offsets live in the zip's
-// embeddings_index.json. (Correct-move embeddings come from the
-// lookup-aligned sidecar; ratings from problem_params.)
+// availability-null masses. The picked-move vector is what still drives a
+// shard-zip walk — its per-problem byte offset lives in the zip's
+// embeddings_index.json — and the null rides along on that walk, both being
+// wanted by the same rows. (Correct-move embeddings and the null itself come
+// from lookup-aligned sidecars; ratings from problem_params.)
 function collectPickedNeedIds(history, startIdx) {
     const ids = new Set();
     for (let i = startIdx; i < history.length; i++) {
@@ -1208,19 +1235,22 @@ function stripOldEmbeddingFields(size, history, startIdx) {
 // keep window needs a fill.
 async function walkPickedShards(size, history, startIdx, pickedNeedIds, checkpoint = null) {
     let filledPicked = 0;
-    await walkShards(size, pickedNeedIds, async ({ zip, zipFilename }) => {
+    await walkShards(size, pickedNeedIds, async ({ zip, zipFilename, lookupLines }) => {
         const indexPayload = await parseEmbeddingsIndex(zip, (e) => {
             console.warn(`backfill[${size}]: parse embeddings_index.json failed for ${zipFilename}:`, e);
         });
         if (!indexPayload || !indexPayload.problems) return;
         // Sequential per-entry WITHIN the shard: Range requests are cheap
-        // (one per-cell block runs under a kilobyte, memoized per problem),
-        // and with shards running SHARD_WALK_CONCURRENCY-wide this bounds the
-        // total in-flight request count.
+        // (one per-cell block runs under a kilobyte, one availability-null row
+        // is tens of bytes, both memoized per problem), and with shards running
+        // SHARD_WALK_CONCURRENCY-wide this bounds the total in-flight request
+        // count.
         const blockCache = new Map();
+        const altCache = new Map();
         let filledHere = 0;
         for (let i = startIdx; i < history.length; i++) {
-            if (await fillWrongAttemptFields(history[i], { indexPayload, zipFilename, size, blockCache })) {
+            if (await fillWrongAttemptFields(history[i],
+                    { indexPayload, zipFilename, size, blockCache, altCache, lookupLines })) {
                 filledPicked++;
                 filledHere++;
             }
@@ -1404,12 +1434,13 @@ async function fillSyncedForSize(size, problemParams = null) {
         }
         return filled;
     }
-    await walkShards(size, needIds, async ({ zip, zipFilename, shardIds }) => {
+    await walkShards(size, needIds, async ({ zip, zipFilename, shardIds, lookupLines }) => {
         // A parse failure = shard without a usable sidecar index; the
         // picked-embedding fill below just skips (no console line).
         const indexPayload = await parseEmbeddingsIndex(zip);
         const idsHere = new Set(shardIds);
         const blockCache = new Map();
+        const altCache = new Map();
         let touchedHere = 0;
 
         for (let i = startIdx; i < history.length; i++) {
@@ -1429,7 +1460,8 @@ async function fillSyncedForSize(size, problemParams = null) {
                 touchedHere++;
             }
 
-            if (await fillWrongAttemptFields(a, { indexPayload, zipFilename, size, blockCache })) {
+            if (await fillWrongAttemptFields(a,
+                    { indexPayload, zipFilename, size, blockCache, altCache, lookupLines })) {
                 filled++;
                 touchedHere++;
             }

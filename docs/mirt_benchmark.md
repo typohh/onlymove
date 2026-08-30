@@ -381,7 +381,7 @@ on its real tail and once with the wide tail at its pooled mean, and compares th
 within-problem sign against the correct cell at the client's own resolution (fp16 +
 0.01 rounding). Of the alternative cells strictly signed in both arms, **10–36% change
 side, depending on the axis** — the tendency test's observed direction and the
-availability null's counts both live on exactly that sign. A tail acting as a monotone
+availability null's masses both live on exactly that sign. A tail acting as a monotone
 contraction toward the correct cell's reading would cancel out of both; the trunk is
 nonlinear and it does not.
 
@@ -407,6 +407,25 @@ nonlinear and it does not.
 `PRODUCTION_BLOCKS`. The flag's choices are the names its recorded runs were made under
 and are left alone so those runs stay reproducible; the shipped layout is the constant,
 not the flag.
+
+## THE AVAILABILITY NULL IS VISITS-LINEAR — MEASURED 2026-08-30
+
+The tendency reading's null weighs each alternative by the visits its own SGF evaluation rests on, rather than counting the alternatives equally. Three measurements decide it, and the third is about which criterion is admissible at all.
+
+**The criterion is the DIRECTIONAL log-loss, because that is the only thing the client consumes.** A null enters the reading as one number per problem per axis — the toward-probability `p` — scored against a binary outcome. So a null is scored on `p` against toward/away, per error, paired over the same errors across arms. Scoring instead on *which* of a decision node's ~58 wrong variations gets clicked (phase 1 of `eval_error_null_models`) measures a question the client never asks: concentrating the pick distribution on the right move says nothing about splitting the alternatives correctly ABOVE and BELOW the answer, and a null can win there and lose here.
+
+**Every weighted null beats equal counting, and visits-linear is the best parameter-free one.** Equal counting scores 0.3257 directional log-loss. It is beaten on **7 of 7 axes with every confidence interval clear of zero**, and visits-linear is the largest parameter-free improvement at **−0.0292**. The *fitted* forms — a visits power with a free exponent, winrate×visits, and the rest of the panel — add only about **0.003** beyond that, a tenth of the margin the weighting itself buys. That does not pay for shipping a parameter into a reading whose whole claim is that it has none, and it would have to be refit and republished with every corpus, so **visits-linear ships and the fitted panel stays a measurement**.
+
+**Split-half reliability is NOT the criterion, and the control is what proves it.** `tendency_null_variants` carries the retired fixed-0.5 null as a control row, and it scores as by far the most reliable arm — **+0.35 mean Δρ against uniform, on 14 of 14 (seven axes × two repeats) intervals**. It is also the arm that is known to be wrong, because it retains the per-problem menu confound entirely: the answer to a tsumego is by construction not a tenuki, so nearly every alternative loads higher on that axis, and a menu is a property of the rank band a user is served — stable within a user, so it replicates across halves exactly like a real lean. **Reliability therefore rises with retained confound rather than with measurement quality**, and the argument is not special to the fixed null: it applies to any pair of nulls differing in how much problem structure they divide out. Selecting a null on reliability selects for the confound. Validity is what is left, which is what the directional log-loss measures.
+
+Reproduce (neither writes to the repo; both read the production corpus, not the pinned baseline DB):
+
+```bash
+# the adjudicating measurement — phase 2b, directional log-loss per axis
+./.venv/bin/python3 -m ablations.eval_error_null_models --embeddings shipped
+# the reliability control that disqualifies reliability as the criterion
+./.venv/bin/python3 -m ablations.tendency_null_variants
+```
 
 ## AXIS VALUE IS A PROPERTY OF THE HOLDOUT DRAW, NOT OF THE MODEL — MEASURED 2026-08-21
 

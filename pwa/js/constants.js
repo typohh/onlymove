@@ -43,11 +43,11 @@ export const ANSWER_HISTORY_WORKING_SET = 3000;
 // because the passes that drop them want different halves:
 //   VECTOR  — what a refit invalidates and a refill can restore. Besides the
 //             two per-move vectors this is the availability null of a wrong
-//             attempt's problem (altAbove/altBelow — how many of the board's
-//             offered alternatives load above/below the answer, the
-//             uniform-over-available null the tendency reading stands
-//             against), which is a function of the same per-cell bin and
-//             moves with the fit exactly as the vectors do. `altMean`,
+//             attempt's problem (altAbove/altBelow — the summed visits of the
+//             board's offered alternatives loading above/below the answer, the
+//             null the tendency reading stands against), which is a function of
+//             the same per-cell bin and moves with the fit exactly as the
+//             vectors do. `altMean`,
 //             `altSd` and `correctCellIndex` are legacy names nothing writes,
 //             kept in the lists so the wipes reclaim them.
 //   ALL     — the vectors plus `pickedCellIndex`, which is NOT fit-derived

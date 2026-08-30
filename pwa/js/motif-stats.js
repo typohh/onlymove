@@ -10,13 +10,14 @@
 // Two independent readings per axis, answering different questions. The
 // error-composition reading (tendency) stands against the AVAILABILITY NULL:
 // what a direction-blind error on each served problem would have looked like,
-// computed per problem from the alternatives its board actually offered
-// (uniform over the non-answer variations — computeAltStats). That null is
-// still a property of the user's own served problems and nobody else's play;
-// without it, the composition statistic reports the problem MENU as a property
-// of the player (the answer to a tsumego is by construction not a tenuki, so
-// nearly every alternative loads higher on that axis — a fixed 50% balance
-// point flags almost everyone).
+// taken per problem over the alternatives its board actually offered, each
+// weighed by the visits its own evaluation rests on (computeAltStats, and the
+// masses packaging publishes for the same quantity). That null is still a
+// property of the user's own served problems and nobody else's play; without
+// it, the composition statistic reports the problem MENU as a property of the
+// player (the answer to a tsumego is by construction not a tenuki, so nearly
+// every alternative loads higher on that axis — a fixed 50% balance point flags
+// almost everyone).
 //
 //   TENDENCY — of your wrong answers, what share erred TOWARD the motif rather
 //   than away from it, against the share a typical error on the same problems
@@ -60,11 +61,11 @@ const MIN_ERRORS = 10;
 // Share of errors that erred TOWARD the motif, against the availability null:
 // each error carries its problem's own null toward-probability p, so the null
 // count is Sum(p) and its variance Sum(p(1-p)) — Poisson-binomial, normal-
-// approximated, which at MIN_ERRORS and interior p is the same approximation
-// the old fixed-null binomial made. Ties (pick loading identical to the
-// answer's) carry no direction and are dropped rather than split — and the
-// null drops them symmetrically, its counts being built from strict
-// comparisons only (computeAltStats).
+// approximated, which at MIN_ERRORS and interior p is what a fixed-null
+// binomial would also be. Ties (pick loading identical to the answer's) carry
+// no direction and are dropped rather than split — and the null drops them
+// symmetrically, its masses being built from strict comparisons only, a tie
+// falling out with its whole weight (computeAltStats).
 function tendencyTest(nOver, n, sumP, sumPQ) {
     if (n < MIN_ERRORS) return null;
     // sumPQ can only be 0 when every problem's null was one-sided (p of 0 or
@@ -135,9 +136,15 @@ export function computeMotifStats(history = null) {
     if (rows.length < MIN_ATTEMPTS) return null;
 
     // --- TENDENCY: error composition against the availability null. Rows
-    // without the null counts (a fill that hasn't landed yet) contribute
+    // without the null masses (a fill that hasn't landed yet) contribute
     // nothing — no fixed-null fallback, which would mix two different neutral
     // points into one statistic.
+    //
+    // altAbove/altBelow are MASSES (summed visits over the alternatives), not
+    // counts, so nothing here may read them as a sample size: they enter only
+    // as the >0 admission test and as the denominator of the toward-probability,
+    // both of which are scale-free. The number of errors, which IS a sample
+    // size, is counted separately in nDir.
     const nOver = new Array(K).fill(0);
     const nDir = new Array(K).fill(0);
     const sumP = new Array(K).fill(0);
@@ -151,9 +158,9 @@ export function computeMotifStats(history = null) {
         if (!altUsable(a)) continue;
         for (let k = 0; k < K; k++) {
             const d = a.embedding[k] - a.pickedEmbedding[k];
-            const nAvail = a.altAbove[k] + a.altBelow[k];
-            if (Number.isFinite(d) && d !== 0 && nAvail > 0) {
-                const p = a.altAbove[k] / nAvail;   // null P(this error leans toward)
+            const availMass = a.altAbove[k] + a.altBelow[k];
+            if (Number.isFinite(d) && d !== 0 && availMass > 0) {
+                const p = a.altAbove[k] / availMass;   // null P(this error leans toward)
                 nDir[k]++;
                 sumP[k] += p;
                 sumPQ[k] += p * (1 - p);

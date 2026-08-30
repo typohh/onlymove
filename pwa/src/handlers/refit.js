@@ -270,8 +270,8 @@ export async function handleRefit(request, env) {
                     aOff + (K + k) * ALTSTATS_BYTES, true));
             }
             // altAbove + altBelow == 0 across every axis is the absent sentinel
-            // (it already fails the client's nAvail guard) — omit rather than
-            // ship counts that say nothing.
+            // (it already fails the client's availMass guard) — omit rather than
+            // ship masses that say nothing.
             if (above.some((v, k) => v + below[k] > 0)) {
                 out.altAbove = above;
                 out.altBelow = below;
