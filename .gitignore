@@ -114,6 +114,12 @@ axes/per_cell/
 axes/per_problem.csv
 axes/motif_proxies.npz
 axes/axes.npz
+# Dev teach banks and the raw rule-quantity dump (auxiliary/rating_dev/
+# build_rule_bank, build_variant_bank, dump_rule_quantities) — reproducible from
+# the proxies/quantities the same way motif_proxies.npz is from the rules.
+axes/bank_*.npz
+axes/rule_bank_*.npz
+axes/rule_quantities.csv
 
 # Local snapshot of the REMOTE production D1: a large (~50 MB) dump pulled by
 # pipeline.fetch_database. Regenerable on demand and changes constantly, so it is
