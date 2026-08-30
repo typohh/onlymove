@@ -11,9 +11,9 @@
 // walk cost tens of megabytes to deliver a few kilobytes of vectors.
 //
 // Three of the four fields are now lookup-aligned corpus sidecars this Worker
-// holds resident (~8.8MB across the correct-move vectors, the availability-null
-// counts, the block offsets and problem_params). Only `pickedEmbedding` is
-// user-dependent, so only it touches a shard bin — and only for wrong attempts.
+// holds resident (the correct-move vectors, the availability null, the block
+// offsets, plus problem_params). Only `pickedEmbedding` is user-dependent, so
+// only it touches a shard bin — and only for wrong attempts.
 //
 // The client sends the lookup ROW it already resolved (it binary-searches
 // lookup.txt in every flow that reaches here), which is what keeps this Worker
@@ -30,7 +30,15 @@ import { getProblemParams } from '../leaderboard.js';
 const K = EMBEDDING_META.K || 0;
 const BYTES_PER_CELL = EMBEDDING_META.bytes_per_cell || K * 2;
 const OFFSETS_ROW = EMBEDDING_META.offsets_bytes_per_row || 5;
-const ALTSTATS_ROW = EMBEDDING_META.altstats_bytes_per_row || 2 * K;
+// The availability null ships K above-masses then K below-masses as
+// little-endian uint32 — MASSES, not counts: packaging weighs each alternative
+// by the visits its evaluation rests on (a comment with no third field is a
+// 30-visit value by convention), and a tie drops with its weight rather than
+// being split. They are integer sums of integer visit counts, so this Worker and
+// the client's own live-path computation agree exactly. The reader-side
+// semantic is unchanged: p = above / (above + below).
+const ALTSTATS_BYTES = 4;
+const ALTSTATS_ROW = EMBEDDING_META.altstats_bytes_per_row || 2 * K * ALTSTATS_BYTES;
 const DATA_VERSION = EMBEDDING_META.data_version || null;
 
 // A batch is capped so one request stays a bounded unit of work: the client
@@ -231,6 +239,8 @@ export async function handleRefit(request, env) {
 
     const nRows = Math.floor(embeddings.length / BYTES_PER_CELL);
     const offsetsView = new DataView(offsets.buffer, offsets.byteOffset, offsets.byteLength);
+    const altstatsView = new DataView(
+        altstats.buffer, altstats.byteOffset, altstats.byteLength);
 
     // Results are ALIGNED TO THE REQUEST ARRAY, not keyed by problem id: two
     // attempts on one problem can have picked different cells, so an id-keyed
@@ -255,8 +265,9 @@ export async function handleRefit(request, env) {
         if (aOff + ALTSTATS_ROW <= altstats.length) {
             const above = []; const below = [];
             for (let k = 0; k < K; k++) {
-                above.push(altstats[aOff + k]);
-                below.push(altstats[aOff + K + k]);
+                above.push(altstatsView.getUint32(aOff + k * ALTSTATS_BYTES, true));
+                below.push(altstatsView.getUint32(
+                    aOff + (K + k) * ALTSTATS_BYTES, true));
             }
             // altAbove + altBelow == 0 across every axis is the absent sentinel
             // (it already fails the client's nAvail guard) — omit rather than

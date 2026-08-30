@@ -24,6 +24,7 @@ from utils.katago.coords import gtp_to_xy, sgf_to_gtp
 from utils.rating.ratings_io import FLOOR_CSV, RATINGS_CSV, SLOPE_CSV, load_size_value_maps, load_value_map
 from utils.rating import se_floor  # noqa: E402
 from utils.katago.sgf_parsing import parse_tsumego_sgf
+from utils.katago.add_variations import parse_eval_visits
 from utils.rating.motif_rules import LABEL_SET, RULE_LABELS
 
 
@@ -37,6 +38,17 @@ PASS_POINT_CODE = 255
 EMBEDDING_DTYPE = np.float16
 EMBEDDING_DTYPE_NAME = "float16"
 EMBEDDING_BYTES_PER_FLOAT = 2
+
+# The availability null (lookup.altstats.bin) carries a MASS per axis and side,
+# not a count: each alternative is weighed by the visits its evaluation rests on,
+# so the quantity is a sum over alternatives rather than how many there are. The
+# masses are INTEGER sums of integer visit counts, which is what lets this
+# producer and the client's live path agree exactly rather than nearly — no
+# rounding stands between them. uint32 because a mass is bounded by
+# (visits per variation) x (variations on the board), well past a uint8 count.
+ALTSTATS_DTYPE = np.dtype("<u4")
+ALTSTATS_DTYPE_NAME = "uint32"
+ALTSTATS_BYTES_PER_QUANTITY = 4
 
 # Backend rating set this packages. v2 (combined cross-board MLP-2PL, written by
 # pipeline.train_mirt + pipeline.map_rating_to_rank) is the only rating
@@ -473,15 +485,20 @@ def _read_embedding_version(embed_dir):
     return None
 
 
-# Bump when the .embeddings.bin / embeddings_index.json layout changes in a way
-# the client must react to. The rev is folded into the SHIPPED embedding_version
+# Bump when the published per-cell layout changes in a way the client must react
+# to — the shard .embeddings.bin / embeddings_index.json, or the lookup-aligned
+# alt-stats read off them, since a stored altAbove/altBelow is fit-derived data
+# governed by the same gate as the vectors (EMBEDDING_VECTOR_FIELDS in
+# pwa/js/constants.js). The rev is folded into the SHIPPED embedding_version
 # (below), so a format change wipes + re-derives clients' stored embeddings via
 # the standing version gate, and into size_inputs_hash, so the shards rebuild on
 # the next run without --force. Rev history:
 #   1 (implicit): SGF-variation order MINUS the pass — bin rows after a non-last
 #     pass were off by one vs the PWA's children.indexOf cell index.
 #   2: pass variations get an all-zeros placeholder row (index parity).
-BIN_FORMAT_REV = 2
+#   3: the availability null weighs each alternative by its visits instead of
+#     counting them, so every stored altAbove/altBelow means something new.
+BIN_FORMAT_REV = 3
 
 
 def shipped_embedding_version(embed_dir):
@@ -886,8 +903,8 @@ def compute_data_version(output_dir):
         h.update(b"missing-correct-embeddings")
     # The two other lookup-aligned sidecars, for the same reason: their row
     # alignment against lookup.txt holds only within one packaging run, and the
-    # alt-stats counts are referenced to the correct-move vectors above, so all
-    # three have to cache-bust together or a client pairs one run's counts with
+    # alt-stats masses are referenced to the correct-move vectors above, so all
+    # three have to cache-bust together or a client pairs one run's masses with
     # another run's answer vector.
     for name in ("lookup.offsets.bin", "lookup.altstats.bin"):
         q = os.path.join(output_dir, "tsumegos", name)
@@ -1124,6 +1141,42 @@ def _read_shard_index(output_dir, size, zip_hash):
         return None
 
 
+def _read_shard_variation_visits(output_dir, size, zip_hash, tids):
+    """Per-root-variation VISIT COUNTS for `tids`, out of the shard's own SGFs.
+
+    Returns {tid: int64 array}, one entry per root variation in exactly the order
+    project_cells_for_problem wrote the per-cell block — parse_tsumego_sgf's
+    variation_nodes, pass row included — so visits[i] weighs block row i.
+
+    The SGFs are read from the shard ZIP, not from tsumegos/<size>/: the zip is
+    the artifact the client holds, and the live-path null reads its comments. Two
+    producers reading different copies of a comment could disagree while both
+    look correct, which is the one failure this sidecar exists to rule out.
+
+    Visits go through utils.katago.add_variations.parse_eval_visits, which owns
+    the convention that a comment carrying no third field is a 30-visit value —
+    never a regex here, or that convention would have two homes.
+
+    A tid whose SGF is not in the zip raises: the shard's own index named it, so
+    an absent member is corruption, not a coverage gap.
+    """
+    zip_path = os.path.join(output_dir, "tsumegos", str(size), f"{zip_hash}.zip")
+    out = {}
+    with zipfile.ZipFile(zip_path) as z:
+        for tid in tids:
+            game = sgfmill.sgf.Sgf_game.from_bytes(z.read(tid + ".sgf"))
+            _, variation_nodes = parse_tsumego_sgf(game)
+            visits = []
+            for node in variation_nodes:
+                try:
+                    comment = node.get("C")
+                except KeyError:
+                    comment = None
+                visits.append(parse_eval_visits(comment))
+            out[tid] = np.asarray(visits, dtype=np.int64)
+    return out
+
+
 def _lookup_rows(output_dir):
     """lookup.txt as [(tsumego_id, zip_hash, size)] in file (id-sorted) order —
     the row order every lookup-aligned sidecar is addressed by."""
@@ -1210,14 +1263,50 @@ def _js_quantize(a):
     return np.floor(np.asarray(a, dtype=np.float64) * 100.0 + 0.5) / 100.0
 
 
+def alt_stat_masses(q, visits):
+    """The availability null for ONE problem: per axis, the summed VISITS of the
+    alternatives loading strictly above / below the answer's own loading.
+
+    `q` is the problem's per-cell block already quantized to the client's own
+    resolution — (n_cells, K), SGF root-variation order — and `visits` is one
+    visit count per those same rows. Returns (above, below), int64 of length K.
+
+    An alternative is weighed by the visits its evaluation rests on rather than
+    counted, because the moves a click could pick are not equally pickable and
+    the search spends its depth where the position invited it. The weights are
+    the integer visit counts themselves, so both masses are exact integers: the
+    client's live path sums the same integers off the same comments, and the two
+    producers can only agree or differ — never drift apart by a rounding.
+
+    Row 0 IS the answer and is the reference. It ties with itself on every axis,
+    so the strict comparisons drop it with no special case — and every other tie
+    drops the same way, WITH its weight: a tie carries no direction, so it
+    belongs to neither side rather than to both. The pass placeholder (the
+    all-zeros row) is excluded before weighing; a click cannot select it.
+    """
+    ref = q[0]
+    keep = ~np.all(q == 0.0, axis=1)
+    kept = q[keep]
+    w = np.asarray(visits, dtype=np.int64)[keep][:, None]
+    above = ((kept > ref) * w).sum(axis=0)
+    below = ((kept < ref) * w).sum(axis=0)
+    return above, below
+
+
 def emit_alt_stats(output_dir):
     """The availability null per problem, ALIGNED TO lookup.txt: row i holds,
-    for the problem on lookup.txt line i, how many of the moves a click could
-    pick load strictly ABOVE then strictly BELOW the correct move's loading, per
-    axis. 2*K bytes/problem (uint8 counts).
+    for the problem on lookup.txt line i, the summed VISITS of the moves a click
+    could pick that load strictly ABOVE then strictly BELOW the correct move's
+    loading, per axis. 2*K uint32 per problem.
+
+    The quantities are MASSES, not counts: an alternative weighs the visits its
+    own evaluation rests on (the third field of its SGF comment; a comment with
+    no third field is a 30-visit value by the convention parse_eval_visits owns).
+    A reader still forms p = above / (above + below) and reads it as before —
+    what changed is which alternatives that ratio gives weight to.
 
     This is computeAltStats (pwa/js/picked-embedding.js) evaluated at packaging
-    time. It is a property of the CORPUS, not of the player — the counts depend
+    time. It is a property of the CORPUS, not of the player — the masses depend
     only on the problem and its answer — so computing it here costs the client
     the whole shard walk it currently pays to rediscover the same numbers.
 
@@ -1234,16 +1323,22 @@ def emit_alt_stats(output_dir):
     Row 0 IS the answer: generation enforces the answer as the first root
     variation and every backend stage reads it positionally. The pass-row
     assertion below is the cheap corpus-wide check of that — a problem whose
-    first variation is the pass would have a misordered SGF, and the counts
+    first variation is the pass would have a misordered SGF, and the masses
     would be referenced to a placeholder.
 
-    Ties carry no direction and are outside both counts, mirroring the
-    observed-side tie drop — which is also why the correct row needs no special
+    Ties carry no direction and are outside both masses, mirroring the
+    observed-side tie drop — a tie drops WITH its weight, rather than being
+    split between the sides — which is also why the correct row needs no special
     exclusion: it ties with itself on every axis and falls out of the strict
     comparisons. The pass placeholder (all-zeros row) is skipped: a click cannot
     select the pass. An id whose shard or block is absent gets an ALL-ZERO row,
     which the client already reads as `no null available` (altAbove + altBelow
-    == 0 fails motif-stats' nAvail guard)."""
+    == 0 fails motif-stats' nAvail guard).
+
+    The weights are read from each shard's OWN SGFs, so this pays an sgfmill
+    parse per problem that the shard build already paid separately. Reading the
+    zip rather than tsumegos/<size>/ is what keeps the weights identical to the
+    ones the client will read out of the archive it downloaded."""
     rows = _lookup_rows(output_dir)
     correct_path = os.path.join(output_dir, "tsumegos", "lookup.embeddings.bin")
     n_floats = os.path.getsize(correct_path) // EMBEDDING_BYTES_PER_FLOAT
@@ -1254,7 +1349,7 @@ def emit_alt_stats(output_dir):
             f"alt-stats sidecar against a lookup it is not aligned to")
     K = n_floats // len(rows)
 
-    out = np.zeros((len(rows), 2 * K), dtype=np.uint8)
+    out = np.zeros((len(rows), 2 * K), dtype=ALTSTATS_DTYPE)
     missing = 0
     for (size, zip_hash), items in _group_rows_by_shard(rows).items():
         index = _read_shard_index(output_dir, size, zip_hash)
@@ -1264,6 +1359,8 @@ def emit_alt_stats(output_dir):
             missing += len(items)
             continue
         blob = np.fromfile(bin_path, dtype=EMBEDDING_DTYPE)
+        visits_by_tid = _read_shard_variation_visits(
+            output_dir, size, zip_hash, [tid for _, tid in items if tid in index])
         for row_i, tid in items:
             entry = index.get(tid)
             if entry is None:
@@ -1276,21 +1373,29 @@ def emit_alt_stats(output_dir):
                 raise ValueError(
                     f"{tid}: shard {zip_hash} bin is short for its own index "
                     f"({block.size} floats, expected {n_cells * K}) — refusing "
-                    f"to ship counts read past the end of a block")
+                    f"to ship masses read past the end of a block")
+            visits = visits_by_tid[tid]
+            # The weights are addressed positionally against the block, so a
+            # length disagreement means the SGF in the zip is not the tree the
+            # block was projected from — every weight would then be on the wrong
+            # cell while both files stayed individually well-formed.
+            if visits.size != n_cells:
+                raise ValueError(
+                    f"{tid}: shard SGF has {visits.size} root variations against "
+                    f"{n_cells} rows in its per-cell block — refusing to weigh "
+                    f"cells by visits that belong to different variations")
             q = _js_quantize(block.reshape(n_cells, K))
-            ref = q[0]                          # the answer's own row
-            if np.all(ref == 0.0):
+            if np.all(q[0] == 0.0):
                 raise ValueError(
                     f"{tid}: first root variation is the pass placeholder — the "
                     f"SGF's variations are misordered and the null would be "
                     f"referenced to a row that is not a move")
-            q = q[~np.all(q == 0.0, axis=1)]   # drop the pass placeholder
-            above = (q > ref).sum(axis=0)
-            below = (q < ref).sum(axis=0)
-            # n_cells is uint8-bounded by emit_lookup_offsets, and neither count
-            # can exceed it, so this only fires if that bound ever moves.
-            if above.max(initial=0) > 255 or below.max(initial=0) > 255:
-                raise ValueError(f"{tid}: alt count exceeds uint8")
+            above, below = alt_stat_masses(q, visits)
+            # A mass is (visits per variation) x (variations), so unlike the
+            # counts it replaced it is not bounded by the uint8 cell count —
+            # a silent wraparound here would ship a null pointing the wrong way.
+            if max(above.max(initial=0), below.max(initial=0)) > 2 ** 32 - 1:
+                raise ValueError(f"{tid}: alt mass exceeds uint32")
             out[row_i, :K] = above
             out[row_i, K:] = below
 
@@ -1300,7 +1405,8 @@ def emit_alt_stats(output_dir):
 
     out_path = os.path.join(output_dir, "tsumegos", "lookup.altstats.bin")
     out.tofile(out_path)
-    print(f"  wrote lookup.altstats.bin ({len(rows)} rows x {2 * K} B"
+    print(f"  wrote lookup.altstats.bin ({len(rows)} rows x "
+          f"{2 * K * ALTSTATS_BYTES_PER_QUANTITY} B, {ALTSTATS_DTYPE_NAME} masses"
           f"{f', {missing} absent zero-filled' if missing else ''}) at {out_path}")
     return out_path
 
@@ -1408,9 +1514,9 @@ if __name__ == "__main__":
     # Where each problem's per-cell block sits, and the availability null read off
     # it. Both are row-aligned to the same final lookup.txt as the correct-move
     # sidecar. Offsets are rebuilt from the shard zips on disk, so they stay right
-    # for a size whose shards were not rebuilt this run; the alt-stats counts are
+    # for a size whose shards were not rebuilt this run; the alt-stats masses are
     # referenced to the correct-move sidecar, so they follow ITS sentinel rule —
-    # keep the pair in lockstep or the counts describe a different answer vector
+    # keep the pair in lockstep or the masses describe a different answer vector
     # than the one shipped beside them.
     print("\n--- per-cell block offsets + availability null ---")
     if _axes_dir()[0] is None or any_sentinel:
@@ -1430,9 +1536,12 @@ if __name__ == "__main__":
         meta_out["bytes_per_cell"] = int(K) * EMBEDDING_BYTES_PER_FLOAT
         # Layout of the two block sidecars, so a reader never hardcodes either
         # width: lookup.offsets.bin is <u4 offset + u1 n_cells per problem,
-        # lookup.altstats.bin is K uint8 above-counts then K uint8 below-counts.
+        # lookup.altstats.bin is K little-endian uint32 above-masses then K
+        # below-masses (summed visits, not counts — see alt_stat_masses).
         meta_out["offsets_bytes_per_row"] = OFFSETS_BYTES_PER_ROW
-        meta_out["altstats_bytes_per_row"] = 2 * int(K)
+        meta_out["altstats_bytes_per_row"] = (
+            2 * int(K) * ALTSTATS_BYTES_PER_QUANTITY)
+        meta_out["altstats_dtype"] = ALTSTATS_DTYPE_NAME
         if ratings_versions:
             meta_out["ratings_version"] = ratings_versions
         meta_out["rating_model"] = RATING_MODEL_TAG
