@@ -157,12 +157,12 @@
         <h2>Features</h2>
         <ul>
             <li>It can be installed from your browser as a standalone app.</li>
-            <li>Your progress is tied to a personal account code, shown under the Account menu. Enter the same code on another device to keep your solving history and rank in sync everywhere you play.</li>
+            <li>You can log in to the same account from multiple devices; your solving history and rank stay in sync everywhere you play.</li>
             <li>The review mode has numerous positions pre-evaluated by <code>kata1-b18c384nbt-s9996604416-d4316597426</code> with a minimum of 30 playouts, usually hundreds of playouts.</li>
-            <li>For positions that have not been pre-evaluated, it uses a server to provide <code>kata1-b18c384nbt-s9996604416-d4316597426</code> with 1 playout to analyze positions.</li>
+            <li>For positions that have not been pre-evaluated, a server analyzes them with <code>kata1-b18c384nbt-s9996604416-d4316597426</code> at 30 playouts; only under load does it drop to 1 playout, and it tells you when that happens.</li>
             <li>Upon failure, if you played too fast and you get better results when you think for longer, a slow red screen will appear.</li>
             <li>Upon failure, if you failed a repeat problem, for which you didn't spend much time reviewing, and you get better results when you spend more time reviewing the solution, a slow red screen will appear.</li>
-            <li>Problem selection learns from your attempt history. Every position is scored along a small set of skill axes — currently five, covering positional judgement, counting, opening versus endgame, reading versus shape, and attack versus defence — learned from real players' results on top of KataGo's internal read of the position, so each axis captures a way players genuinely differ. A per-user logistic regression tilts upcoming problems toward the skills that have been tripping you up. When you pick the wrong move, the move you actually played is scored on the same axes, so the system can distinguish "the position is hard to read" from "you over- or under-play this kind of move" — and problem selection uses that direction, favoring skills you under-play rather than serving more of what you already over-play.</li>
+            <li>Problem selection learns from your attempt history. Every position is scored along a small set of skill axes — currently seven, covering life and death, the endgame, ko, the opening, tenuki, sente, and capturing races — learned from real players' results on top of KataGo's internal read of the position, so each axis captures a way players genuinely differ. A per-user logistic regression tilts upcoming problems toward the skills that have been tripping you up. When you pick the wrong move, the move you actually played is scored on the same axes, so the system can distinguish "the position is hard to read" from "you over- or under-play this kind of move" — and problem selection uses that direction, favoring skills you under-play rather than serving more of what you already over-play.</li>
             <li>Push notifications can be enabled to remind you when failed problems are due for review.</li>
             <li>A Community tab shows anonymous server-wide statistics over the past week — overall activity, the rank distribution, time usage, and how quickly players return to failed problems — with your own position highlighted.</li>
             <li>The statistics page tracks factors influencing your problem-solving probability. Ideally, time-related metrics should be close to zero, while a positive trend in the "per problem solved" metric indicates learning. It also shows a per-attempt rating-history chart, a smoothed long-term skill estimate with a 95% confidence band, a session-to-session form variance metric, and a sorted list of skills you tend to misplay described in plain sentences.</li>
@@ -222,12 +222,12 @@
         <h2>功能</h2>
         <ul>
             <li>它可以从你的浏览器安装为一个独立的应用。</li>
-            <li>你的进度与一个个人账号代码绑定，该代码显示在“账号”菜单下。在另一台设备上输入相同的代码，即可让你的解题记录和段级位在你所游玩的每个地方保持同步。</li>
+            <li>你可以在多台设备上登录同一账号，解题记录和段级位会在各处保持同步。</li>
             <li>复习模式中有大量局面已由 <code>kata1-b18c384nbt-s9996604416-d4316597426</code> 预先评估，评估至少使用 30 次模拟推演，通常是数百次模拟推演。</li>
-            <li>对于尚未预先评估的局面，它会使用一台服务器让 <code>kata1-b18c384nbt-s9996604416-d4316597426</code> 以 1 次模拟推演来分析局面。</li>
+            <li>对于尚未预先评估的局面，会由一台服务器让 <code>kata1-b18c384nbt-s9996604416-d4316597426</code> 以 30 次模拟推演进行分析；只有在负载较高时才会降至 1 次模拟推演，并且会告知你。</li>
             <li>做错时，如果你下得太快、而思考更久能得到更好的结果，就会出现一个缓慢的红色屏幕。</li>
             <li>做错时，如果你做错的是一道重复出现的题目、且你在复习上花的时间不多、而花更多时间复习解法能得到更好的结果，就会出现一个缓慢的红色屏幕。</li>
-            <li>题目选取会从你的尝试记录中学习。每个局面都会在少数几条技能轴上打分——目前共有五条，涵盖形势判断、数目、布局与官子、计算力与棋形，以及攻击与防守——这些轴以 KataGo 对局面的内部解读为基础、根据真实玩家的解题结果学习而来，因此每条轴都对应着玩家之间真实存在的差异。一个针对每位用户的逻辑回归会将接下来的题目向那些一直让你栽跟头的技能倾斜。当你选错着法时，你实际下的那一手也会在相同的轴上打分，因此系统能够区分“这个局面难以计算”和“你对这类着法下得过多或过少”——而题目选取会利用这一方向，偏向你下得过少的技能，而不是继续提供更多你已经下得过多的类型。</li>
+            <li>题目选取会从你的尝试记录中学习。每个局面都会在少数几条技能轴上打分——目前共有七条，涵盖死活、官子、打劫、布局、脱先、先手与对杀——这些轴以 KataGo 对局面的内部解读为基础、根据真实玩家的解题结果学习而来，因此每条轴都对应着玩家之间真实存在的差异。一个针对每位用户的逻辑回归会将接下来的题目向那些一直让你栽跟头的技能倾斜。当你选错着法时，你实际下的那一手也会在相同的轴上打分，因此系统能够区分“这个局面难以计算”和“你对这类着法下得过多或过少”——而题目选取会利用这一方向，偏向你下得过少的技能，而不是继续提供更多你已经下得过多的类型。</li>
             <li>可以启用推送通知，在做错的题目到复习时间时提醒你。</li>
             <li>“社区”选项卡展示过去一周内全服匿名的统计数据——总体活跃度、段级位分布、时间使用情况，以及玩家回头重做错题的快慢——并突出显示你自己的位置。</li>
             <li>统计页面追踪影响你解题概率的各项因素。理想情况下，与时间相关的指标应接近于零，而“每解出一题”指标呈正向趋势则表明有所学习。它还展示一张逐次尝试的评分历史图表、一个带 95% 置信带的平滑长期棋力估计、一个逐次对局间的状态方差指标，以及一份用平实语句描述、按你倾向下错的技能排序的清单。</li>
@@ -287,12 +287,12 @@
 <h2>機能</h2>
 <ul>
     <li>ブラウザからスタンドアロンアプリとしてインストールできます。</li>
-    <li>あなたの進捗は、「アカウント」メニューに表示される個人用のアカウントコードに紐づいています。別のデバイスで同じコードを入力すれば、プレイするすべての場所で解答履歴と段級位を同期できます。</li>
+    <li>複数のデバイスから同じアカウントにログインでき、解答履歴と段級位はどこでも同期されます。</li>
     <li>検討モードでは、多数の局面が <code>kata1-b18c384nbt-s9996604416-d4316597426</code> によって、最低30回、通常は数百回のプレイアウトであらかじめ評価されています。</li>
-    <li>あらかじめ評価されていない局面については、サーバーを利用して <code>kata1-b18c384nbt-s9996604416-d4316597426</code> に1回のプレイアウトを与えて局面を分析します。</li>
+    <li>あらかじめ評価されていない局面については、サーバーが <code>kata1-b18c384nbt-s9996604416-d4316597426</code> を用いて30回のプレイアウトで分析します。負荷が高いときのみ1回のプレイアウトに下がりますが、その際はその旨が表示されます。</li>
     <li>間違えたとき、あなたが早く打ちすぎていて、長く考えた方がよい結果になる場合には、ゆっくりとした赤い画面が表示されます。</li>
     <li>間違えたとき、復習にあまり時間をかけなかった再出題の問題を間違え、解法の復習にもっと時間をかけた方がよい結果になる場合には、ゆっくりとした赤い画面が表示されます。</li>
-    <li>問題選択はあなたの挑戦履歴から学習します。すべての局面は少数のスキル軸——現在は5本で、形勢判断、目算、序盤とヨセ、読みと形、攻めと守りをカバーします——の上で採点されます。これらの軸は KataGo による局面の内部的な読みをもとに、実際のプレイヤーの解答結果から学習されたもので、各軸はプレイヤー間に実際に存在する差を捉えています。ユーザーごとのロジスティック回帰が、あなたがつまずいているスキルの方へ今後の問題を傾けます。あなたが誤った手を選ぶと、実際に打った手も同じ軸の上で採点されるため、システムは「その局面が読みにくい」ことと「あなたがこの種の手を打ちすぎている／打たなすぎている」ことを区別できます。そして問題選択はその方向を利用し、あなたがすでに打ちすぎているものをさらに出題するのではなく、打たなすぎているスキルを優先します。</li>
+    <li>問題選択はあなたの挑戦履歴から学習します。すべての局面は少数のスキル軸——現在は7本で、死活、ヨセ、コウ、序盤、手抜き、先手、攻め合いをカバーします——の上で採点されます。これらの軸は KataGo による局面の内部的な読みをもとに、実際のプレイヤーの解答結果から学習されたもので、各軸はプレイヤー間に実際に存在する差を捉えています。ユーザーごとのロジスティック回帰が、あなたがつまずいているスキルの方へ今後の問題を傾けます。あなたが誤った手を選ぶと、実際に打った手も同じ軸の上で採点されるため、システムは「その局面が読みにくい」ことと「あなたがこの種の手を打ちすぎている／打たなすぎている」ことを区別できます。そして問題選択はその方向を利用し、あなたがすでに打ちすぎているものをさらに出題するのではなく、打たなすぎているスキルを優先します。</li>
     <li>プッシュ通知を有効にすると、間違えた問題が復習の時期になったときに知らせてくれます。</li>
     <li>「コミュニティ」タブでは、過去1週間にわたるサーバー全体の匿名統計、つまり全体の活動状況、段級位の分布、時間の使い方、そしてプレイヤーが間違えた問題にどれだけ早く戻ってくるかが、あなた自身の位置を強調して表示されます。</li>
     <li>統計ページは、あなたが問題を解ける確率に影響する要因を追跡します。理想的には、時間に関連する指標はゼロに近いのが望ましく、一方「問題を解くごと」の指標が正の傾向を示していれば学習が進んでいることを表します。また、挑戦ごとのレーティング履歴のグラフ、95%信頼区間の帯を伴う平滑化された長期的な棋力推定、セッションごとの調子のばらつきの指標、そしてあなたが打ち間違えやすいスキルを平易な文章で説明した並べ替え済みの一覧も表示されます。</li>
@@ -352,12 +352,12 @@
         <h2>기능</h2>
         <ul>
             <li>브라우저에서 독립 실행형 앱으로 설치할 수 있습니다.</li>
-            <li>여러분의 진행 상황은 계정 메뉴에 표시되는 개인 계정 코드에 연결됩니다. 다른 기기에서 같은 코드를 입력하면 여러분이 플레이하는 모든 곳에서 풀이 기록과 급수/단을 동기화할 수 있습니다.</li>
+            <li>여러 기기에서 같은 계정에 로그인할 수 있으며, 풀이 기록과 급수/단이 어디서나 동기화됩니다.</li>
             <li>복습 모드에는 <code>kata1-b18c384nbt-s9996604416-d4316597426</code>이 최소 30회, 보통 수백 회의 플레이아웃으로 미리 평가한 수많은 국면이 있습니다.</li>
-            <li>미리 평가되지 않은 국면의 경우, 서버를 이용해 <code>kata1-b18c384nbt-s9996604416-d4316597426</code>에 1회의 플레이아웃을 주어 국면을 분석합니다.</li>
+            <li>미리 평가되지 않은 국면은 서버가 <code>kata1-b18c384nbt-s9996604416-d4316597426</code>로 30회의 플레이아웃으로 분석합니다. 부하가 높을 때만 1회의 플레이아웃으로 낮아지며, 그럴 때는 그 사실을 알려 줍니다.</li>
             <li>실패했을 때, 너무 빨리 두었고 더 오래 생각하면 더 나은 결과가 나오는 경우, 천천히 붉어지는 화면이 나타납니다.</li>
             <li>실패했을 때, 복습에 시간을 많이 들이지 않은 반복 문제를 틀렸고 해법 복습에 시간을 더 들이면 더 나은 결과가 나오는 경우, 천천히 붉어지는 화면이 나타납니다.</li>
-            <li>문제 선택은 여러분의 시도 기록으로부터 학습합니다. 모든 국면은 소수의 스킬 축 — 현재 다섯 개로, 형세판단, 계가, 포석과 끝내기, 수읽기와 모양, 공격과 수비를 다룹니다 — 위에서 점수가 매겨집니다. 이 축들은 KataGo가 판을 읽어 낸 내부 표현을 바탕으로 실제 플레이어들의 풀이 결과로부터 학습되어, 각 축은 플레이어들 사이에 실제로 존재하는 차이를 포착합니다. 사용자별 로지스틱 회귀가 앞으로 나올 문제를 여러분이 자주 걸려 넘어지는 스킬 쪽으로 기울입니다. 여러분이 틀린 수를 두면, 실제로 둔 수도 같은 축 위에서 점수가 매겨지므로, 시스템은 "국면이 읽기 어렵다"와 "여러분이 이런 종류의 수를 과하게 두거나 부족하게 둔다"를 구분할 수 있습니다 — 그리고 문제 선택은 그 방향을 이용해, 이미 과하게 두는 것을 더 내놓기보다 부족하게 두는 스킬을 우선합니다.</li>
+            <li>문제 선택은 여러분의 시도 기록으로부터 학습합니다. 모든 국면은 소수의 스킬 축 — 현재 일곱 개로, 사활, 끝내기, 패, 포석, 손빼기, 선수, 수상전을 다룹니다 — 위에서 점수가 매겨집니다. 이 축들은 KataGo가 판을 읽어 낸 내부 표현을 바탕으로 실제 플레이어들의 풀이 결과로부터 학습되어, 각 축은 플레이어들 사이에 실제로 존재하는 차이를 포착합니다. 사용자별 로지스틱 회귀가 앞으로 나올 문제를 여러분이 자주 걸려 넘어지는 스킬 쪽으로 기울입니다. 여러분이 틀린 수를 두면, 실제로 둔 수도 같은 축 위에서 점수가 매겨지므로, 시스템은 "국면이 읽기 어렵다"와 "여러분이 이런 종류의 수를 과하게 두거나 부족하게 둔다"를 구분할 수 있습니다 — 그리고 문제 선택은 그 방향을 이용해, 이미 과하게 두는 것을 더 내놓기보다 부족하게 두는 스킬을 우선합니다.</li>
             <li>틀린 문제가 복습할 때가 되면 알려 주도록 푸시 알림을 켤 수 있습니다.</li>
             <li>커뮤니티 탭은 지난 한 주 동안의 서버 전체 익명 통계 — 전체 활동, 급수/단 분포, 시간 사용, 그리고 플레이어들이 틀린 문제로 얼마나 빨리 돌아오는지 — 를 여러분 자신의 위치를 강조하여 보여 줍니다.</li>
             <li>통계 페이지는 여러분의 문제 풀이 확률에 영향을 미치는 요인들을 추적합니다. 이상적으로는 시간 관련 지표가 0에 가까워야 하며, "풀이한 문제당" 지표의 양의 추세는 학습을 나타냅니다. 또한 시도별 레이팅 기록 차트, 95% 신뢰 구간이 있는 부드럽게 처리한 장기 기력 추정값, 세션 간 컨디션 분산 지표, 그리고 여러분이 잘못 두는 경향이 있는 스킬을 평이한 문장으로 설명한 정렬된 목록을 보여 줍니다.</li>
