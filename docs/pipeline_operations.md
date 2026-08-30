@@ -32,7 +32,7 @@ GPU, resumable by file existence, iterates both sizes. Feeds both the rating fea
 
 **Mandatory, not diagnostic.** Per problem, it measures how many stones' worth of ownership the correct first move swings against the best resolved refutation, into `activations/_signal_cache/ownership_swing.csv`. It is a feature block the rating features read, and `joint_feature_tail` **raises** on a live tsumego with no row — so a corpus top-up that skips this step aborts `train_mirt` one step later, pointing at the wrong place. An unreadable SGF aborts for the same reason.
 
-It is also read by two of the shipped motif rules (`life and death`, `territory`), and `build_motif_proxies` **silently skips** a problem with no row, so a gap here quietly shrinks the taught set as well.
+It is also read by two of the shipped motif rules (`life and death`, `semeai`), and `build_motif_proxies` **silently skips** a problem with no row, so a gap here quietly shrinks the taught set as well.
 
 Resumable by the `tid` column, appended and fsynced periodically. Iterates all board sizes, takes no arguments, and has no alternate evaluator — it is production-lean by design.
 

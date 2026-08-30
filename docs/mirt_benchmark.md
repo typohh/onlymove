@@ -265,27 +265,40 @@ the DIRECTION is the finding and the margins are not. But the direction is
 consistent across the tier split and the combined column agrees, which is enough to
 stop pursuing it: a rule's own rating dependence is not the thing to remove.
 
-### THE PRODUCTION RULE SET IS THE FIVE FROM THE WORKING TIER
+### THE PRODUCTION RULE SET IS THE SEVEN OF `comp7_core` — MEASURED 2026-08-30
 
-`axes/labels.json` ships `ko`, `counting`, `tenuki`, `life and death`, `territory`,
-one rule per axis, unidirectional, so `K_AXES` = 5. **The criterion is reliability,
-not likelihood**, and that is a decision about what the axes are FOR: the axes exist
-to report a user's weaknesses and tilt selection, which needs a user's position on
-an axis to be identifiable from a plausible history. Combined logloss cannot
-adjudicate at this resolution anyway — paired, K=4 -> 6 -> 8 moves it by less than
-the draw-to-draw spread — while N50 separates the two tiers several-fold at every K
-tried, and no K rescues a second-tier rule.
+`axes/labels.json` ships `life and death`, `yose`, `ko`, `opening`, `tenuki`,
+`sente`, `semeai`, one rule per axis, unidirectional, so `K_AXES` = 7. **The
+criterion is reliability, not likelihood**, and that is a decision about what the
+axes are FOR: the axes exist to report a user's weaknesses and tilt selection, which
+needs a user's position on an axis to be identifiable from a plausible history.
+Combined logloss cannot adjudicate at this resolution anyway — paired, K=4 -> 6 -> 8
+moves it by less than the draw-to-draw spread — while N50 separates the tiers
+several-fold at every K tried, and no K rescues a second-tier rule.
 
-**`tenuki` ships against its own evidence, deliberately, and is the axis to watch.**
-Its N50 qualifies but its reliability curve is FLAT across three banks and twelve
-seeds, which says the between-user variance is ~0 and the N50 is a curve-fit
-artifact. If that is what it is, `fit_population_constants` is where it shows up:
-`WEAKNESS_AXIS_MIN_VAR_RATIO` tests between-user variance against the mean per-user
-estimation variance and halts on exactly this case. That gate is measuring a
-different estimator on different data — the client's augmented EB design over all
-users, not a parity split of the MIRT's own axis — so it is a genuine second
-reading rather than a restatement, and it is the check that decides whether the
-axis is real.
+**Provenance, and it is NOT the pinned one above.** These arms ran on the production
+data as it stood on the measurement date — 298,501 attempt rows over 2,507 users —
+with `--production` and no problem holdout, so the figures below are ARM-AGAINST-ARM
+at a fixed seed and cannot be put beside the held-out tables in this document. The
+comparison that carries them is the pairing across the two seeds, nothing else.
+
+The arms are two seeds each, dumped to `dev_runs/<arm>_s{0,1}.{log,npz}`.
+`comp7_core` carries the sweep's best TIME-ADJUSTED SURVEY RHO — highest on seed 0
+at 0.8590 and second on seed 1 at 0.8581, and the only arm whose WORSE seed clears
+0.855, against the nine-rule `all9`'s 0.8416 / 0.8454. Stop-split does not separate
+the arms at all: comp7_core's 0.4822 / 0.4804 sits inside a field running about
+0.480 to 0.488, the same resolution problem the K panel above reports. Read the
+pairing rather than the margin — a single-seed rho gap this size sits inside the
+seed spread elsewhere in the same sweep (`comp8_noopen` runs 0.8472 / 0.8634).
+
+**Every axis in this set passes the CURVE test as well as the N50** (the test itself,
+and why the N50 alone cannot make it, are in `motif_axes_workflow.md`). Scored on
+`dev_runs/comp7_core_s{0,1}.npz`, N50 spans 501–1,441 on seed 0 and 521–2,527 on
+seed 1 against the ability control's 102 / 109, and the ordering inside that span
+does not survive the seed change — the set is what replicates, not the ranking.
+`tenuki` climbs on both — r at a thousand attempts 0.72 / 0.53, trend +0.80 on each,
+user-bootstrap interval there clear of zero ([+0.12, +0.89], [+0.27, +0.70]) — and it
+climbs in the wide `all9` arm as well (0.08/0.42/0.42/0.53, N50 680).
 
 ## AXIS VALUE IS A PROPERTY OF THE HOLDOUT DRAW, NOT OF THE MODEL — MEASURED 2026-08-21
 
