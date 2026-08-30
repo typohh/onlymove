@@ -23,6 +23,11 @@ trunk twice —
                columns. --no-input-scale measures the eval-convention variant
                (all surviving columns at scale 1) instead.
 
+--population picked swaps the uniform cell population for the wrong moves
+players actually recorded (db/d1.sqlite, weighted by attempt counts) — the
+population the tendency test's observed side runs on — and weights each
+problem's null shift by how often it was really failed.
+
 and compare, per axis, at the client's own resolution (fp16 storage cast +
 quantizeEmbedding's round-to-0.01):
 
@@ -46,6 +51,7 @@ property of the conditioning, not of the cells alone.
 import argparse
 import json
 import os
+import sqlite3
 import sys
 import time
 
@@ -55,165 +61,192 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-import sgfmill.sgf  # noqa: E402
-
-from utils.katago.coords import gtp_to_xy, sgf_to_gtp  # noqa: E402
-from utils.katago.sgf_parsing import parse_tsumego_sgf  # noqa: E402
-from utils.rating.mirt_net import build_trunk  # noqa: E402
-from utils.rating.model_constants import (  # noqa: E402
-    INPUT_DROPOUT, K_AXES, PCA_DIM, SEED, SIZES)
-from utils.rating.features import (  # noqa: E402
-    SIZE_FLAG_COLS, corpus_tids_by_size, joint_feature_tail,
-    load_joint_activation_basis, load_joint_tail_blocks)
-
-MODEL_PT = os.path.join(PROJECT_ROOT, "ratings", "mirt_model.pt")
+from utils.katago.coords import gtp_to_xy  # noqa: E402
+from utils.rating.model_constants import INPUT_DROPOUT, K_AXES, SIZES  # noqa: E402
+from auxiliary.ablations._projection import (  # noqa: E402
+    ShippedProjection, problem_arrays, quantize, variation_npz_rows)
 
 
-def quantize(a):
-    """Client resolution: fp16 storage cast, then quantizeEmbedding's 0.01 rounding."""
-    return np.round(a.astype(np.float16).astype(np.float64) * 100.0) / 100.0
+def load_picked_errors():
+    """{(size, tid): [(x, y, n_attempts)]} — recorded wrong first-time attempts'
+    move coordinates from the local DB copy, GTP-decoded. This is the population
+    the tendency test's OBSERVED side actually runs on, so in --population
+    picked the flip statistics weight each (problem, cell) by how often real
+    players picked it."""
+    db = os.path.join(PROJECT_ROOT, "db", "d1.sqlite")
+    if not os.path.exists(db):
+        raise SystemExit(f"missing {db} — run pipeline.fetch_database first")
+    con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    try:
+        rows = con.execute(
+            "SELECT size, problem, move, COUNT(*) FROM tsumego_reports "
+            "WHERE success = 0 AND is_repeat = 0 AND move IS NOT NULL AND move != '' "
+            "GROUP BY size, problem, move").fetchall()
+    finally:
+        con.close()
+    out = {}
+    for size, tid, move, cnt in rows:
+        xy = gtp_to_xy(move)
+        if xy is None:
+            continue
+        out.setdefault((int(size), str(tid)), []).append(
+            (int(xy[0]), int(xy[1]), int(cnt)))
+    return out
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--n-per-size", type=int, default=1000)
+    ap.add_argument("--n-per-size", type=int, default=1000,
+                    help="problems sampled per board (variations mode only)")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--no-input-scale", action="store_true",
                     help="masked arm at eval convention: surviving columns at "
                          "scale 1 instead of 1/(1-INPUT_DROPOUT)")
+    ap.add_argument("--population", choices=("variations", "picked"),
+                    default="variations",
+                    help="variations: uniform over sampled problems' variation "
+                         "cells (the null's own population). picked: every "
+                         "problem with recorded wrong attempts, observed-side "
+                         "cells weighted by real error counts from the DB — "
+                         "the population the tendency test's observed "
+                         "direction runs on")
     args = ap.parse_args()
 
     import torch
-    import torch.nn as nn
     t0 = time.time()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    if not os.path.exists(MODEL_PT):
-        raise SystemExit(f"no {MODEL_PT} — run pipeline.train_mirt first")
-    tids_by_size = corpus_tids_by_size(SIZES)
-    basis = load_joint_activation_basis(SIZES, tids_by_size, PCA_DIM, SEED)
-    m1, s1 = basis["m1"], basis["s1"]
-    C, pmean = basis["C"], basis["pca_mean"]
-    m2, s2 = basis["m2"], basis["s2"]
-
-    st = torch.load(MODEL_PT, map_location=device)
-    wide, n_wide = load_joint_tail_blocks(SIZES, tids_by_size)
-    fdim = PCA_DIM + n_wide + SIZE_FLAG_COLS
-    trunk, d = build_trunk(fdim, dropout=0.0)
-    trunk = trunk.to(device)
-    trunk.load_state_dict(st["trunk"])
-    trunk.eval()
-    g_lin = nn.Linear(d, K_AXES, bias=False).to(device)
-    g_lin.load_state_dict(st["g_lin"])
-    g_rms = st["g_rms"].to(device).view(1, -1)
+    P = ShippedProjection(device)
+    tids_by_size = P.tids_by_size
     act_scale = 1.0 if args.no_input_scale else 1.0 / (1.0 - INPUT_DROPOUT)
 
-    rng = np.random.default_rng(args.seed)
-    sample = []
-    for size in SIZES:
-        tids = tids_by_size[size]
-        pick = rng.choice(len(tids), size=min(args.n_per_size, len(tids)),
-                          replace=False)
-        sample += [(size, tids[i]) for i in sorted(pick)]
-    print(f"{len(sample)} problems sampled (seed {args.seed}), device {device}, "
-          f"masked-arm activation scale {act_scale:.4f}", flush=True)
+    picks = None
+    if args.population == "picked":
+        picks = load_picked_errors()
+        corpus = {(s, t) for s in SIZES for t in tids_by_size[s]}
+        sample = sorted(k for k in picks if k in corpus)
+        print(f"{len(sample)} failed problems from the DB "
+              f"({sum(c for v in picks.values() for *_xy, c in v)} wrong "
+              f"attempts), device {device}, masked-arm activation scale "
+              f"{act_scale:.4f}", flush=True)
+    else:
+        rng = np.random.default_rng(args.seed)
+        sample = []
+        for size in SIZES:
+            tids = tids_by_size[size]
+            pick = rng.choice(len(tids), size=min(args.n_per_size, len(tids)),
+                              replace=False)
+            sample += [(size, tids[i]) for i in sorted(pick)]
+        print(f"{len(sample)} problems sampled (seed {args.seed}), device "
+              f"{device}, masked-arm activation scale {act_scale:.4f}",
+              flush=True)
 
     K = K_AXES
-    n_pairs = np.zeros(K, dtype=np.int64)
-    n_flip = np.zeros(K, dtype=np.int64)
-    n_strict_any = np.zeros(K, dtype=np.int64)
-    n_tie_change = np.zeros(K, dtype=np.int64)
+    n_pairs = np.zeros(K)
+    n_flip = np.zeros(K)
+    n_strict_any = np.zeros(K)
+    n_tie_change = np.zeros(K)
     p_pairs = [[] for _ in range(K)]
     absd_full = np.zeros(K)
     absd_mask = np.zeros(K)
     corr_shift = np.zeros(K)
     n_corr = 0
-    n_skip_parse, n_skip_cells = 0, 0
+    n_skip = 0
+    n_outside, n_at_correct, n_no_obs = 0, 0, 0
 
-    with torch.no_grad():
-        for done, (size, tid) in enumerate(sample, 1):
-            sgf_path = os.path.join(PROJECT_ROOT, "tsumegos", str(size), tid + ".sgf")
-            npz_path = os.path.join(PROJECT_ROOT, "activations", str(size), tid + ".npz")
-            try:
-                with open(sgf_path, "rb") as f:
-                    game = sgfmill.sgf.Sgf_game.from_bytes(f.read())
-                _, variation_nodes = parse_tsumego_sgf(game)
-            except Exception:
-                n_skip_parse += 1
+    for done, (size, tid) in enumerate(sample, 1):
+        cand, xys, correct_idx = problem_arrays(size, tid)
+        var_rows = variation_npz_rows(size, tid, xys)
+        if var_rows is None or correct_idx not in var_rows or len(var_rows) < 2:
+            n_skip += 1
+            continue
+        xy_to_row = {(int(x), int(y)): i for i, (x, y) in enumerate(xys)}
+
+        rows = np.array(var_rows, dtype=np.intp)
+        Z = P.pca(cand[rows])
+        tail_full = P.tail(size, tid)
+        tail_mask = tail_full.copy()
+        tail_mask[:P.n_wide] = 0.0             # size flag kept
+        n = len(rows)
+        inp = np.concatenate([
+            np.concatenate([Z, np.tile(tail_full, (n, 1))], axis=1),
+            np.concatenate([Z * act_scale, np.tile(tail_mask, (n, 1))], axis=1),
+        ], axis=0).astype(np.float32)
+        g = P.axes(inp)
+        gA, gB = g[:n], g[n:]
+        ci = var_rows.index(correct_idx)
+        qA, qB = quantize(gA), quantize(gB)
+
+        # Observed-side cells: the whole variation set (uniform), or the
+        # really-picked wrong cells weighted by their attempt counts.
+        if picks is None:
+            obs_idx = [i for i in range(n) if i != ci]
+            obs_w = np.ones(len(obs_idx))
+        else:
+            row_to_local = {r: i for i, r in enumerate(var_rows)}
+            obs_idx, wlist = [], []
+            for x, y, cnt in picks[(size, tid)]:
+                li = row_to_local.get(xy_to_row.get((x, y)))
+                if li is None:
+                    n_outside += cnt       # no embeddable variation cell —
+                    continue               # the client gets no vector either
+                if li == ci:
+                    n_at_correct += cnt    # failed deeper in the tree; the
+                    continue               # sign test drops it as a tie
+                obs_idx.append(li)
+                wlist.append(cnt)
+            if not obs_idx:
+                n_no_obs += 1
                 continue
-            with np.load(npz_path, allow_pickle=False) as dnpz:
-                cand = np.asarray(dnpz["candidates"], dtype=np.float32)
-                xys = np.asarray(dnpz["xys"], dtype=np.int64)
-                correct_idx = int(dnpz["correct_idx"])
-            xy_to_row = {(int(x), int(y)): i for i, (x, y) in enumerate(xys)}
-            var_rows = []
-            ok = True
-            for node in variation_nodes:
-                _, mb = node.get_raw_move()
-                xy = gtp_to_xy(sgf_to_gtp(mb.decode("utf-8"), size))
-                if xy is None:
-                    continue                       # pass — never embedded
-                r = xy_to_row.get((int(xy[0]), int(xy[1])))
-                if r is None:
-                    ok = False
-                    break
-                var_rows.append(r)
-            if not ok or correct_idx not in var_rows or len(var_rows) < 2:
-                n_skip_cells += 1
-                continue
+            obs_w = np.array(wlist, dtype=np.float64)
 
-            rows = np.array(var_rows, dtype=np.intp)
-            Z = ((((cand[rows] - m1) / s1 - pmean) @ C.T - m2) / s2)
-            tail_full = joint_feature_tail((size, tid), wide).astype(np.float32)
-            tail_mask = tail_full.copy()
-            tail_mask[:n_wide] = 0.0               # size flag kept
-            n = len(rows)
-            inp = np.concatenate([
-                np.concatenate([Z, np.tile(tail_full, (n, 1))], axis=1),
-                np.concatenate([Z * act_scale, np.tile(tail_mask, (n, 1))], axis=1),
-            ], axis=0)
-            g = g_lin(trunk(torch.from_numpy(inp).to(device))) / g_rms
-            g = g.cpu().numpy()
-            gA, gB = g[:n], g[n:]
-            ci = var_rows.index(correct_idx)
-            qA, qB = quantize(gA), quantize(gB)
-
-            corr_shift += np.abs(gA[ci] - gB[ci])
-            n_corr += 1
-            alt = [i for i in range(n) if i != ci]
-            dA = qA[ci][None, :] - qA[alt]
-            dB = qB[ci][None, :] - qB[alt]
-            sA, sB = np.sign(dA), np.sign(dB)
-            strictA, strictB = sA != 0, sB != 0
-            both = strictA & strictB
-            n_pairs += both.sum(axis=0)
-            n_flip += ((sA * sB) < 0).sum(axis=0)
-            n_strict_any += (strictA | strictB).sum(axis=0)
-            n_tie_change += (strictA ^ strictB).sum(axis=0)
-            absd_full += np.abs(gA[ci][None, :] - gA[alt]).sum(axis=0)
-            absd_mask += np.abs(gB[ci][None, :] - gB[alt]).sum(axis=0)
-            for k in range(K):
-                a_above = int((sA[:, k] < 0).sum())
-                a_below = int((sA[:, k] > 0).sum())
-                b_above = int((sB[:, k] < 0).sum())
-                b_below = int((sB[:, k] > 0).sum())
-                if a_above + a_below > 0 and b_above + b_below > 0:
-                    p_pairs[k].append((a_above / (a_above + a_below),
-                                       b_above / (b_above + b_below)))
-            if done % 400 == 0:
-                print(f"  {done}/{len(sample)} ({time.time()-t0:.0f}s)", flush=True)
+        corr_shift += np.abs(gA[ci] - gB[ci])
+        n_corr += 1
+        wcol = obs_w[:, None]
+        dA = qA[ci][None, :] - qA[obs_idx]
+        dB = qB[ci][None, :] - qB[obs_idx]
+        sA, sB = np.sign(dA), np.sign(dB)
+        strictA, strictB = sA != 0, sB != 0
+        n_pairs += ((strictA & strictB) * wcol).sum(axis=0)
+        n_flip += (((sA * sB) < 0) * wcol).sum(axis=0)
+        n_strict_any += ((strictA | strictB) * wcol).sum(axis=0)
+        n_tie_change += ((strictA ^ strictB) * wcol).sum(axis=0)
+        absd_full += (np.abs(gA[ci][None, :] - gA[obs_idx]) * wcol).sum(axis=0)
+        absd_mask += (np.abs(gB[ci][None, :] - gB[obs_idx]) * wcol).sum(axis=0)
+        # The null stays over the problem's whole variation set (that IS the
+        # null), entering once per observed error — matching the shipped
+        # Poisson-binomial, where each error contributes its problem's p.
+        nul = [i for i in range(n) if i != ci]
+        nA = np.sign(qA[ci][None, :] - qA[nul])
+        nB = np.sign(qB[ci][None, :] - qB[nul])
+        # One problem one vote in the uniform draw; in picked mode a problem
+        # votes once per real error, matching the Poisson-binomial's sum of p.
+        w_prob = float(obs_w.sum()) if picks is not None else 1.0
+        for k in range(K):
+            a_above = int((nA[:, k] < 0).sum())
+            a_below = int((nA[:, k] > 0).sum())
+            b_above = int((nB[:, k] < 0).sum())
+            b_below = int((nB[:, k] > 0).sum())
+            if a_above + a_below > 0 and b_above + b_below > 0:
+                p_pairs[k].append((a_above / (a_above + a_below),
+                                   b_above / (b_above + b_below), w_prob))
+        if done % 400 == 0:
+            print(f"  {done}/{len(sample)} ({time.time()-t0:.0f}s)", flush=True)
 
     labels_path = os.path.join(PROJECT_ROOT, "axes", "labels.json")
     names = [str(c) for c in json.load(open(labels_path))["components"]] \
         if os.path.exists(labels_path) else [f"axis{i}" for i in range(K)]
 
-    print(f"\nproblems used: {n_corr}  (skipped: {n_skip_parse} parse, "
-          f"{n_skip_cells} cell-map)", flush=True)
+    extra = (f", {n_outside} picked outside the variation set, "
+             f"{n_at_correct} at the correct cell, {n_no_obs} problems with "
+             f"no usable pick" if picks is not None else "")
+    print(f"\nproblems used: {n_corr}  (skipped: {n_skip}{extra})", flush=True)
     print(f"\n{'axis':<24}{'pairs':>8}{'flip%':>8}{'tie-ch%':>9}"
           f"{'mean|dp|':>10}{'p90|dp|':>9}{'|d|mask/full':>13}{'corr-shift':>11}")
     for k in range(K):
-        dp = np.array([abs(a - b) for a, b in p_pairs[k]])
+        dp = np.repeat(np.array([abs(a - b) for a, b, _ in p_pairs[k]]),
+                       np.array([int(w) for *_a, w in p_pairs[k]], dtype=np.int64))
         ratio = absd_mask[k] / max(absd_full[k], 1e-12)
-        print(f"{names[k][:23]:<24}{n_pairs[k]:>8}"
+        print(f"{names[k][:23]:<24}{int(n_pairs[k]):>8}"
               f"{100.0 * n_flip[k] / max(n_pairs[k], 1):>8.2f}"
               f"{100.0 * n_tie_change[k] / max(n_strict_any[k], 1):>9.2f}"
               f"{dp.mean() if len(dp) else float('nan'):>10.4f}"
