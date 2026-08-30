@@ -225,3 +225,4 @@ todo.md
 
 # Derived work-splitting list, regenerated from the corpus on each fleet run.
 tsumegos/exclude_*.txt
+/axes/per_cell.stale-*
