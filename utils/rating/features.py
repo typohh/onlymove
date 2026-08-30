@@ -742,10 +742,9 @@ def _game_phase_one(path):
 
     prefix = the linear move chain from root to the branch point (the game that
     led to the contested position); main_len = non-pass moves on the principal
-    line (first-child chain) of the CORRECT first move — the child with the best
-    winrate comment, score breaking ties (the same choice as the PWA's
-    findBestMoveFromChildren / cache_rating_features slot 0). The principal line
-    terminates in passes by construction."""
+    line (first-child chain) of the CORRECT first move — here the child with the
+    best winrate comment, score breaking ties, matching cache_rating_features
+    slot 0. The principal line terminates in passes by construction."""
     import re as _re
     import sgfmill.sgf
     cmt_re = _re.compile(rb"(\d+\.?\d*)%/([-]?\d+\.?\d*)")
@@ -1160,16 +1159,26 @@ def load_joint_mirt_features(sizes, pca_dim, seed, blocks="all"):
     a slice has to restate where the activation block ends, which is the one number this
     function exists to state once. "all" is the shipped layout and the only value any
     production stage passes; "activations" drops every wide block, leaving the activation
-    PCA and the board-size flag. The size flag is NOT a block and stays in both (it is
-    the board the problem is on, not a property measured about it), and it stays outside
-    the dropout region in both, so the two arms differ in columns and in nothing else.
+    PCA and the board-size flag; "activations+bot" keeps the bot-winrate block as the
+    one wide block and drops move evals, ownership and phase — the blocks that describe
+    the problem via its ANSWER, which is what makes them per-cell conditioning when the
+    trunk is fanned out over alternative moves. The size flag is NOT a block and stays
+    in every arm (it is the board the problem is on, not a property measured about it),
+    and it stays outside the dropout region in every arm, so the arms differ in columns
+    and in nothing else.
     """
-    if blocks not in ("all", "activations"):
-        raise ValueError(f"blocks must be 'all' or 'activations', got {blocks!r}")
+    if blocks not in ("all", "activations", "activations+bot"):
+        raise ValueError(
+            f"blocks must be 'all', 'activations' or 'activations+bot', got {blocks!r}")
     tids_by_size = corpus_tids_by_size(sizes)
     act, k_act = load_joint_activations(sizes, tids_by_size, pca_dim, seed)
-    wide, n_wide = (load_joint_tail_blocks(sizes, tids_by_size)
-                    if blocks == "all" else ((), 0))
+    if blocks == "all":
+        wide, n_wide = load_joint_tail_blocks(sizes, tids_by_size)
+    elif blocks == "activations+bot":
+        bw, nb = load_joint_bot_winrate(sizes, tids_by_size)
+        wide, n_wide = (("bot_winrate", bw),), nb
+    else:
+        wide, n_wide = (), 0
     keys = [(s, t) for s in sizes for t in tids_by_size[s]]
     key_idx = {key: i for i, key in enumerate(keys)}
     input_dim = k_act + n_wide

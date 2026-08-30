@@ -1039,16 +1039,21 @@ def main():
                     help="trunk activation. SwiGLU by default; it doubles the "
                          "trunk's parameters at a given width, so read it "
                          "against the relu control rather than alone.")
-    ap.add_argument("--features", choices=("production", "activations"),
+    ap.add_argument("--features",
+                    choices=("production", "activations", "activations+bot"),
                     default="production",
                     help="WHICH per-problem blocks the trunk sees. `production` is "
                          "the shipped layout (activation PCA + bot winrate + move "
                          "evals + ownership swing + game phase + the board-size "
                          "flag); `activations` keeps the activation PCA and the "
-                         "size flag and drops every wide block. The ablation is "
+                         "size flag and drops every wide block; `activations+bot` "
+                         "additionally keeps bot winrate and drops only the "
+                         "answer-derived blocks (move evals, ownership, phase) — "
+                         "the ones that become correct-move conditioning when the "
+                         "trunk is fanned out per cell. The ablation is "
                          "selected inside utils.rating.features, not by slicing "
-                         "the matrix here, so neither arm restates where the "
-                         "activation block ends. Both arms keep the size flag "
+                         "the matrix here, so no arm restates where the "
+                         "activation block ends. Every arm keeps the size flag "
                          "outside the dropout region, so INPUT_DROPOUT masks the "
                          "same fraction of what each is given.")
     ap.add_argument("--global-slope", action="store_true",
@@ -1163,7 +1168,8 @@ def main():
     # the problem, while the corpus set raises.
     feat, keys, key_idx, input_dim = load_joint_mirt_features(
         SIZES, PCA_DIM, SEED,
-        blocks=("all" if args.features == "production" else "activations"))
+        blocks={"production": "all", "activations": "activations",
+                "activations+bot": "activations+bot"}[args.features])
     fdim = feat.shape[1]
     print(f"loaded in {time.time() - t0:.0f}s: {len(keys)} problems, feat "
           f"{fdim} (dropout region {input_dim}), blocks={args.features}",
