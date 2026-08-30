@@ -252,10 +252,11 @@ def minimax(node, is_pass, prev_was_pass, depth):
 
 
 def pick_answer(roots):
-    """The move the client accepts as correct: highest winrate, score breaks ties.
+    """The answer as the EVALUATIONS name it: highest winrate, score breaks ties.
 
-    Mirrors findBestMoveFromChildren in pwa/js/sgf.js -- selection is by
-    evaluation, never by document order.
+    Deliberately not the corpus contract (variation 0, which is what the client
+    and every pipeline stage read). This is an audit: picking the other way is
+    what lets it report where a shipped file's comments disagree with its order.
     """
     best, best_w, best_s = None, -float('inf'), -float('inf')
     for child in roots:

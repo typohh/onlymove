@@ -10,8 +10,9 @@ with no such flip is decided by territory or capture-race counting, not by life
 and death.
 
 Method, per problem:
-  - Parse the SGF; the correct move is variation_nodes[0] (generator convention,
-    enforced by promote_winning_first_move) and its colour is the solver.
+  - Parse the SGF; the correct move is variation_nodes[0] (generator convention:
+    construct_initial_sgf writes it first and every later pass appends) and its
+    colour is the solver.
   - Collect the RESOLVED refutations: root variations whose subtree carries a
     resolved continuation, i.e. lines the generator drove to a double pass. Everything else
     is an abandoned stub, and an ownership map read off one of those is the net's
@@ -73,11 +74,10 @@ comment is written at whatever budget the pass that produced it used, and
 uniform across a problem's variations. That is still a search per candidate
 against one visit per candidate.
 
-Note this is NOT the client's rule for naming the answer
-(`findBestMoveFromChildren`: winrate first, score breaking exact ties) and must
-not be conformed to it — the client decides which move a player should find,
-where win probability is what a player maximizes; this module decides which
-position to measure against.
+Note this is NOT how the answer is named — that is variation 0, fixed at
+generation — nor the winrate-first ranking the move-eval features use, and it
+must not be conformed to either. Those say which move a player should find;
+this module decides which position to measure against.
 
 Units: a delta of 2.0 in raw ownership is one point going from wholly the
 opponent's to wholly ours, so every swing column is HALVED to read as stones.

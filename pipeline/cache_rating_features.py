@@ -154,8 +154,9 @@ def extract_move_features(game):
 
     All candidate first-move nodes share the side to move; each comment is read and oriented to
     that side (win prob and score from the solver's perspective). Moves are sorted best→worst by
-    (win-prob, score) so slot 0 IS the winning move (the same choice as the PWA's
-    findBestMoveFromChildren — highest win rate, score breaking ties), and slots 1..9 are the
+    (win-prob, score) so slot 0 is the best-evaluated move — which is the answer, though the
+    answer is CONTRACTUALLY variation 0 and this sort is a feature layout, not a lookup —
+    and slots 1..9 are the
     best alternatives. The rare problem with <10 evaluated moves forward-fills its last (worst)
     move into the empty slots (gap-to-a-missing-alternative = 0)."""
     _setup, vnodes = parse_tsumego_sgf(game)
@@ -182,8 +183,8 @@ def extract_move_features(game):
 
 def _ranked_children(node, solver_black):
     """A node's evaluated children as [(solver_wp, solver_score, child)], ordered by what the
-    MOVER would pick — highest win prob for the mover, score breaking ties, the PWA's
-    findBestMoveFromChildren rule (also how slot 0 of the block above is chosen).
+    MOVER would pick — highest win prob for the mover, score breaking ties (also how slot 0
+    of the block above is chosen).
 
     Ordering by the mover while recording for the solver is the whole split: slot 0 has to be
     the move that actually gets played, or the line walked here is not the line the solver

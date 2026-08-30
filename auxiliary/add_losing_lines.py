@@ -16,9 +16,9 @@ auxiliary/audit_solution_lines.py.
 WHAT THIS ADDS
 --------------
 Exactly one line per problem: the BEST losing first move — highest winrate for
-the side to move, score breaking exact ties, which is the client's
-findBestMoveFromChildren rule applied to the candidates that are not the answer
-— played out with KataGo's own best move for both sides until both sides pass.
+the side to move, score breaking exact ties, over the candidates that are not
+the answer (the answer being variation 0) — played out with KataGo's own best
+move for both sides until both sides pass.
 
 Only the PRINCIPAL line is added (see BRANCH_SHARE): one conclusion is what the
 problem lacks, and a branching subtree costs both engine time and shard bytes on

@@ -396,8 +396,8 @@ def rule_shape(evals, max_gap=None):
 
     `evals` is the mover-framed (winrate, score) of every root variation whose
     continuation the generator resolved — an abandoned line is not a rival, it is
-    a line nobody played out. Ranked by WINRATE, which is what names the answer
-    (findBestMoveFromChildren).
+    a line nobody played out. Ranked by WINRATE, the axis on which the answer
+    outruns its rivals (the answer itself is variation 0, not a ranking result).
 
     A MAXIMUM gap, not a minimum: a wide gap means one move wins and the other
     loses, which the position announces. The uncertain end is the narrow one, and
@@ -420,8 +420,8 @@ def rule_yose(evals):
     not. That gap is the signature of a position decided by a margin.
 
     `evals` is [(winrate, score)] over the root variations, mover-framed. Ranked
-    by WINRATE, because that is what names the answer (findBestMoveFromChildren),
-    so "best and second best" is the answer and its closest rival."""
+    by WINRATE, the axis the answer leads on, so "best and second best" is the
+    answer and its closest rival."""
     if len(evals) < 2:
         return False
     top = sorted(evals, key=lambda t: (t[0], t[1]), reverse=True)[:2]

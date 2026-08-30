@@ -15,12 +15,14 @@ For every SGF in tsumegos/<size>/ this measures:
      with the score below 0, or the reverse — at the first-move level, on the
      principal lines, and anywhere in the tree.
 
-THE WINNING MOVE IS DEFINED BY EVALUATION, NOT BY POSITION.  Historic files
-exist whose variation_nodes[0] is not the winning move, so the winner is picked
-the way the PWA picks it (pwa/js/sgf.js findBestMoveFromChildren: best winrate
-among the first moves, score as the tie-break).  How often that disagrees with
-variation_nodes[0] — the convention benchmark_bots / extract_activations /
-package_for_pwa still use — is reported, as is a census of the stricter
+THE ANSWER IS variation_nodes[0] — the corpus contract every consumer reads,
+the client's isCorrectMove included.  This audit deliberately picks the winner
+the OTHER way, by evaluation (best winrate among the first moves, score as the
+tie-break), precisely so the two can be compared: the count below is how often a
+shipped file's own comments name a first move other than the one generation
+verified, which is a corpus-health signal and nothing else.  A disagreement is
+never resolved by reordering; the answer's position is fixed when the tree is
+built.  Also reported is a census of the stricter
 "exactly one first move with winrate > 50% AND score > 0" rule that
 utils.katago.add_variations.first_move_is_well_formed gates new problems on.
 
@@ -149,7 +151,7 @@ def conflict_strength(ev):
 
 
 def pick_winning_move(children, solver_is_black):
-    """The winning first move, by EVALUATION — the PWA's findBestMoveFromChildren.
+    """The winning first move, by EVALUATION — deliberately not by position.
 
     Best solver-perspective winrate among the first moves, score as the tie-break.
     Returns (index, node) or (None, None) when nothing carries an evaluation.
@@ -346,7 +348,7 @@ def report(size, rows, errors):
         print(f"    mean |w_next - w_cur|      = {d:6.2f}   <- small => ONE fixed perspective")
         print(f"    mean |w_cur + w_next - 100| = {s:6.2f}   <- small would mean mover-perspective")
 
-    print(f"\n   Identifying the winning first move (by evaluation, PWA convention)")
+    print(f"\n   Identifying the winning first move (by evaluation, for comparison)")
     not_first = sum(1 for r in rows if not r["winner_is_first_child"])
     print(f"  winner is NOT variation_nodes[0]:      {pct(not_first, n)}")
     strict = {}
