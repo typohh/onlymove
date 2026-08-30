@@ -73,7 +73,10 @@ construction, which is the regime the tendency test's null exists to divide out.
 Arms. The DEFAULT arm is the production per-cell store (axes/per_cell/, or the
 retired sibling train_mirt renamed it to -- --store resolves whichever is on
 disk, and takes an explicit path so the same script re-runs against a copy or
-against a freshly written store). Store values are read as published, fp16 and
+against a freshly written store). --store is REPEATABLE, which is what puts a
+new store and the one a refit retired in one paired table rather than in two
+runs that have to be trusted to have drawn the same problems; each gets its own
+--store-params, paired by position. Store values are read as published, fp16 and
 otherwise unquantized -- the client's 0.01 rounding is deliberately NOT applied,
 since a rounding step can only shrink the within component and this measures
 what the fit emitted. A dev checkpoint enters only as an explicitly named
@@ -263,20 +266,23 @@ def decompose(per_problem, per_problem_correct, triple):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--store", default=None,
-                    help="per-cell store directory for the default arm; "
-                         "resolved from axes/per_cell* when omitted, 'none' to "
-                         "run the model arms alone")
+    ap.add_argument("--store", action="append", default=None,
+                    help="per-cell store directory; resolved from axes/per_cell* "
+                         "when omitted, 'none' to run the model arms alone. "
+                         "Repeatable, so a new store and the sibling a refit "
+                         "retired share ONE paired table")
     ap.add_argument("--arm", action="append", default=[], metavar="CKPT:BLOCKS",
                     help="comparison arm: a dev checkpoint and the block layout "
                          f"it was FITTED on ({'|'.join(FEATURE_BLOCKS)}), which "
                          "is not recoverable from the file. Repeatable")
-    ap.add_argument("--store-params", default=None, metavar="PATH",
-                    help="the store arm's OWN triple: a packed problem_params.bin "
-                         "(as package_for_pwa shipped beside that store) or a "
-                         "ratings/ directory. Defaults to the live ratings/ CSVs, "
-                         "which are correct ONLY for a store the current fit "
-                         "wrote — a later refit overwrites ratings/ in place")
+    ap.add_argument("--store-params", action="append", default=None, metavar="PATH",
+                    help="a store arm's OWN triple: a packed problem_params.bin "
+                         "(as package_for_pwa shipped beside that store), a "
+                         "ratings/ directory, or 'live' for the current ratings/ "
+                         "CSVs — which are correct ONLY for a store the current "
+                         "fit wrote, since a later refit overwrites ratings/ in "
+                         "place. Paired BY POSITION with --store; give one per "
+                         "store or none at all")
     ap.add_argument("--n-per-size", type=int, default=1500,
                     help="problems sampled per board size")
     ap.add_argument("--seed", type=int, default=0)
@@ -287,13 +293,23 @@ def main():
     device = torch.device("cpu")
 
     arms = []
-    store = args.store if args.store is not None else resolve_store()
-    if store is not None and store != "none":
-        if not os.path.isdir(store):
-            raise SystemExit(f"no per-cell store at {store}")
-        arms.append(StoreArm(store, args.store_params))
-    elif args.store is None:
-        print("no per-cell store found under axes/per_cell* — model arms only")
+    if args.store is None:
+        resolved = resolve_store()
+        stores = [resolved] if resolved else []
+        if not stores:
+            print("no per-cell store found under axes/per_cell* — model arms only")
+    else:
+        stores = [s for s in args.store if s != "none"]
+    sparams = args.store_params if args.store_params is not None \
+        else [None] * len(stores)
+    if len(sparams) != len(stores):
+        ap.error(f"--store-params is paired BY POSITION with --store: "
+                 f"{len(stores)} stores against {len(sparams)} params. Give one "
+                 f"per store ('live' for the current ratings/ CSVs) or none")
+    for s, p in zip(stores, sparams):
+        if not os.path.isdir(s):
+            raise SystemExit(f"no per-cell store at {s}")
+        arms.append(StoreArm(s, None if p == "live" else p))
     for spec in args.arm:
         ckpt, _, blocks = spec.rpartition(":")
         if not ckpt or blocks not in FEATURE_BLOCKS:
