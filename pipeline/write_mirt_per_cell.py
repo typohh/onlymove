@@ -11,33 +11,29 @@ features, a cell's shipped value is `problem_value + (z_cell - z_correct) @
 delta`, and taking that difference annihilates every additive term — the
 activation mean, the PCA mean, the post-PCA mean alike — while the rest is two
 diagonal scalings and a rotation, all linear and composing. The entire projection
-then folds into ONE matrix of K columns applied to raw activations, so a cell
-costs 6912*K.
+then folds into ONE matrix of K columns applied to the stored activations.
 
 `pipeline.train_mirt` puts a TRUNK between the features and the loadings. It is
 nonlinear, so differences no longer annihilate and nothing folds: every cell
-needs the full 6912 -> PCA_DIM projection and then the trunk.
+needs the full stored-vector -> PCA_DIM projection and then the trunk.
 
-THAT SOUNDS EXPENSIVE AND IS NOT. It is ~128x the arithmetic per cell, but the
-arithmetic was never the cost: 9.09M cells x 6912 x PCA_DIM is ~16 TFLOP, which
-measures at ~13 SECONDS on the development GPU. The run is bound entirely by
-reading and decompressing ~125 GB of activation npz, which is CPU work. So the
-optimization that matters is READ PARALLELISM, and the GPU side needs nothing
-clever.
+THAT SOUNDS EXPENSIVE AND IS NOT. The projection over every cell of the corpus
+is a batched matmul the GPU finishes in seconds; the run is bound by reading
+and decompressing the activation store (the encoded per-problem npz), which is
+CPU work. So the optimization that matters is READ PARALLELISM, and the GPU
+side needs nothing clever.
 
   READER THREADS, not one. npz decompression releases the GIL, so threads scale
   on it, and a single reader leaves the GPU idle almost all the time.
 
-  fp16 for the projection. Measured 1.19 vs 0.96 TFLOP/s here — this GPU has no
-  fast fp16 path, so the gain is bandwidth, not arithmetic.
+  fp16 for the projection matmul — this GPU has no fast fp16 path, so the gain
+  is bandwidth, not arithmetic.
 
-  NOT IMPLEMENTED, and deliberately: the non-activation block (bot winrate, move
-  evals, phase, size — 84 of 212 columns) is constant per problem, so its
-  contribution to trunk layer 1 could be computed once per problem instead of
-  once per cell. Layer 1 is ~6% of the projection cost and 84/212 of it is ~40%,
-  so the saving is ~2.4% of a term that is already not the bottleneck. It would
-  mean bypassing nn.Sequential to reach inside the first layer, and that is not
-  worth 2.4% of 13 seconds.
+  NOT IMPLEMENTED, and deliberately: the non-activation tail (bot winrate, move
+  evals, ownership, phase, size) is constant per problem, so its contribution
+  to trunk layer 1 could be computed once per problem instead of once per cell.
+  That would mean bypassing nn.Sequential to reach inside the first layer, to
+  shave a few percent off a term that is already not the bottleneck.
 
 Run after `pipeline.train_mirt`, which writes the model this reads.
 """
@@ -90,8 +86,9 @@ def _load_one(args):
 def _reader(tasks, act_dirs, q):
     """Fill the queue from a THREAD POOL. This is the whole performance story:
     the projection is seconds of GPU time and the run is bound by decompressing
-    ~125 GB of npz. That work releases the GIL, so threads scale on it, and a
-    single reader would leave the GPU idle for essentially the entire run."""
+    the activation store's npz. That work releases the GIL, so threads scale on
+    it, and a single reader would leave the GPU idle for essentially the entire
+    run."""
     from concurrent.futures import ThreadPoolExecutor
     batch = []
     with ThreadPoolExecutor(max_workers=READ_WORKERS) as ex:
@@ -154,8 +151,8 @@ def main():
     # RESUMABLE by file existence, the same idiom extract_activations uses. Every
     # write goes through a tmp file and os.replace, so a file that exists is
     # complete — an interrupted run loses at most the batch in flight. Worth
-    # having: this is a ~15 minute pass over 125 GB, and it is the last step
-    # before packaging, so it is exactly the one that gets interrupted.
+    # having: this is a long pass over the whole activation store, and it is the
+    # last step before packaging, so it is exactly the one that gets interrupted.
     n_all = len(tasks)
     tasks = [(s, t) for s, t in tasks
              if not os.path.exists(os.path.join(OUT_DIR, str(s), t + ".npz"))]

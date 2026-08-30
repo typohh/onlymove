@@ -1,6 +1,8 @@
 """Choose the frozen activation-encoder width M by measurement.
 
-Two questions, both answered from the raw activations/<size>/*.npz still on disk:
+Two questions, both answered from RAW per-problem npz (candidates at full trunk
+width). The shipped store holds the encoder's OUTPUT, so a re-run needs a raw
+extraction (`extract_activations --raw --out-dir`) in place of it:
 
 1. Spectrum scan — what fraction of the fit-set variance does an M-dim PCA
    keep, for M in {128, 256, 368, 512}? Bounds what any M-space refit can lose.
@@ -23,7 +25,7 @@ Usage:
   ./.venv/bin/python3 auxiliary/encoder_m_sweep.py [--n-third 20000] [--rows-cache PATH]
 
 The extracted row matrix is cached (--rows-cache) so the analysis half can be
-re-run without re-reading ~50GB of npz files.
+re-run without re-reading the npz set.
 """
 
 import argparse
