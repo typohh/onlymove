@@ -39,9 +39,9 @@ of the SCORE term over a personalized wr-gap baseline — i.e. whether a
 score-specific counting skill exists beyond general tightness.
 
 Usage:
-  ./.venv/bin/python3 -m auxiliary.eval_score_gap_axis
-  ./.venv/bin/python3 -m auxiliary.eval_score_gap_axis --feature wr_gap
-  ./.venv/bin/python3 -m auxiliary.eval_score_gap_axis --feature joint
+  ./.venv/bin/python3 -m ablations.eval_score_gap_axis
+  ./.venv/bin/python3 -m ablations.eval_score_gap_axis --feature wr_gap
+  ./.venv/bin/python3 -m ablations.eval_score_gap_axis --feature joint
 """
 
 import argparse

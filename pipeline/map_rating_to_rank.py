@@ -34,7 +34,7 @@ THE MODEL — a latent CONSENSUS rank, every server (EGF included) a coupling of
     contributes total weight 1 regardless of career length. A user with no fittable
     block (never MIN_ATTEMPTS inside one window) falls back to the pooled career
     rating as a single anchor. Validated by paired 50-folding CV
-    (auxiliary.eval_rank_map_cv): held-out NLL −0.04±0.01 and deep-kyu MAE 5.2→4.2
+    (ablations.eval_rank_map_cv): held-out NLL −0.04±0.01 and deep-kyu MAE 5.2→4.2
     ranks vs the pooled-career anchor, dan band unchanged. The same harness tested
     integrating each rating's Fisher CI into the likelihood (errors-in-variables)
     and REJECTED it — declaration noise dominates, so it over-steepens the curve and
@@ -71,7 +71,7 @@ THE MODEL — a latent CONSENSUS rank, every server (EGF included) a coupling of
     sends its gradient to 0 instead of letting it steer the coupling; honest
     extreme declarations (merely improbable, often cross-server-consistent) keep
     most of their weight. EPS IS DELIBERATELY SMALL: the paired CV
-    (auxiliary.eval_rank_map_cv, the +rob variants, scored on honest declarations
+    (ablations.eval_rank_map_cv, the +rob variants, scored on honest declarations
     only via --drop-eval) shows held-out NLL degrades MONOTONICALLY in eps — the
     plain logistic's linear tails already bound junk influence, so a large junk
     floor lets the fit over-sharpen its couplings (worse calibration, point

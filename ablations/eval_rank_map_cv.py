@@ -49,7 +49,7 @@ the small leak cancels in paired diffs).
 Sanity: with se=0 and unit weights this module's fit reproduces pipeline
 fit_consensus exactly (checked at startup on the full data).
 
-Usage: ./.venv/bin/python3 -m auxiliary.eval_rank_map_cv [--reps 6] [--folds 5]
+Usage: ./.venv/bin/python3 -m ablations.eval_rank_map_cv [--reps 6] [--folds 5]
 """
 
 import argparse
@@ -358,7 +358,7 @@ def main():
                          "the EVAL set only (training keeps them). For scoring on "
                          "honest declarations when the eval set is known to contain "
                          "junk — e.g. the contamination-posterior>0.5 rows from "
-                         "auxiliary.check_mapped_vs_declared_rank. Applied identically "
+                         "ablations.check_mapped_vs_declared_rank. Applied identically "
                          "to every variant, so paired diffs stay fair.")
     args = ap.parse_args()
 

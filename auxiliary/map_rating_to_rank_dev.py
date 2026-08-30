@@ -88,10 +88,10 @@ def _shape_at(ys, shape=RATING_SHAPE):
     rank_curve_shape models — 'cubic' (production), 'linear', 'exp', ..."""
     params, theta = fit_shape(shape)
     return np.asarray(theta(rank_to_axis(ys), params), float)
-from auxiliary.check_mapped_vs_declared_rank import (  # noqa: E402
-    apply_M, declared_to_internal, load_M, load_server_curves,
-    load_time_adjust, load_user_median_solve_minutes,
+from utils.rating.ratings_io import (  # noqa: E402
+    apply_M, declared_to_internal, load_M, load_rank_map, load_time_adjust,
 )
+from utils.rating.rank_surveys import load_user_median_solve_minutes  # noqa: E402
 
 # EGF declared-scalar bands for the per-band bias report (1k=0, 1d=1; no zero gap).
 EGF_BANDS = [
@@ -270,7 +270,7 @@ def time_form_study(args, boot=300):
         merged_floors.update(load_floors(args.dir, s))
     lapse = load_lapse(args.dir)
     m_ratings, m_internal = load_M(args.dir)
-    server_curves = load_server_curves(args.dir)
+    server_curves = load_rank_map(args.dir)
     # first_time_only: mirror the production anchor + the client's first-time-only
     # estimator; repeats would inflate the 80%-clear rating this harness fits.
     attempts = load_attempts_for_users(args.sql, set(surveys["user_id"].unique()),

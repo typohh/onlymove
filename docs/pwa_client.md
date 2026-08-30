@@ -239,7 +239,7 @@ Cold start (few attempts with vectors): nothing flags, neutral serve.
 
 ## Recall
 
-The model, the equilibrium and the measurement against the attempt log are `methodology.md` §2.8; the evaluation harness is `auxiliary/eval_recall_model.py`.
+The model, the equilibrium and the measurement against the attempt log are `methodology.md` §2.8; the evaluation harness is `ablations/eval_recall_model.py`.
 
 **A due recall wins a serve decision only with probability `recallServeShare()`** (`recall-model.js`), the constant-volume equilibrium share solved at a fraction of the user's trailing-week daily average. **Note the direction is the opposite of what the fraction suggests**: the working window is counted in *attempts*, so a lower assumed volume makes the served share **rise**.
 

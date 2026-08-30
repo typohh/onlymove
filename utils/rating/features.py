@@ -729,7 +729,7 @@ def load_joint_continuation(sizes, tids_by_size):
 # MIRT prototype's r head found predictable residual difficulty on exactly this
 # surface — see auxiliary.rating_dev.train_joint_mirt). Living here keeps the
 # production trainer (pipeline.train_mirt), the experiment surface
-# (auxiliary.rating_dev.*) and the axis analyses (auxiliary.eval_score_gap_axis)
+# (auxiliary.rating_dev.*) and the axis analyses (ablations.eval_score_gap_axis)
 # on ONE set of definitions: same caches, same transforms, in sync by construction.
 
 

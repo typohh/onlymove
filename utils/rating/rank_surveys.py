@@ -11,7 +11,8 @@ auxiliary/ or pipeline/ imports) so production and research both import them fro
 import datetime
 import os
 import re
-from collections import defaultdict
+import sqlite3
+from collections import defaultdict, deque
 
 import numpy as np
 import pandas as pd
@@ -250,3 +251,49 @@ def latest_per_user_server(surveys):
     surveys = surveys.sort_values("created_at")
     return (surveys.groupby(["user_id", "server"], as_index=False)
             .tail(1).reset_index(drop=True))
+
+
+# --- Client-mirror solve-time window ---------------------------------------
+# The time dock's solve-time feature, defined exactly as the CLIENT defines it:
+# the median non-repeat, timed, AFK-capped solve minutes over the user's WORKING
+# SET — the unified most-recent ANSWER_HISTORY_WORKING_SET attempts across both
+# sizes (getMergedAnswerHistory), repeats included in the window — not whole
+# history. `pipeline.map_rating_to_rank` deliberately keeps its OWN copy of these
+# numbers: the mapping's server-side feature is no longer a strict mirror (see the
+# note beside its AFK_CAP_MS), so the two must be free to diverge.
+TIME_ADJUST_AFK_CAP_MS = 180000
+TIME_ADJUST_MIN_TIMED = 20
+WORKING_SET = 3000  # ANSWER_HISTORY_WORKING_SET in pwa/js/constants.js
+
+
+def load_user_median_solve_minutes(sqlite_path, working_set=WORKING_SET):
+    """{user_prefix8: median novel solve minutes} over each user's WORKING-SET
+    window — the most-recent `working_set` attempts unified across both sizes —
+    reproducing the client's medianNovelSolveMinutes() on getMergedAnswerHistory().
+
+    The window is taken over ALL attempts (repeats included, like the client's
+    working set), ordered by created_at so backfilled rows land at their true
+    historical position, and ONLY THEN filtered to non-repeat + timed (0, AFK cap]
+    before the median — matching the client, which slices the last `working_set`
+    raw attempts first and filters inside that slice."""
+    con = sqlite3.connect(sqlite_path)
+    try:
+        # created_at is ISO-8601 TEXT (sorts chronologically); id breaks ties.
+        # Order by id, not created_at, would pull backfilled-historical rows
+        # (recent id, old timestamp) into the recent window — see the fetch
+        # cursor note in CLAUDE.md.
+        cur = con.execute(
+            "SELECT user_id, is_repeat, time_used FROM tsumego_reports "
+            "ORDER BY created_at, id")
+        windows = defaultdict(lambda: deque(maxlen=working_set))
+        for uid, is_repeat, t in cur:
+            windows[uid[:8]].append((is_repeat, t))
+    finally:
+        con.close()
+    out = {}
+    for pref, rows in windows.items():
+        ts = [float(t) for (rep, t) in rows
+              if not rep and t is not None and 0 < float(t) <= TIME_ADJUST_AFK_CAP_MS]
+        if len(ts) >= TIME_ADJUST_MIN_TIMED:
+            out[pref] = float(np.median(ts)) / 60000.0
+    return out

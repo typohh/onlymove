@@ -103,3 +103,109 @@ def load_rating_rank_curve(ratings_dir, *, size="9"):
     xs = np.asarray(c["ratings"], dtype=float)
     ys = np.asarray(c["ranks"], dtype=float)
     return xs, ys
+
+
+def interp_extrap_vec(x, xs, ys):
+    """np.interp with linear extrapolation past both ends (vectorized).
+    xs strictly ascending, len ≥ 2; x an array."""
+    y = np.interp(x, xs, ys)
+    sl0 = (ys[1] - ys[0]) / (xs[1] - xs[0])
+    sl1 = (ys[-1] - ys[-2]) / (xs[-1] - xs[-2])
+    y = np.where(x < xs[0], ys[0] + sl0 * (x - xs[0]), y)
+    y = np.where(x > xs[-1], ys[-1] + sl1 * (x - xs[-1]), y)
+    return y
+
+
+def interp_extrap(x, xs, ys):
+    """Scalar linear interp with end-slope extrapolation; mirrors the PWA's
+    rank-decomposition.js interpExtrap so client and offline tools agree exactly.
+    xs ascending, len ≥ 2; x a scalar; xs/ys may be plain lists or arrays."""
+    n = len(xs)
+    if x <= xs[0]:
+        return ys[0] + (ys[1] - ys[0]) / (xs[1] - xs[0]) * (x - xs[0])
+    if x >= xs[n - 1]:
+        return ys[n - 1] + (ys[n - 1] - ys[n - 2]) / (xs[n - 1] - xs[n - 2]) * (x - xs[n - 1])
+    lo, hi = 0, n - 1
+    while hi - lo > 1:
+        m = (lo + hi) >> 1
+        if xs[m] <= x:
+            lo = m
+        else:
+            hi = m
+    t = (x - xs[lo]) / (xs[hi] - xs[lo])
+    return ys[lo] + t * (ys[hi] - ys[lo])
+
+
+def load_M(ratings_dir, *, size="9"):
+    """The M curve's knots, SORTED: (rating_knots_asc, internal_rank_asc), ready for
+    interp_extrap_vec. Same file as load_rating_rank_curve; this adds only the sort
+    the interpolators require, and both board keys are identical so `size` rarely
+    matters. `M` is the rating→latent-consensus-rank map (pwa/shared/rank-math.js
+    applyM); every server rank is a coupling off it, not a second curve."""
+    ratings, internal = load_rating_rank_curve(ratings_dir, size=size)
+    order = np.argsort(ratings)
+    return ratings[order], internal[order]
+
+
+def apply_M(rating, m_ratings, m_internal):
+    """rating → internal rank scalar, through the knots load_M returns."""
+    return float(interp_extrap_vec(np.array([rating]), m_ratings, m_internal)[0])
+
+
+def load_rank_map(ratings_dir):
+    """{server: (our_knots_asc, server_knots_asc)} from ratings/rank_map.json — the
+    per-server couplings off the internal consensus scale, sorted ascending in `our`
+    so either direction can be interpolated. Pair with internal_to_server (forward,
+    what we would show a user on that server) or declared_to_internal (inverse, what
+    a user declaring a rank there is claiming in internal units)."""
+    with open(os.path.join(ratings_dir, "rank_map.json")) as f:
+        rm = json.load(f)
+    out = {}
+    for server, v in rm.items():
+        our = np.asarray(v["our"], dtype=float)
+        srv = np.asarray(v["server"], dtype=float)
+        order = np.argsort(our)
+        out[server] = (our[order], srv[order])
+    return out
+
+
+def internal_to_server(server, internal_scalar, rank_map):
+    """internal rank scalar → that server's own rank scalar, UNCLAMPED (the ladder
+    bounds a label, not a value — mirroring rank-translation.js
+    internalRankToServerRank).
+
+    An unknown or degenerate coupling yields NaN, deliberately NOT the identity:
+    identity would report the raw internal rank AS a server rank, which is silently
+    wrong and indistinguishable from a real result in a plot. The inverse direction
+    (declared_to_internal) DOES fall back to identity, because there an unrecognised
+    server's declaration is already on the hub scale."""
+    c = rank_map.get(server)
+    if not c or len(c[0]) < 2:
+        return float("nan")
+    our, srv = c
+    return float(interp_extrap_vec(np.array([internal_scalar]), our, srv)[0])
+
+
+def declared_to_internal(server, declared_scalar, rank_map):
+    """Invert a coupling: a declared SERVER rank scalar → internal rank scalar,
+    interpolating through the {server → our} knots (server is the x-axis here). An
+    unknown server is the identity hub. `srv` is ascending because it was sorted
+    with `our` and the fit is monotone."""
+    if server not in rank_map:
+        return float(declared_scalar)
+    our, srv = rank_map[server]
+    return float(interp_extrap_vec(np.array([declared_scalar]), srv, our)[0])
+
+
+def load_time_adjust(ratings_dir):
+    """(alpha, center) from the shipped population_constants.json, or None — the
+    log-time dock alpha·(log10 median solve minutes − center) that map_rating_to_rank
+    fits and pwa/js/population-constants.js applies. THESE TWO KEYS ARE THE SHIPPED
+    FORM: a reader gating on any other field silently gets no dock, which lands a
+    raw rating in a comparison that must be time-adjusted (see the consensus-mapping
+    note in CLAUDE.md)."""
+    with open(os.path.join(ratings_dir, "population_constants.json")) as f:
+        ta = json.load(f).get("time_adjust")
+    if not ta:
+        return None
+    return (float(ta["alpha_per_log10_min"]), float(ta["center_log10_min"]))

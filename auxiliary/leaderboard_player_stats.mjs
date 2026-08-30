@@ -24,7 +24,7 @@
 // /leaderboard page's onlymove column all carry. It therefore inherits that value's
 // deliberate conservatism while a posterior is wide, which is a display policy rather
 // than a model error — so do NOT read the est-vs-real columns here as the mapping's
-// bias. auxiliary/check_mapped_vs_declared_rank.py is the script for that: it scores
+// bias. ablations/check_mapped_vs_declared_rank.py is the script for that: it scores
 // the calibrated estimate against every declared and verified rating.
 //
 // The ranks are computed BIT-IDENTICALLY to production: this script esbuild-bundles
@@ -73,7 +73,7 @@ const STALE_WARN_MS = 6 * 3600 * 1000;
 // --- CLI ------------------------------------------------------------------------
 const USAGE = `Per-player leaderboard report: country, attempt counts, solve time, the last
 7 days' activity, and the rank onlymove SHOWS each player beside their verified EGF/AGA
-rating. Not a calibration check — see auxiliary/check_mapped_vs_declared_rank.py.
+rating. Not a calibration check — see ablations/check_mapped_vs_declared_rank.py.
 
 Usage: node auxiliary/leaderboard_player_stats.mjs [options]
 
@@ -572,7 +572,7 @@ async function main() {
         + `real EGF/AGA = the verified machine heartbeat — the EGD GoR ((GoR−2000)/100) / the AGA rating.\n`
         + `surveys = rank declarations the player has SELF-REPORTED (rows, so a re-declaration counts again); the weekly 'EGD'/'AGAR' machine heartbeats are excluded.\n`
         + `The shown rank is deliberately conservative while a posterior is wide, so est-vs-real here is NOT the mapping's bias — `
-        + `auxiliary/check_mapped_vs_declared_rank.py measures that.\n`
+        + `ablations/check_mapped_vs_declared_rank.py measures that.\n`
         + `Ranks are shown for EVERYONE (the production buf ≥ ${RANKED_MIN} gate is dropped here); `
         + `players below that threshold are low-confidence — see se in --json.`
         + (out.some((p) => p.rebuilt) ? `\n† = no leaderboard row (pruned as idle); buffer rebuilt from tsumego_reports, as the Worker would on their next report.` : '')

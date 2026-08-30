@@ -60,9 +60,9 @@ same dock the PWA shows: a solver slower than typical for their rank reads weake
 on a timed server. Users without enough timed novel attempts keep the raw rank.
 
 Usage:
-  ./.venv/bin/python3 -m auxiliary.check_mapped_vs_declared_rank --list
-  ./.venv/bin/python3 -m auxiliary.check_mapped_vs_declared_rank --csv out.csv
-  ./.venv/bin/python3 -m auxiliary.check_mapped_vs_declared_rank --min-attempts 30
+  ./.venv/bin/python3 -m ablations.check_mapped_vs_declared_rank --list
+  ./.venv/bin/python3 -m ablations.check_mapped_vs_declared_rank --csv out.csv
+  ./.venv/bin/python3 -m ablations.check_mapped_vs_declared_rank --min-attempts 30
 """
 
 import argparse
@@ -86,6 +86,8 @@ from utils.rating.rank_surveys import (  # noqa: E402
     SERVERS, SQL_PATH_DEFAULT, VERIFIED_SERVERS, is_verified_active,
     latest_per_user_server, load_attempts_for_users, load_rank_surveys,
     value_to_rank, verified_rank_value, verified_tier_rank,
+    TIME_ADJUST_AFK_CAP_MS, TIME_ADJUST_MIN_TIMED, WORKING_SET,
+    load_user_median_solve_minutes,
 )
 from pipeline.map_rating_to_rank import (  # noqa: E402
     EPS_CONTAMINATION, SIZES, load_floors, load_ratings, load_slopes,
@@ -93,37 +95,12 @@ from pipeline.map_rating_to_rank import (  # noqa: E402
 from utils.rating.fit_rank_curves import (  # noqa: E402
     CALIBRATION_P, fit_user_rating, interp_extrap_vec,
 )
-from utils.rating.ratings_io import load_lapse, load_rating_rank_curve  # noqa: E402
+from utils.rating.ratings_io import (  # noqa: E402
+    apply_M, declared_to_internal, load_M, load_lapse, load_rank_map,
+    load_time_adjust,
+)
 
 V2_DIR_DEFAULT = os.path.join(PROJECT_ROOT, "ratings")
-
-
-def load_M(v2_dir):
-    """Shared rating→internal-rank-scalar knots (both board keys are identical).
-    Returns (ratings_asc, internal_scalars_asc) for interp_extrap_vec."""
-    ratings, internal = load_rating_rank_curve(
-        v2_dir, size=SIZES[0])
-    order = np.argsort(ratings)
-    return ratings[order], internal[order]
-
-
-def load_server_curves(v2_dir):
-    """{server: (our_knots, server_knots)} from rank_map.json, both ascending in
-    internal-rank scalar / server-rank scalar."""
-    with open(os.path.join(v2_dir, "rank_map.json")) as f:
-        rm = json.load(f)
-    out = {}
-    for server, v in rm.items():
-        our = np.asarray(v["our"], dtype=float)
-        srv = np.asarray(v["server"], dtype=float)
-        order = np.argsort(our)
-        out[server] = (our[order], srv[order])
-    return out
-
-
-def apply_M(R, m_ratings, m_internal):
-    """rating R → internal(EGF) rank scalar."""
-    return float(interp_extrap_vec(np.array([R]), m_ratings, m_internal)[0])
 
 
 # --- Time adjustment (always on, mirrors the client) -----------------------
@@ -136,63 +113,6 @@ def apply_M(R, m_ratings, m_internal):
 # The client takes this median over its WORKING SET — the unified most-recent
 # ANSWER_HISTORY_WORKING_SET attempts across both sizes (getMergedAnswerHistory),
 # repeats included — NOT whole history, so we mirror that window here.
-TIME_ADJUST_AFK_CAP_MS = 180000
-TIME_ADJUST_MIN_TIMED = 20
-WORKING_SET = 3000  # ANSWER_HISTORY_WORKING_SET in pwa/js/constants.js
-
-
-def load_time_adjust(v2_dir):
-    """(alpha, center) from the shipped population_constants.json, or None — the simple
-    log-time dock alpha·(log10 median min − center) the consensus mapping produces."""
-    with open(os.path.join(v2_dir, "population_constants.json")) as f:
-        ta = json.load(f).get("time_adjust")
-    if not ta:
-        return None
-    return (float(ta["alpha_per_log10_min"]), float(ta["center_log10_min"]))
-
-
-def load_user_median_solve_minutes(sqlite_path, working_set=WORKING_SET):
-    """{user_prefix8: median novel solve minutes} over each user's WORKING-SET
-    window — the most-recent `working_set` attempts unified across both sizes —
-    reproducing the client's medianNovelSolveMinutes() on getMergedAnswerHistory().
-
-    The window is taken over ALL attempts (repeats included, like the client's
-    working set), ordered by created_at so backfilled rows land at their true
-    historical position, and ONLY THEN filtered to non-repeat + timed (0, AFK cap]
-    before the median — matching the client, which slices the last `working_set`
-    raw attempts first and filters inside that slice."""
-    con = sqlite3.connect(sqlite_path)
-    try:
-        # created_at is ISO-8601 TEXT (sorts chronologically); id breaks ties.
-        # Order by id, not created_at, would pull backfilled-historical rows
-        # (recent id, old timestamp) into the recent window — see the fetch
-        # cursor note in CLAUDE.md.
-        cur = con.execute(
-            "SELECT user_id, is_repeat, time_used FROM tsumego_reports "
-            "ORDER BY created_at, id")
-        windows = defaultdict(lambda: deque(maxlen=working_set))
-        for uid, is_repeat, t in cur:
-            windows[uid[:8]].append((is_repeat, t))
-    finally:
-        con.close()
-    out = {}
-    for pref, rows in windows.items():
-        ts = [float(t) for (rep, t) in rows
-              if not rep and t is not None and 0 < float(t) <= TIME_ADJUST_AFK_CAP_MS]
-        if len(ts) >= TIME_ADJUST_MIN_TIMED:
-            out[pref] = float(np.median(ts)) / 60000.0
-    return out
-
-
-def declared_to_internal(server, declared_scalar, server_curves):
-    """Invert a server coupling: declared SERVER scalar → internal rank scalar.
-    Interpolate through the {server → our} knots (server is the x-axis here).
-    EGF / unknown servers are the identity hub."""
-    if server not in server_curves:
-        return float(declared_scalar)
-    our, srv = server_curves[server]
-    # srv must be ascending for np.interp; it is (sorted with `our`, monotone fit).
-    return float(interp_extrap_vec(np.array([declared_scalar]), srv, our)[0])
 
 
 def internal_to_server(server, internal_scalar, server_curves):
@@ -469,7 +389,7 @@ def main():
     surveys = latest_per_user_server(surveys)
 
     m_ratings, m_internal = load_M(args.dir)
-    server_curves = load_server_curves(args.dir)
+    server_curves = load_rank_map(args.dir)
 
     merged_ratings, merged_slopes, merged_floors = {}, {}, {}
     for s in SIZES:

@@ -17,7 +17,7 @@ discrepancy with one pinned source. The gate passes if the encoder's flip rate
 sits at or below that order.
 
 Usage:
-  ./.venv/bin/python3 auxiliary/encoder_altstats_gate.py [--n-per-size 1500]
+  ./.venv/bin/python3 -m ablations.encoder_altstats_gate [--n-per-size 1500]
 """
 
 import argparse

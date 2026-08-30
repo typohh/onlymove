@@ -75,8 +75,8 @@ RECONSTRUCTION CAVEATS (read before quoting a number)
     folds them back in.
 
 USAGE
-  ./.venv/bin/python3 -m auxiliary.eval_recall_model
-  ./.venv/bin/python3 -m auxiliary.eval_recall_model --all-chains --min-n 50
+  ./.venv/bin/python3 -m ablations.eval_recall_model
+  ./.venv/bin/python3 -m ablations.eval_recall_model --all-chains --min-n 50
 """
 
 import argparse

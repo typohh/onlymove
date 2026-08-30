@@ -3,7 +3,7 @@
 The claim we want to be able to make is "our rank is about as accurate as an EGF
 rating built from x tournament games". This script produces x by simulating the
 tournament side from scratch and matching its accuracy to the measured onlymove
-accuracy (`auxiliary.check_mapped_vs_declared_rank --csv`), on the same three
+accuracy (`ablations.check_mapped_vs_declared_rank --csv`), on the same three
 statistics, in EGF rank units:
 
   Spearman rho, % within 1 rank, % within 2 ranks.
@@ -83,8 +83,8 @@ abilities do not drift; all three flatter the tournament side, so the matched x 
 if anything conservative.
 
 Usage:
-  ./.venv/bin/python3 -m auxiliary.check_mapped_vs_declared_rank --csv /tmp/decl.csv
-  ./.venv/bin/python3 -m auxiliary.eval_equivalent_tournament_games --targets /tmp/decl.csv
+  ./.venv/bin/python3 -m ablations.check_mapped_vs_declared_rank --csv /tmp/decl.csv
+  ./.venv/bin/python3 -m ablations.eval_equivalent_tournament_games --targets /tmp/decl.csv
 """
 
 import argparse

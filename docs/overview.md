@@ -20,7 +20,7 @@ There is no curriculum, no lesson text and no human-authored content of any kind
 
 **`analysis_server/` — the fallback brain.** Most positions ship with the engine's own evaluation baked into the file, so the app can explain a variation without asking anybody. Where that is missing, the app asks this service, which wraps a Go engine behind a small HTTP interface. It exists so that review mode never has a dead end. A companion `worker.py` lets a faster machine dial in and take the service's work over while it is running, which buys depth of search rather than speed; the app is unaware of which machine answered.
 
-Alongside those: `auxiliary/` holds diagnostics, one-off surgery scripts and the rating-model research surface — nothing in the main flow reads it — and `vast_orchestration.py` rents a cloud GPU for the three heavy generation steps.
+Alongside those: `auxiliary/` holds diagnostics, surgery scripts and the rating-model research surface, `ablations/` holds the repeatable measurements that stand behind the shipped choices — nothing in the main flow reads either — and `vast_orchestration.py` rents a cloud GPU for the three heavy generation steps.
 
 ## How the parts hand off
 

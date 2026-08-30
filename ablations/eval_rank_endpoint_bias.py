@@ -45,8 +45,8 @@ Reads the local DB (db/d1.sqlite). No network.
 local DB (data-rich accounts make the endpoint comparison meaningful).
 
 Usage:
-  ./.venv/bin/python3 -m auxiliary.eval_rank_endpoint_bias --users <id>,<id>
-  ./.venv/bin/python3 -m auxiliary.eval_rank_endpoint_bias --users <id>,<id> --sds 0,1,1.5,2,2.5,3,5
+  ./.venv/bin/python3 -m ablations.eval_rank_endpoint_bias --users <id>,<id>
+  ./.venv/bin/python3 -m ablations.eval_rank_endpoint_bias --users <id>,<id> --sds 0,1,1.5,2,2.5,3,5
 """
 
 import argparse

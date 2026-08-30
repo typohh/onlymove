@@ -87,7 +87,7 @@ A per-cell value needs the full projection plus a trunk pass, which is far more 
 
 Reads the rank surveys and `db/d1.sqlite` (timed attempts for the career-block anchors and the median solve time); writes `ratings/rating_to_rank.json` (`{ratings, ranks}` plus a top-level `time_adjust {alpha_per_log10_min, center_log10_min}`) and `ratings/rank_map.json` (`{server: {our, server}}` knots, EGF included as a real coupling rather than an identity line). Both board keys are identical. Backend only — `package_for_pwa` publishes both.
 
-Production-clean: no experiment flags. The experiment surface is `auxiliary/map_rating_to_rank_dev.py` and the cross-validation harness that validated the career-block anchors is `auxiliary/eval_rank_map_cv.py`. The model itself is `methodology.md` §1.12.
+Production-clean: no experiment flags. The experiment surface is `auxiliary/map_rating_to_rank_dev.py`, and the cross-validation harness that validated the career-block anchors is `ablations/eval_rank_map_cv.py`; the end-to-end calibration check to run after a refit is `ablations/check_mapped_vs_declared_rank.py`. The model itself is `methodology.md` §1.12.
 
 **Ratings are time-adjusted throughout the mapping**, so the client headline maps the *raw* rating through the curve while every server translation maps the *time-adjusted* one. Dropping the dock for the headline is a client display choice, and the consequence for measurement is in CLAUDE.md's rule about which error column is quotable.
 

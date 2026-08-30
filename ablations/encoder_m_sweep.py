@@ -22,7 +22,7 @@ npz (x, y) map. Stratification across board sizes is inherited from each
 frame's natural proportions.
 
 Usage:
-  ./.venv/bin/python3 auxiliary/encoder_m_sweep.py [--n-third 20000] [--rows-cache PATH]
+  ./.venv/bin/python3 -m ablations.encoder_m_sweep [--n-third 20000] [--rows-cache PATH]
 
 The extracted row matrix is cached (--rows-cache) so the analysis half can be
 re-run without re-reading the npz set.

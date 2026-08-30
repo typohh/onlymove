@@ -39,6 +39,10 @@ CALIBRATION_P = 0.8  # matches the client / momentum: rank = where you clear 80%
 FLOOR_MAX = 0.78
 
 from utils.paths import PROJECT_ROOT
+# interp_extrap/_vec live in ratings_io, which is deliberately scipy-free so the
+# light consumers (package_for_pwa, se_floor) can read a curve without this module.
+# Re-exported here because they were defined here and callers import them from here.
+from utils.rating.ratings_io import interp_extrap, interp_extrap_vec  # noqa: F401,E402
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
@@ -126,36 +130,6 @@ def ordinal_nll_vec(tau, x, k, w=None, eps=0.0):
         p = (1.0 - eps) * p + eps / (K + 1)
     logs = np.log(p)
     return -float(np.sum(logs if w is None else w * logs))
-
-
-def interp_extrap_vec(x, xs, ys):
-    """np.interp with linear extrapolation past both ends (vectorized).
-    xs strictly ascending, len ≥ 2; x an array."""
-    y = np.interp(x, xs, ys)
-    sl0 = (ys[1] - ys[0]) / (xs[1] - xs[0])
-    sl1 = (ys[-1] - ys[-2]) / (xs[-1] - xs[-2])
-    y = np.where(x < xs[0], ys[0] + sl0 * (x - xs[0]), y)
-    y = np.where(x > xs[-1], ys[-1] + sl1 * (x - xs[-1]), y)
-    return y
-
-
-def interp_extrap(x, xs, ys):
-    """Scalar linear interp with end-slope extrapolation; mirrors the PWA's
-    rank-decomposition.js interpExtrap so client and offline tools agree exactly.
-    xs ascending, len ≥ 2; x a scalar; xs/ys may be plain lists or arrays."""
-    n = len(xs)
-    if x <= xs[0]:
-        return ys[0] + (ys[1] - ys[0]) / (xs[1] - xs[0]) * (x - xs[0])
-    if x >= xs[n - 1]:
-        return ys[n - 1] + (ys[n - 1] - ys[n - 2]) / (xs[n - 1] - xs[n - 2]) * (x - xs[n - 1])
-    lo, hi = 0, n - 1
-    while hi - lo > 1:
-        m = (lo + hi) >> 1
-        if xs[m] <= x:
-            lo = m
-        else:
-            hi = m
-    return ys[lo] + (ys[hi] - ys[lo]) * (x - xs[lo]) / (xs[hi] - xs[lo])
 
 
 def _unpack_thresholds(block, baseline):

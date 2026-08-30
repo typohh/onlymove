@@ -73,7 +73,12 @@ if PROJECT_ROOT not in sys.path:
 
 from utils.paths import DB_SQLITE  # noqa: E402
 from utils.rating.fit_rank_curves import interp_extrap  # noqa: E402
-from utils.rating.ratings_io import load_size_value_maps  # noqa: E402
+from utils.rating.ratings_io import (  # noqa: E402
+    internal_to_server, load_rank_map, load_size_value_maps, load_time_adjust,
+)
+from utils.rating.rank_surveys import (  # noqa: E402
+    TIME_ADJUST_AFK_CAP_MS, TIME_ADJUST_MIN_TIMED,
+)
 
 # --- client constants (ports of pwa/js/{irt,rank-decomposition,rank-translation}.js) ---
 SIZES = ("9", "13")
@@ -99,16 +104,15 @@ MIN_ATTEMPTS = 20
 SUPPORT_EFFN = 10                 # effN floor for "supported" (line drawn)
 # Local-linear wide-kernel slope ridge (ranks per τ_S); see Smoother.at(linear=).
 # Mirrors SLOPE_PRIOR_SD in pwa/js/rank-decomposition.js (tuned via
-# auxiliary/eval_rank_endpoint_bias.py).
+# ablations/eval_rank_endpoint_bias.py).
 SLOPE_PRIOR_SD = 2.0
 
 NEAR_RANK_P_HI = 0.95
 LOGIT_80 = math.log(0.8 / 0.2)
 NEAR_RANK_L = math.log(NEAR_RANK_P_HI / (1 - NEAR_RANK_P_HI)) - LOGIT_80  # ~1.558
 
-# time adjustment (stats-ui.js makeMedianSolveMinutesAt / population-constants.js)
-TIME_ADJUST_AFK_CAP_MS = 180000
-TIME_ADJUST_MIN_TIMED = 20
+# time adjustment (stats-ui.js makeMedianSolveMinutesAt / population-constants.js);
+# the window/cap constants are shared with the rank tools via rank_surveys.
 TIME_ADJUST_TAU_MS = 30 * DAY_MS
 TIME_ADJUST_SHRINK_ESS = 8
 
@@ -182,7 +186,7 @@ class RankingSystem:
         # one shared curve (both keys identical); used for the time-adjust remap
         self.curve9 = self.curve.get("9") or next(iter(self.curve.values()))
         try:
-            self.rank_map = json.load(open(os.path.join(v2_dir, "rank_map.json")))
+            self.rank_map = load_rank_map(v2_dir)
         except (OSError, ValueError):
             self.rank_map = {}
 
@@ -226,11 +230,7 @@ class RankingSystem:
         # the consensus mapping our rank is the hub and EGF is one server hanging
         # off it, so an identity short-circuit here would silently report the raw
         # internal rank as an EGF rank.
-        our = idx
-        c = self.rank_map.get(server)
-        if not c or "our" not in c or "server" not in c or len(c["our"]) < 2:
-            return float("nan")
-        return interp_extrap(our, c["our"], c["server"])
+        return internal_to_server(server, idx, self.rank_map)
 
     def skill_to_display(self, idx, delta, server):
         """Internal skill index -> display value: index for OnlyMove, else the
@@ -471,15 +471,21 @@ def compute_variant(full, grid, apply_filter, lapse, linear=True):
 
 
 def time_deltas(S_vals, t_vals, med_at, ta, server):
-    """Per-point time-adjust delta (rating units); 0 for OnlyMove / no time data."""
+    """Per-point time-adjust delta (rating units); 0 for OnlyMove / no time data.
+
+    `ta` is (alpha, center) from ratings_io.load_time_adjust — the shipped log-time
+    dock alpha·(log10 median minutes − center), the same arithmetic as
+    population-constants.js timeAdjustDeltaRating. The centre is a CONSTANT: the
+    retired rank-residualized form (an expected log-time linear in the user's own
+    skill) is not what map_rating_to_rank fits any more."""
     out = np.zeros(len(S_vals))
     if server == ONLYMOVE or med_at is None or ta is None:
         return out
+    alpha, center = ta
     for i, (S, t) in enumerate(zip(S_vals, t_vals)):
         m = med_at(float(t))
         if m and m > 0 and math.isfinite(S):
-            expected = ta["g0"] + ta["g1"] * S
-            out[i] = ta["alpha"] * (math.log10(m) - expected)
+            out[i] = alpha * (math.log10(m) - center)
     return out
 
 
@@ -527,12 +533,7 @@ def main():
     full = Smoother(ts, x, slope, floor, kappa, y, lapse)
 
     # time-adjust support (uses ALL first-time attempts' times, matched or not)
-    tad = pc.get("time_adjust") or {}
-    ta = None
-    if all(k in tad for k in ("alpha_per_log10_min", "time_vs_rank_intercept",
-                              "time_vs_rank_slope")):
-        ta = {"alpha": tad["alpha_per_log10_min"], "g0": tad["time_vs_rank_intercept"],
-              "g1": tad["time_vs_rank_slope"]}
+    ta = load_time_adjust(args.dir)
     med_at = make_median_solve_minutes_at(
         [(parse_ts(r[3]), r[4]) for r in rows]) if server != ONLYMOVE else None
 
@@ -550,8 +551,8 @@ def main():
     print(f"  ranking system: {os.path.relpath(args.dir, PROJECT_ROOT)}   LAPSE={lapse:.4f}")
     if server != ONLYMOVE:
         if ta and med_at:
-            print(f"  time-adjust: alpha={ta['alpha']:+.3f}/log10min  "
-                  f"(timed attempts available)")
+            print(f"  time-adjust: alpha={ta[0]:+.3f}/log10min  "
+                  f"center={ta[1]:+.3f} log10min  (timed attempts available)")
         else:
             print("  time-adjust: UNAVAILABLE (constants or timed data missing) "
                   "-> server view == identity")

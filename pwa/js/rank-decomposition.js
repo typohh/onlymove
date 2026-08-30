@@ -242,7 +242,7 @@ function gaussianWeight(dtOverTau) {
 // collapses to local-constant (point AND sandwich SE); larger = more boundary
 // de-biasing at the cost of more boundary variance.
 //
-// Validated on real histories (auxiliary/eval_rank_endpoint_bias.py — interior
+// Validated on real histories (ablations/eval_rank_endpoint_bias.py — interior
 // held-out lag test, 10 users): today's local-constant endpoint LAGS the lag-free
 // two-sided reference by ~1.2 stones on TRENDING stretches; this is a genuine
 // bias/variance dial (no sharp knee). SD=2.0 removes ~40% of that lag (−1.16 →
