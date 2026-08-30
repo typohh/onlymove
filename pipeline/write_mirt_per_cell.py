@@ -29,11 +29,19 @@ side needs nothing clever.
   fp16 for the projection matmul — this GPU has no fast fp16 path, so the gain
   is bandwidth, not arithmetic.
 
-  NOT IMPLEMENTED, and deliberately: the non-activation tail (bot winrate, move
-  evals, ownership, phase, size) is constant per problem, so its contribution
-  to trunk layer 1 could be computed once per problem instead of once per cell.
-  That would mean bypassing nn.Sequential to reach inside the first layer, to
-  shave a few percent off a term that is already not the bottleneck.
+  NOT IMPLEMENTED, and deliberately: the non-activation tail (bot winrate and
+  the board-size flag) is constant per problem, so its contribution to trunk
+  layer 1 could be computed once per problem instead of once per cell. That
+  would mean bypassing nn.Sequential to reach inside the first layer, to shave a
+  few percent off a term that is already not the bottleneck.
+
+THAT TAIL IS SHORT BECAUSE OF THIS PASS. `PRODUCTION_BLOCKS` keeps the blocks
+that describe the problem and drops the ones that describe its ANSWER (move
+evals, ownership swing, game phase), because here the trunk is evaluated at every
+legal cell against a tail that is the CORRECT move's — so an answer-derived block
+conditions each alternative cell on the answer instead of on itself. Reading the
+layout from the constant rather than naming one here is what keeps this pass and
+`pipeline.train_mirt` on the same columns.
 
 Run after `pipeline.train_mirt`, which writes the model this reads.
 """
@@ -51,10 +59,10 @@ if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 from utils.rating.model_constants import (  # noqa: E402
-    K_AXES, PCA_DIM, SEED, SIZES)
+    K_AXES, PCA_DIM, PRODUCTION_BLOCKS, SEED, SIZES)
 from utils.rating.features import (  # noqa: E402
     SIZE_FLAG_COLS, corpus_tids_by_size, joint_feature_tail,
-    load_joint_activation_basis, load_joint_tail_blocks)
+    load_joint_activation_basis, load_joint_blocks)
 # The trunk's layer stack, stated once — it has to be rebuilt here EXACTLY as it
 # was fitted, and a stack that matches by shape while differing in its activation
 # loads cleanly and projects every cell through the wrong function.
@@ -125,11 +133,13 @@ def main():
     st = torch.load(MODEL_PT, map_location=device)
     import torch.nn as nn
 
-    # Shared tail — same blocks, same order, same fail-loud-on-missing rule the
-    # trunk was fitted with. Only the activation block differs here (per CELL
-    # rather than the correct cell), which is exactly why the rest must not be
-    # restated locally.
-    wide, n_wide = load_joint_tail_blocks(SIZES, tids_by_size)
+    # Shared tail — the SAME layout the trunk was fitted with, from the same
+    # loader, with the same fail-loud-on-missing rule. Only the activation block
+    # differs here (per CELL rather than the correct cell), which is exactly why
+    # the rest must not be restated locally: a layout named here would be a second
+    # switch, and feeding the trunk columns it was not fitted with produces a
+    # well-formed shard.
+    wide, n_wide = load_joint_blocks(PRODUCTION_BLOCKS, SIZES, tids_by_size)
     fdim = PCA_DIM + n_wide + SIZE_FLAG_COLS
     # Dropout is not in the state_dict, so 0.0 here still loads weights fitted
     # at DROPOUT; this pass is eval-only anyway.

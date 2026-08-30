@@ -30,17 +30,15 @@ GPU, resumable by file existence, iterates both sizes. Feeds both the rating fea
 
 ### `extract_ownership_swing`
 
-**Mandatory, not diagnostic.** Per problem, it measures how many stones' worth of ownership the correct first move swings against the best resolved refutation, into `activations/_signal_cache/ownership_swing.csv`. It is a feature block the rating features read, and `joint_feature_tail` **raises** on a live tsumego with no row — so a corpus top-up that skips this step aborts `train_mirt` one step later, pointing at the wrong place. An unreadable SGF aborts for the same reason.
-
-It is also read by two of the shipped motif rules (`life and death`, `semeai`), and `build_motif_proxies` **silently skips** a problem with no row, so a gap here quietly shrinks the taught set as well.
+**Mandatory, not diagnostic.** Per problem, it measures how many stones' worth of ownership the correct first move swings against the best resolved refutation, into `activations/_signal_cache/ownership_swing.csv`. Two of the shipped motif rules (`life and death`, `semeai`) are written over it, so it reaches the fit as taught directions rather than as trunk columns — the trunk's own blocks are `PRODUCTION_BLOCKS` (`methodology.md` §1.3). **That makes it no less required**: `build_motif_proxies` **aborts** on a live tsumego with no row rather than labelling a short corpus, so a top-up that skips this step stops the labelling one step later, pointing at the wrong place. An unreadable SGF aborts for the same reason.
 
 Resumable by the `tid` column, appended and fsynced periodically. Iterates all board sizes, takes no arguments, and has no alternate evaluator — it is production-lean by design.
 
 ### `cache_rating_features`
 
-Builds **both** aggregate caches the rating trainer reads, in one command so they cannot drift apart:
+Builds **both** aggregate caches the fit depends on, in one command so they cannot drift apart:
 
-1. `activations/_signal_cache/move_evals_<size>.npz` — the candidate-move-eval cache, holding **both** the root `feats` array that the move block reads **and** the `cont` array that the continuation block reads. One SGF parse fills both, and a row counts as cached only when both are present, so a cache predating `cont` re-extracts whole.
+1. `activations/_signal_cache/move_evals_<size>.npz` — the candidate-move-eval cache, holding **both** the root `feats` array that the move block reads **and** the `cont` array that the continuation block reads. One SGF parse fills both, and a row counts as cached only when both are present, so a cache predating `cont` re-extracts whole. Neither array is in the shipped trunk layout (`methodology.md` §1.3): they serve the `"all"` comparison arm, the tightness axis analyses, and `build_alt_vec_cache`'s runner-up coordinate. The tightness motif rules read the same evaluations straight from the SGF comments, so `build_motif_proxies` does not depend on this file.
 2. `activations/_signal_cache/correct_vecs_<size>.npy` + `correct_ids_<size>.json` — the correct-cell activation vectors, built first, by `utils.rating.features.build_correct_vec_cache`. `correct_ids` is **both the rated set and this step's own id set**, which is what keeps them in lockstep.
 
 Both are incremental and reconcile in both directions (see the governing rule above). `--force` re-extracts the move features only; `--rebuild-activation-cache` additionally re-reads every activation npz, which takes hours and is for a corrupt cache rather than routine use.
@@ -82,6 +80,8 @@ Per-step cost is dominated by the shallow-slope barrier, which is why it reads `
 Writes `axes/per_cell/<size>/<tid>.npz` — a K-vector for **every legal cell**, which the client needs because it scores the move the user *picked*, not only the answer. Resumable by file existence, so an interruption costs only the batch in flight; the whole pass is on the order of fifteen minutes.
 
 A per-cell value needs the full projection plus a trunk pass, which is far more arithmetic than a linear map on features would need and is nonetheless irrelevant: the pass is bound by **reading** the activation npz files, so read parallelism is the whole optimization.
+
+**It assembles the non-activation tail from `PRODUCTION_BLOCKS` through the same loader the trainer uses**, never a local block list. That tail is constant per problem — it is the correct move's — so the layout is exactly what keeps the fanout honest: a block describing the problem through its answer would hand every alternative cell the answer's description (`methodology.md` §1.3). A layout named here instead would be a second switch, and feeding the trunk columns it was not fitted with produces a shard that is well-formed and wrong.
 
 ### `map_rating_to_rank`
 

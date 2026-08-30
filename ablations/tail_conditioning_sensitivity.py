@@ -2,12 +2,15 @@
 """How tail-conditioned are the per-cell axis readings' within-problem signs?
 
 The per-cell projection (pipeline.write_mirt_per_cell) feeds every legal cell
-the SAME per-problem tail (bot winrate, move evals, ownership, phase — all
-describing the problem via its answer) beside that cell's own activations. The
-client's tendency test and its availability null read only WITHIN-PROBLEM sign
-structure referenced to the correct cell, so a tail that acted as a monotone
-contraction toward the correct cell's reading would cancel out of both. The
-trunk is nonlinear, so nothing guarantees that; this measures it.
+the SAME per-problem tail — whatever wide blocks the checkpoint's layout carries
+— beside that cell's own activations. The client's tendency test and its
+availability null read only WITHIN-PROBLEM sign structure referenced to the
+correct cell, so a tail that acted as a monotone contraction toward the correct
+cell's reading would cancel out of both. The trunk is nonlinear, so nothing
+guarantees that; this measures it. Run against a fit carrying the answer-derived
+blocks (move evals, ownership, phase) it is the measurement that keeps them out
+of PRODUCTION_BLOCKS — see docs/mirt_benchmark.md; run against the shipped
+layout it is the standing check on what the bot block alone conditions.
 
 Method: for a seeded problem sample, project each problem's SGF root-variation
 cells (the exact cell set the shipped null is computed over) through the fitted

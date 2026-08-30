@@ -300,6 +300,114 @@ does not survive the seed change — the set is what replicates, not the ranking
 user-bootstrap interval there clear of zero ([+0.12, +0.89], [+0.27, +0.70]) — and it
 climbs in the wide `all9` arm as well (0.08/0.42/0.42/0.53, N50 680).
 
+## THE TRUNK'S INPUT IS ACTIVATIONS + BOT WINRATE — MEASURED 2026-08-30
+
+`PRODUCTION_BLOCKS` = `"activations+bot"` (`utils/rating/model_constants.py`). The trunk
+reads the joint-PCA activation block, the bot pass-rate block and the board-size flag;
+the answer-derived blocks — move evals, ownership swing, game phase — are dropped from
+it and keep their pipeline role as the material the motif rules are written over. **The
+rating case is PARITY, so the decision rests on the per-cell side**: the same trunk is
+fanned out over every legal cell, and there the tail is the CORRECT move's, so an
+answer-derived block describes every alternative cell by the answer.
+
+**Provenance, and it is NOT the pinned one above.** Both arms ran on the production data
+as it stood on the measurement date — 299,320 attempt rows over 2,508 users, 220,463
+problems with features, joint-PCA cache `joint_pca_dc739b061d817dd0.npz` — under
+`--production`, no problem holdout, `--holdout-user-frac 0.15`, one model seed per fold.
+Nine INDEPENDENT held-out-user draws, seeds 0–8, PAIRED: each fold's two arms share a
+holdout hash and row count, so the arms may be differenced fold by fold and the spread
+across folds may not be read as an error bar on the arm difference. Arms are
+`dev_runs/featprod_s0-s8` (`--features production`, which selects the ALL-blocks layout,
+feat 213 / dropout region 212) and `dev_runs/actbot_s0-s8` (`--features
+activations+bot`, feat 182 / 181), scored by `eval_user_holdout` into
+`dev_runs/eval_<arm>_s<n>.log`.
+
+```
+  combined (rating+axis) held-out-user logloss, forward walk (all)
+  fold      all    act+bot     delta (mnat, + = act+bot better)
+    s0   0.5076   0.5057        +1.90
+    s1   0.5060   0.5034        +2.60
+    s2   0.4885   0.4960        -7.50
+    s3   0.4799   0.4822        -2.30
+    s4   0.4907   0.4926        -1.90
+    s5   0.4960   0.4963        -0.30
+    s6   0.5129   0.5095        +3.40
+    s7   0.4928   0.4923        +0.50
+    s8   0.5142   0.5138        +0.40
+  mean -0.36 mnat (sd 3.29 over folds, sem 1.10); attempt-weighted -0.09; act+bot ahead on 5 of 9
+  rating column alone: mean -0.18 mnat
+```
+
+**Neither arm is separable from the other on likelihood.** The mean sits at a fifth of
+its own fold-to-fold standard error, the sign changes five times across the nine folds,
+and the largest single-fold gap (7.5 mnat on s2) is the same size as the axis-value
+spread the next section reports for one arm against itself. A single fold quoted from
+this table is a statement about that draw.
+
+**Time-adjusted survey rho is flat too** — cross-fitted, per-server n-weighted, printed
+by each training run: mean 0.8539 (all) against 0.8526 (act+bot) over the nine folds,
+per-fold difference −0.0014 on average with four of nine positive, against a per-fold
+spread of about 0.005 within each arm. Base rho is not quotable here (`CLAUDE.md`).
+
+**What separates them is the per-cell reading, and it is net-neutral with the two
+ownership axes gaining.** `ablations/tendency_split_half.py` scores the client's own
+tendency reading — 347 users with at least 20 recorded errors, 38,356 attempts over
+30,519 problems, halves by parity — with arm A the shipped all-blocks fit (fdim 213)
+and arm B a dev checkpoint on its own full input:
+
+```
+  drho (arm B - arm A) per axis, arm B = dev_runs/actbot_s{3,4}.pt
+  axis                s3                        s4
+  life and death   +0.231 [+0.066, +0.392]   +0.087 [-0.067, +0.234]
+  yose             -0.109                    +0.048
+  ko               -0.123                    -0.150 [-0.294, -0.002]
+  opening          -0.010                    -0.036
+  tenuki           -0.152 [-0.276, -0.021]   -0.119
+  sente            +0.003                    +0.075
+  semeai           +0.127 [-0.029, +0.283]   +0.045
+  mean drho across axes: -0.005 / -0.007
+```
+
+The two axes taught from ownership rules — `life and death` and `semeai` — improve on
+both dev seeds, `ko` and `tenuki` lose on both, and the mean is zero to within a
+thousandth. **The control says the tail is what moves them**: masking the wide tail on
+the SHIPPED checkpoint (arm B = mask, activation scale 1/(1−`INPUT_DROPOUT`)) gives the
+same mean drho of −0.003 while `opening` alone gains +0.104 rho / +0.235 r — so these
+shifts are the conditioning changing, not a differently-converged fit.
+
+**The mechanism, measured directly.** `ablations/tail_conditioning_sensitivity.py`
+projects each problem's SGF root-variation cells twice through the all-blocks fit, once
+on its real tail and once with the wide tail at its pooled mean, and compares the
+within-problem sign against the correct cell at the client's own resolution (fp16 +
+0.01 rounding). Of the alternative cells strictly signed in both arms, **10–36% change
+side, depending on the axis** — the tendency test's observed direction and the
+availability null's counts both live on exactly that sign. A tail acting as a monotone
+contraction toward the correct cell's reading would cancel out of both; the trunk is
+nonlinear and it does not.
+
+### Reproduction
+
+```bash
+# one fold, both arms (repeat --holdout-seed/--seeds 0..8)
+./.venv/bin/python3 -m auxiliary.rating_dev.train_joint_mirt --production \
+    --features production --seeds 0 --holdout-seed 0 --holdout-user-frac 0.15 \
+    --dump-params dev_runs/featprod_s0.npz
+./.venv/bin/python3 -m auxiliary.rating_dev.train_joint_mirt --production \
+    --features activations+bot --seeds 0 --holdout-seed 0 --holdout-user-frac 0.15 \
+    --dump-params dev_runs/actbot_s0.npz
+./.venv/bin/python3 -m auxiliary.rating_dev.eval_user_holdout \
+    --dumps dev_runs/actbot_s0.npz --seeds 0 --label actbot_s0
+# the per-cell reading, shipped fit against a dev checkpoint
+./.venv/bin/python3 -m ablations.tendency_split_half \
+    --arm-b-model dev_runs/actbot_s3.pt --arm-b-features activations+bot
+./.venv/bin/python3 -m ablations.tail_conditioning_sensitivity
+```
+
+**`--features production` in the dev trainer names the ALL-blocks arm**, not
+`PRODUCTION_BLOCKS`. The flag's choices are the names its recorded runs were made under
+and are left alone so those runs stay reproducible; the shipped layout is the constant,
+not the flag.
+
 ## AXIS VALUE IS A PROPERTY OF THE HOLDOUT DRAW, NOT OF THE MODEL — MEASURED 2026-08-21
 
 Every axis-adds figure in this document, the one below included, comes from one or

@@ -579,13 +579,13 @@ def run_size(size):
             if new_file:
                 writer.writeheader()
             for i, fname in enumerate(todo, 1):
-                # AN UNREADABLE PROBLEM ABORTS THE RUN. This file is a feature
-                # block the rating loaders read, and joint_feature_tail raises on
-                # a live tsumego with no row, so a problem skipped here does not
-                # degrade the fit — it stops it, thousands of problems and one
-                # step later, pointing at the wrong place. Failing on the SGF
-                # that caused it is the cheap version of the same halt. Resume
-                # picks up from the last flushed row.
+                # AN UNREADABLE PROBLEM ABORTS THE RUN. This file is what the two
+                # ownership motif rules are read from, and build_motif_proxies
+                # aborts on a live tsumego with no row, so a problem skipped here
+                # does not degrade the labels — it stops them, thousands of
+                # problems and one step later, pointing at the wrong place.
+                # Failing on the SGF that caused it is the cheap version of the
+                # same halt. Resume picks up from the last flushed row.
                 row = process_one_sgf(os.path.join(in_dir, fname), backend)
                 writer.writerow({k: row.get(k, "") for k in FIELDS})
                 n_done += 1

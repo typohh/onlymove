@@ -39,9 +39,10 @@ from utils.katago.sgf_parsing import parse_tsumego_sgf
 from utils.rating.activation_encoder import fingerprint, load_encoder
 from utils.rating.features import (
     SIZE_FLAG_COLS, corpus_tids_by_size, joint_feature_tail,
-    load_joint_activation_basis, load_joint_tail_blocks)
+    load_joint_activation_basis, load_joint_blocks)
 from utils.rating.mirt_net import build_trunk
-from utils.rating.model_constants import K_AXES, PCA_DIM, SEED, SIZES
+from utils.rating.model_constants import (
+    K_AXES, PCA_DIM, PRODUCTION_BLOCKS, SEED, SIZES)
 
 MODEL_PT = os.path.join(PROJECT_ROOT, "ratings", "mirt_model.pt")
 ENC_DIR = os.path.join(PROJECT_ROOT, "activations", "enc")
@@ -106,7 +107,7 @@ def main():
     s2 = torch.tensor(basis["s2"], dtype=torch.float32, device=device)
 
     st = torch.load(MODEL_PT, map_location=device)
-    wide, n_wide = load_joint_tail_blocks(SIZES, tids_by_size)
+    wide, n_wide = load_joint_blocks(PRODUCTION_BLOCKS, SIZES, tids_by_size)
     trunk, d = build_trunk(PCA_DIM + n_wide + SIZE_FLAG_COLS, dropout=0.0)
     trunk = trunk.to(device); trunk.load_state_dict(st["trunk"]); trunk.eval()
     g_lin = nn.Linear(d, K_AXES, bias=False).to(device)

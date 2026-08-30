@@ -10,8 +10,10 @@ problem, orients each to the SIDE TO MOVE (so "win prob" means "the solver's win
 colour), sorts the moves by win probability, and keeps the WINNING move plus the 9 next-best
 alternatives. For each of those 10 moves it stores (logit win-prob, clipped score): a fixed
 20-dim raw feature vector per problem describing how sharply the best move stands out from its
-rivals — a difficulty signal orthogonal to the trunk activations and the bot-ladder win rates
-that train_mirt already feeds.
+rivals. This block is OUTSIDE the shipped trunk layout (model_constants.PRODUCTION_BLOCKS): it
+describes the problem through its ANSWER, which is what the trunk cannot carry once it is fanned
+out over every legal cell. Two motif rules turn on the same quantity, but they read the SGF's own
+evaluation comments directly, so pipeline.build_motif_proxies does not depend on this cache.
 
 It ALSO reads the CONTINUATION — the principal line after the answer, plus the opponent's other
 tries at its first node, every node's explored children kept as (logit win-prob, score) oriented
@@ -22,8 +24,9 @@ winning first move with every rival decisively lost (measured: the 5th percentil
 alternative slot sits AT the win-prob clip), so the block above is saturated by construction on
 its alternatives.
 
-Output (one per board size), consumed by train_mirt through
-utils.rating.features.load_joint_move_features + load_joint_continuation:
+Output (one per board size), read through utils.rating.features.load_joint_move_features +
+load_joint_continuation (the "all" comparison layout), load_tightness_gaps (the axis analyses)
+and build_alt_vec_cache (which takes its runner-up cell from `alt_xy`):
   activations/_signal_cache/move_evals_<size>.npz
       tids   (n,)      <U8   canonical problem id (orientation-invariant hash)
       feats  (n, 20)   f32   RAW [logit win-prob, score] × 10 moves (solution, then 9 alts)

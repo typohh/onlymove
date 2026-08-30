@@ -3,7 +3,7 @@
 Three callers build it: pipeline.train_mirt fits it, pipeline.write_mirt_per_cell
 reloads it to project every legal cell, and auxiliary.rating_dev.train_joint_mirt is
 the experiment surface. Each used to restate the layer stack, and they agreed only by
-convention. That is the same failure utils.rating.features.load_joint_tail_blocks
+convention. That is the same failure utils.rating.features.load_joint_blocks
 exists to prevent, one layer up: the fanout has to rebuild the FITTED architecture
 exactly, and a mismatch that happens to keep the shapes — a different activation at
 the same widths — loads cleanly and projects every cell through the wrong function.

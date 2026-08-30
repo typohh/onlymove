@@ -2,8 +2,9 @@
 
 The features here are `utils.rating.features.load_joint_mirt_features`, byte-for-byte
 the matrix `pipeline.train_mirt` feeds its trunk: joint-PCA correct-move activations,
-bot winrate, candidate-move evaluations, game phase, board-size flag. They are NOT
-assembled here — the assembly is single-sourced in utils so the two cannot drift.
+bot winrate, board-size flag — the loader's default is `PRODUCTION_BLOCKS`, so this
+tracks a layout change without being told. They are NOT assembled here — the assembly
+is single-sourced in utils so the two cannot drift.
 
 That is the whole point of the tool. A label probe fitted in this space is a function
 of exactly what the trunk reads, so a direction it finds is one the trunk can

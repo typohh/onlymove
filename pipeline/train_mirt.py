@@ -27,8 +27,17 @@ architecture — lives in `auxiliary.rating_dev.train_joint_mirt`, so a test twe
 cannot reach the shipped fit. The measurement behind every constant here:
 `docs/mirt_benchmark.md`.
 
-Run `pipeline.extract_activations` then `pipeline.cache_rating_features` first;
-the move-eval cache is a hard prerequisite. So are the motif proxies,
+THE TRUNK SEES `PRODUCTION_BLOCKS` (utils.rating.model_constants): the joint-PCA
+correct-cell activations, the bot pass-rate block, and the board-size flag past the
+dropout region. The answer-derived blocks — move evals, ownership swing, game phase
+— are not trunk inputs: this same trunk is fanned out over every legal cell by
+`pipeline.write_mirt_per_cell`, where a block describing the problem through its
+ANSWER conditions every alternative cell on the correct move. They remain
+prerequisites, one step further back, because `pipeline.build_motif_proxies` is
+written over them and its verdicts are what the axes are taught onto.
+
+Run `pipeline.extract_activations` then `pipeline.cache_rating_features` first; the
+correct-cell activation cache is a hard prerequisite. So are the motif proxies,
 `axes/motif_proxies.npz` from `pipeline.build_motif_proxies` — see below.
 
 THE AXES ARE TAUGHT ONTO FIXED DIRECTIONS, which is what gives a name a chance to
@@ -113,7 +122,8 @@ if PROJECT_ROOT not in sys.path:
 
 from utils.rating.model_constants import (  # noqa: E402
     CALIBRATION_P, EPS, GAUGE_MOM, INPUT_DROPOUT, LAPSE_CAP, LAPSE_INIT,
-    K_AXES, PCA_DIM, SEED, SIZES, SLOPE_FLOOR, clear_logit_vec)
+    K_AXES, PCA_DIM, PRODUCTION_BLOCKS, SEED, SIZES, SLOPE_FLOOR,
+    clear_logit_vec)
 from utils.rating.features import (  # noqa: E402
     load_first_time_attempts, load_joint_mirt_features)
 # The trunk's layer stack, stated once — pipeline.write_mirt_per_cell rebuilds it
@@ -285,11 +295,11 @@ class JointMIRT(nn.Module):
         return (self.v - self.v.mean(dim=0, keepdim=True))[uid]
 
     def _drop(self, feat):
-        """COLUMN dropout over the wide input region as ONE mask — activations,
-        bot winrate, move evals, ownership and game phase together, every block
-        measured about the PROBLEM. Only the board-size indicator sits past that
-        region, since it identifies the board rather than the problem, so a new
-        wide block belongs INSIDE input_dim and is then masked automatically."""
+        """COLUMN dropout over the wide input region as ONE mask — activations and
+        bot winrate together, every block measured about the PROBLEM. Only the
+        board-size indicator sits past that region, since it identifies the board
+        rather than the problem, so a new wide block belongs INSIDE input_dim and
+        is then masked automatically."""
         if not self.training or INPUT_DROPOUT <= 0.0 or self.input_dim <= 0:
             return feat
         keep = (torch.rand(len(feat), self.input_dim, device=feat.device)
@@ -511,7 +521,8 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     t0 = time.time()
 
-    feat, keys, key_idx, input_dim = load_joint_mirt_features(SIZES, PCA_DIM, SEED)
+    feat, keys, key_idx, input_dim = load_joint_mirt_features(
+        SIZES, PCA_DIM, SEED, blocks=PRODUCTION_BLOCKS)
     fdim = feat.shape[1]
     print(f"loaded in {time.time() - t0:.0f}s: {len(keys)} problems, "
           f"feat {fdim} (dropout region {input_dim})", flush=True)

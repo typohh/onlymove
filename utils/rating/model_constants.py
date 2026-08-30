@@ -19,6 +19,16 @@ from utils.rating.fit_rank_curves import CALIBRATION_P
 K_AXES = 7                       # skill axes fitted alongside the rating; MUST equal
                                  # the number of `components` in axes/labels.json,
                                  # which is the shipping decision K follows
+# THE SHIPPED TRUNK INPUT, stated once: which per-problem blocks the feature trunk
+# sees, named as `blocks` names them in utils.rating.features. Activations + bot
+# winrate here means the joint-PCA activation block, the bot pass-rate block, and
+# the board-size flag past the dropout region. The answer-derived blocks — move
+# evals, ownership swing, game phase — stay pipeline artifacts and build the motif
+# rules, but they are NOT trunk inputs: the trunk is fanned out over every legal
+# cell, so a block describing the problem through its ANSWER conditions every
+# alternative cell on the correct move. "all" is the dev comparison arm.
+# Evidence: docs/mirt_benchmark.md.
+PRODUCTION_BLOCKS = "activations+bot"
 EPS = 1e-6
 SIZES = list(ALL_BOARD_SIZES)
 SEED = 0

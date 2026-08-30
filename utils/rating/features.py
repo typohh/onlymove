@@ -2,9 +2,11 @@
 
 This is the production home for the helpers that load the rating model's training data
 (first-time human attempts), turn it into the ability unit (2-month overlapping profiles),
-and assemble the per-problem feature trunk (joint-PCA correct-move activations, common-column
-bot winrate, candidate-move evaluations). It also owns the activation "signal cache" path
-helpers those feature loaders read.
+and assemble the per-problem feature trunk. Every per-problem block lives here, whether or
+not the shipped layout (model_constants.PRODUCTION_BLOCKS) feeds it to the trunk: the ones
+outside it — candidate-move evaluations, ownership swing, game phase — are what the motif
+rules and the axis analyses are written over. It also owns the activation "signal cache"
+path helpers those loaders read.
 
 These functions used to live in auxiliary/ (the research area) and were imported back into the
 pipeline; they are leaf utilities (no auxiliary/ or pipeline/ imports), so both the production
@@ -24,7 +26,7 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 
-from utils.rating.model_constants import ACT_ENCODER_DIM
+from utils.rating.model_constants import ACT_ENCODER_DIM, PRODUCTION_BLOCKS
 from utils.rating.ratings_io import FLOOR_CSV, RATINGS_CSV, SLOPE_CSV
 
 from utils.constants import RETIRED_IDS_PATH, read_retired_ids
@@ -725,12 +727,12 @@ def load_joint_continuation(sizes, tids_by_size):
 # --------------------------------------------------------------------------------
 # Scalar problem axes: tightness gaps (from the move-eval cache) and game phase
 # (from the SGFs, cached). These are the forward-validated per-user axes of
-# docs/methodology.md AND candidate rating-model features (the residual-
-# MIRT prototype's r head found predictable residual difficulty on exactly this
-# surface — see auxiliary.rating_dev.train_joint_mirt). Living here keeps the
-# production trainer (pipeline.train_mirt), the experiment surface
-# (auxiliary.rating_dev.*) and the axis analyses (ablations.eval_score_gap_axis)
-# on ONE set of definitions: same caches, same transforms, in sync by construction.
+# docs/methodology.md, and they are what the MOTIF RULES are written over
+# (utils.rating.motif_rules, evaluated by pipeline.build_motif_proxies, which reads
+# load_game_phase below) rather than trunk inputs. Living here keeps the rule
+# builder, the experiment surface (auxiliary.rating_dev.*) and the axis analyses
+# (ablations.eval_score_gap_axis) on ONE set of definitions: same caches, same
+# transforms, in sync by construction.
 
 
 def _game_phase_cache_path(size):
@@ -804,12 +806,13 @@ def load_game_phase(rebuild=False, sizes=(9, 13)):
     directions are load-bearing here:
 
       a tid the cache LACKS is not a neutral omission — it is missing data for a
-      live problem, and joint_feature_tail RAISES on it. It used to substitute a
-      zero vector, which after the pooled z-score is exactly the population mean,
-      so the problem was rated, given an axis vector and shipped on an imputed
-      phase block with nothing anywhere recording it. Keeping this cache in step
-      with the corpus is what stops that error being reached; it is no longer
-      what stops it being silent.
+      live problem, and every consumer RAISES on it: pipeline.build_motif_proxies
+      cannot label the problem, so it aborts rather than shrinking the taught set,
+      and joint_feature_tail raises for a fit assembling the "all" layout. A zero
+      vector in its place is exactly the population mean after the pooled z-score,
+      so the problem would be labelled, rated and shipped on an imputed phase block
+      with nothing anywhere recording it. Keeping this cache in step with the corpus
+      is what stops that error being reached; it is not what stops it being silent.
 
       a DEPARTED tid left behind is not inert either — phase_ratio_z takes its
       z-scores over this cache's whole population, so a purged problem shifts
@@ -957,8 +960,10 @@ def load_joint_ownership(sizes, tids_by_size):
     A row whose `alt_move` is blank (no refutation was read to a conclusion, so
     the swing is undefined) is NOT emitted, and is therefore missing rather than zero: a zero swing
     positively asserts the problem has no life-and-death content, which is a different
-    claim from having failed to measure it. joint_feature_tail turns that absence into
-    a hard error for any problem still in the rated set.
+    claim from having failed to measure it. That absence is a hard error wherever the
+    block is consumed — pipeline.build_motif_proxies, which writes the two ownership
+    rules and aborts rather than shipping a short label file, and joint_feature_tail
+    for a fit assembling the "all" layout.
     """
     if not os.path.exists(OWNERSHIP_CSV):
         raise FileNotFoundError(
@@ -989,19 +994,21 @@ SIZE_FLAG_COLS = 1
 
 
 def load_joint_tail_blocks(sizes, tids_by_size):
-    """Every per-problem block AFTER the activation block, loaded once, in THE order
-    the trunk is trained on. Returns (wide, n_wide).
+    """The "all" layout: every per-problem block, loaded once, in THE order the
+    trunk is trained on. Returns (wide, n_wide).
 
     EVERY BLOCK IS MASKED — bot winrate, move evals, ownership and game phase all
     sit inside the INPUT_DROPOUT region; the board-size flag past them is the one
     exception and is SIZE_FLAG_COLS above, not a block.
 
-    This exists so the order is stated ONCE. Three consumers build trunk input — the
-    trainer here, pipeline.write_mirt_per_cell (which substitutes per-CELL activations
-    for the correct-cell block) and utils.rating.residual_axes (which appends columns
-    of its own) — and each used to restate the concatenation. They agreed, but only by
-    convention: a block added to one and not the others lands in a different column
-    than the trunk was fitted with, and both files stay well-formed.
+    This exists so the order is stated ONCE. Consumers build trunk input from the
+    same blocks in different places — the trainer here, pipeline.write_mirt_per_cell
+    (which substitutes per-CELL activations for the correct-cell block) and
+    utils.rating.residual_axes (which appends columns of its own) — and a copy of
+    the concatenation agrees only by convention: a block added to one and not the
+    others lands in a different column than the trunk was fitted with, and both
+    files stay well-formed. Which of these blocks a given fit actually sees is
+    load_joint_blocks below, not this function.
     """
     bw, nb = load_joint_bot_winrate(sizes, tids_by_size)
     mv, nmv = load_joint_move_features(sizes, tids_by_size)
@@ -1010,6 +1017,38 @@ def load_joint_tail_blocks(sizes, tids_by_size):
     wide = (("bot_winrate", bw), ("move_evals", mv), ("ownership", ow),
             ("game_phase", ph))
     return wide, nb + nmv + now + nph
+
+
+# The block LAYOUTS a fit can be assembled on. Which one ships is
+# model_constants.PRODUCTION_BLOCKS; the rest are comparison arms.
+FEATURE_BLOCKS = ("all", "activations", "activations+bot")
+
+
+def load_joint_blocks(blocks, sizes, tids_by_size):
+    """(wide, n_wide) for ONE layout: the per-problem blocks between the activation
+    block and the board-size flag, in trunk order.
+
+    THE ONLY place a layout name becomes a block list. Every consumer that feeds the
+    trunk — the trainer, the per-cell fanout, the ablation projections — comes through
+    here, because a second switch elsewhere feeds a checkpoint columns it was not
+    fitted with, and the two arms are both well-formed matrices.
+
+    "activations+bot" keeps the one wide block that does NOT describe the problem
+    through its ANSWER, which is what makes it usable as per-cell conditioning: the
+    trunk is fanned out over every legal cell, so an answer-derived block hands every
+    alternative cell a description of the correct move. "activations" drops every wide
+    block. "all" is every block load_joint_tail_blocks states. The size flag is not a
+    block and stays in every layout (it is the board the problem is on, not a property
+    measured about it), so the layouts differ in columns and in nothing else.
+    """
+    if blocks == "all":
+        return load_joint_tail_blocks(sizes, tids_by_size)
+    if blocks == "activations+bot":
+        bw, nb = load_joint_bot_winrate(sizes, tids_by_size)
+        return (("bot_winrate", bw),), nb
+    if blocks == "activations":
+        return (), 0
+    raise ValueError(f"blocks must be one of {FEATURE_BLOCKS}, got {blocks!r}")
 
 
 def corpus_tids_by_size(sizes):
@@ -1132,10 +1171,10 @@ def joint_feature_tail(key, wide):
     return np.concatenate(parts)
 
 
-def load_joint_mirt_features(sizes, pca_dim, seed, blocks="all"):
-    """THE per-problem feature matrix the MIRT trunk sees — activations, bot winrate,
-    move evals, ownership swing, game phase, board size — assembled once here so every
-    consumer sees the same columns in the same order.
+def load_joint_mirt_features(sizes, pca_dim, seed, blocks=PRODUCTION_BLOCKS):
+    """THE per-problem feature matrix the MIRT trunk sees — the joint-PCA activation
+    block, the wide blocks `blocks` selects, then the board-size flag — assembled once
+    here so every consumer sees the same columns in the same order.
 
     Returns (feat (n_problems, fdim) float32, keys [(size, tid)], key_idx {key: row},
     input_dim). `input_dim` is the leading block INPUT_DROPOUT masks: the activation
@@ -1154,31 +1193,20 @@ def load_joint_mirt_features(sizes, pca_dim, seed, blocks="all"):
     something unreachable. Copying the assembly there would let the two drift silently,
     which is the failure this single source exists to prevent.
 
-    `blocks` selects WHICH per-problem blocks are assembled, and exists so a feature
-    ablation is expressed HERE rather than by slicing the returned matrix at a caller —
-    a slice has to restate where the activation block ends, which is the one number this
-    function exists to state once. "all" is the shipped layout and the only value any
-    production stage passes; "activations" drops every wide block, leaving the activation
-    PCA and the board-size flag; "activations+bot" keeps the bot-winrate block as the
-    one wide block and drops move evals, ownership and phase — the blocks that describe
-    the problem via its ANSWER, which is what makes them per-cell conditioning when the
-    trunk is fanned out over alternative moves. The size flag is NOT a block and stays
-    in every arm (it is the board the problem is on, not a property measured about it),
-    and it stays outside the dropout region in every arm, so the arms differ in columns
-    and in nothing else.
+    `blocks` selects WHICH per-problem blocks are assembled (load_joint_blocks holds
+    the layouts), and exists so a feature ablation is expressed HERE rather than by
+    slicing the returned matrix at a caller — a slice has to restate where the
+    activation block ends, which is the one number this function exists to state once.
+    It defaults to PRODUCTION_BLOCKS, so a caller that means "what the shipped trunk
+    sees" gets it without naming a layout.
     """
-    if blocks not in ("all", "activations", "activations+bot"):
-        raise ValueError(
-            f"blocks must be 'all', 'activations' or 'activations+bot', got {blocks!r}")
+    # Membership only, so a typo fails before the joint-PCA load rather than after
+    # it; the layouts themselves are load_joint_blocks', which is the one switch.
+    if blocks not in FEATURE_BLOCKS:
+        raise ValueError(f"blocks must be one of {FEATURE_BLOCKS}, got {blocks!r}")
     tids_by_size = corpus_tids_by_size(sizes)
     act, k_act = load_joint_activations(sizes, tids_by_size, pca_dim, seed)
-    if blocks == "all":
-        wide, n_wide = load_joint_tail_blocks(sizes, tids_by_size)
-    elif blocks == "activations+bot":
-        bw, nb = load_joint_bot_winrate(sizes, tids_by_size)
-        wide, n_wide = (("bot_winrate", bw),), nb
-    else:
-        wide, n_wide = (), 0
+    wide, n_wide = load_joint_blocks(blocks, sizes, tids_by_size)
     keys = [(s, t) for s in sizes for t in tids_by_size[s]]
     key_idx = {key: i for i, key in enumerate(keys)}
     input_dim = k_act + n_wide

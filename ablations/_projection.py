@@ -20,38 +20,21 @@ import sgfmill.sgf
 from utils.katago.coords import gtp_to_xy, sgf_to_gtp
 from utils.katago.sgf_parsing import parse_tsumego_sgf
 from utils.rating.mirt_net import build_trunk
-from utils.rating.model_constants import K_AXES, PCA_DIM, SEED, SIZES
+from utils.rating.model_constants import (
+    K_AXES, PCA_DIM, PRODUCTION_BLOCKS, SEED, SIZES)
 from utils.rating.features import (
     SIZE_FLAG_COLS, corpus_tids_by_size, joint_feature_tail,
-    load_joint_activation_basis, load_joint_bot_winrate,
-    load_joint_tail_blocks)
+    load_joint_activation_basis, load_joint_blocks)
 from utils.paths import PROJECT_ROOT
 
 MODEL_PT = os.path.join(PROJECT_ROOT, "ratings", "mirt_model.pt")
 
 # The block layouts a checkpoint here can have been fitted on, named exactly as
 # load_joint_mirt_features' `blocks` argument names them — a checkpoint trained
-# with `--features X` is projected with blocks="X" and nothing else.
+# with `--features X` is projected with blocks="X" and nothing else. The layouts
+# themselves are utils.rating.features.load_joint_blocks; this tuple is only the
+# subset these scripts compare.
 FEATURE_BLOCKS = ("all", "activations+bot")
-
-
-def tail_blocks(blocks, sizes, tids_by_size):
-    """(wide, n_wide) for one block layout: the per-problem columns AFTER the
-    activation block and BEFORE the board-size flag, in trunk order.
-
-    "all" defers wholly to load_joint_tail_blocks, which is where the shipped
-    order is stated. "activations+bot" keeps the one wide block that does not
-    describe the problem through its ANSWER, which is what makes it usable as
-    per-cell conditioning; it mirrors the same branch in
-    load_joint_mirt_features, and the two must stay in step or a dev checkpoint
-    is fed columns it was not fitted with.
-    """
-    if blocks == "all":
-        return load_joint_tail_blocks(sizes, tids_by_size)
-    if blocks == "activations+bot":
-        bw, nb = load_joint_bot_winrate(sizes, tids_by_size)
-        return (("bot_winrate", bw),), nb
-    raise ValueError(f"blocks must be one of {FEATURE_BLOCKS}, got {blocks!r}")
 
 
 def quantize(a):
@@ -63,17 +46,18 @@ class FittedProjection:
     """A fitted trunk + axis head and everything needed to feed it: the
     joint-PCA basis, the per-problem tail blocks for ITS layout, the corpus.
 
-    `blocks` is the layout the checkpoint was fitted on (see FEATURE_BLOCKS).
-    It is not inferable from the file, and getting it wrong is caught by the
-    trunk's first Linear refusing the width rather than silently absorbed —
-    which is why the caller states it.
+    `blocks` is the layout the checkpoint was fitted on (see FEATURE_BLOCKS),
+    defaulting to the shipped one. It is not inferable from the file, and getting
+    it wrong is caught by the trunk's first Linear refusing the width rather than
+    silently absorbed — which is why a caller pointing at a dev checkpoint states
+    it.
 
     The joint-PCA basis is shared across checkpoints by construction: it is
     keyed on the corpus, PCA_DIM and SEED, none of which a feature ablation
     moves, so two fits' activation blocks are the same columns.
     """
 
-    def __init__(self, device, model_path=MODEL_PT, blocks="all"):
+    def __init__(self, device, model_path=MODEL_PT, blocks=PRODUCTION_BLOCKS):
         import torch
         import torch.nn as nn
         if not os.path.exists(model_path):
@@ -90,7 +74,7 @@ class FittedProjection:
         self.C, self.pmean = basis["C"], basis["pca_mean"]
         self.m2, self.s2 = basis["m2"], basis["s2"]
         st = torch.load(model_path, map_location=device)
-        self.wide, self.n_wide = tail_blocks(blocks, SIZES, self.tids_by_size)
+        self.wide, self.n_wide = load_joint_blocks(blocks, SIZES, self.tids_by_size)
         self.fdim = fdim = PCA_DIM + self.n_wide + SIZE_FLAG_COLS
         trunk, d = build_trunk(fdim, dropout=0.0)
         self.trunk = trunk.to(device)
@@ -126,7 +110,7 @@ class ShippedProjection(FittedProjection):
     the deployed model is measured on."""
 
     def __init__(self, device):
-        super().__init__(device, MODEL_PT, "all")
+        super().__init__(device, MODEL_PT, PRODUCTION_BLOCKS)
 
 
 def problem_arrays(size, tid):
