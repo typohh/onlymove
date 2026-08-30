@@ -150,6 +150,30 @@ TUNE_HARD_CAP = 8        # safety cap on the doubling-style ramp
 # (~8.5 katago + ~1 python).
 CPU_PER_INSTANCE = 10
 INSTANCE_HEADROOM = 0.8
+# Offer filter: CPU has to be sized to the CARD, not to an absolute floor, since
+# KataGo's search is CPU-fed and a bigger card is ramped to more instances. The
+# value is derived from the two constants above against the tuned N in
+# state["_gpu_cache"] — cores_needed = N * CPU_PER_INSTANCE / INSTANCE_HEADROOM,
+# read back as TFLOPS/core. That derivation is an UPPER bound on this ratio: a
+# cached N that was itself CPU-capped reconstructs the host's cores rather than
+# the GPU's appetite, so erring to a SMALLER value (more CPU) is the safe way to
+# be wrong. This value sits at the loose end of what the cache implies.
+MAX_TFLOPS_PER_CORE = 3.0
+# Link floor, Mbps, required in both directions (see cmd_add).
+MIN_INET_MBPS = 400
+# PCIe floor, also relative to the card: KataGo moves input planes up and policy
+# /value back every batch, so the host-to-device link is walked at a rate set by
+# the card's throughput, not by anything absolute. Bracketed by two points, both
+# for a 5090 (~108 TFLOPS): PCIe 3.0 x16 measures ~13.6 GB/s = 7.9 and is known
+# INSUFFICIENT, while 4.0 x16 measures ~25 GB/s = 4.3 and is the nearest
+# known-good. The value sits inside that bracket, nearer the known-good end.
+#
+# Test `pcie_bw` (MEASURED GB/s), never `pci_gen`: the pool carries gen-5 hosts
+# measuring 13.4 and 18.3 GB/s, so a host can advertise a generation whose
+# nominal width it does not deliver, and the 13.4 one is worse than the gen-3
+# case this is here to exclude. `gpu_lanes` needs no separate test either — a
+# narrow link shows up in the measurement already.
+MAX_TFLOPS_PER_PCIE_GBPS = 4.5
 
 
 # ---------------------------------------------------------------------------
@@ -749,10 +773,26 @@ def cmd_add():
     #    sufficient.
     #  * reliability>0.99 — a full run takes hours with no checkpointing, so a
     #    host that drops offline mid-run costs the whole run.
+    #  * cpu_cores_effective>=8 — an absolute floor, enough to feed ONE generate
+    #    instance (CPU_PER_INSTANCE). It is not the real CPU criterion, only the
+    #    part expressible server-side; MAX_TFLOPS_PER_CORE below is the rest.
+    #  * inet_down/inet_up>=400 — setup pushes the repo, the katago binary and
+    #    the model weights before any work starts, and generate's output is
+    #    rsynced back off the box, so a slow link is paid twice on every run and
+    #    is not visible in TFLOPS/$ either. Required in BOTH directions: the two
+    #    are independently reported and the up figure is the weaker one in the
+    #    pool, which is the direction the results come back on.
+    #
+    # --limit is mandatory, not a tuning knob: the API returns 64 offers by
+    # default, ranked by ITS score and not by ours, so without this the sort
+    # below picks the best of an arbitrary truncation of the pool.
     query = ("rented=False rentable=True num_gpus=1 "
-             "cuda_max_good>=12.8 reliability>0.99")
-    print("Searching offers (single GPU, CUDA >= 12.8, reliability > 99%)...")
-    offers = run_vast_cmd(["search", "offers", query])
+             "cuda_max_good>=12.8 reliability>0.99 "
+             "cpu_cores_effective>=8 "
+             f"inet_down>={MIN_INET_MBPS} inet_up>={MIN_INET_MBPS}")
+    print("Searching offers (single GPU, CUDA >= 12.8, reliability > 99%, "
+          f">= 8 effective cores, >= {MIN_INET_MBPS} Mbps up/down)...")
+    offers = run_vast_cmd(["search", "offers", query, "--limit", "1000"])
     if not offers:
         print("No offers found.")
         return
@@ -766,6 +806,35 @@ def cmd_add():
     if not priced:
         print(f"No offers with a usable price/TFLOPS pair ({len(offers)} seen).")
         return
+
+    # CPU sized to the card. Expressed here rather than in the query because the
+    # search DSL compares a field to a CONSTANT and this is a ratio between two
+    # fields. An offer with no core count is dropped rather than assumed fine:
+    # the whole point is that TFLOPS/$ cannot see a starved CPU.
+    fed = [o for o in priced
+           if o.get("cpu_cores_effective", 0) > 0
+           and o["total_flops"] / o["cpu_cores_effective"] <= MAX_TFLOPS_PER_CORE]
+    if not fed:
+        print(f"No offers with >= 1 core per {MAX_TFLOPS_PER_CORE} TFLOPS "
+              f"({len(priced)} priced offers seen).")
+        return
+    print(f"  {len(fed)}/{len(priced)} offers carry enough CPU "
+          f"(1 core per {MAX_TFLOPS_PER_CORE} TFLOPS or better)")
+
+    # Same shape as the CPU rule, and local for the same reason: a ratio between
+    # two fields is not expressible in the search DSL. A missing measurement is
+    # dropped rather than trusted, since an unmeasured link is exactly the case
+    # the TFLOPS/$ ranking cannot see.
+    linked = [o for o in fed
+              if o.get("pcie_bw", 0) > 0
+              and o["total_flops"] / o["pcie_bw"] <= MAX_TFLOPS_PER_PCIE_GBPS]
+    if not linked:
+        print(f"No offers with >= 1 GB/s PCIe per {MAX_TFLOPS_PER_PCIE_GBPS} "
+              f"TFLOPS ({len(fed)} CPU-adequate offers seen).")
+        return
+    print(f"  {len(linked)}/{len(fed)} of those carry enough PCIe "
+          f"(1 GB/s per {MAX_TFLOPS_PER_PCIE_GBPS} TFLOPS or better)")
+    priced = linked
     priced.sort(key=lambda o: o["total_flops"] / o["dph_total"], reverse=True)
 
     print(f"{len(priced)} candidate offers; top by TFLOPS/$:")
@@ -774,7 +843,9 @@ def cmd_add():
               f"{o['total_flops']:6.1f} TFLOPS  ${o['dph_total']:.3f}/hr  "
               f"{o['total_flops'] / o['dph_total']:6.1f} TFLOPS/$  "
               f"{o.get('gpu_ram', 0) / 1024:.0f} GB  "
-              f"{o.get('cpu_cores_effective', 0):.0f} cores")
+              f"{o.get('cpu_cores_effective', 0):.0f} cores  "
+              f"{o['total_flops'] / o['cpu_cores_effective']:.2f} TF/core  "
+              f"gen{o.get('pci_gen', 0):.0f} {o['pcie_bw']:.1f} GB/s")
 
     best = priced[0]
     print(f"Creating instance ({best.get('gpu_name', '?')}, "
