@@ -57,13 +57,13 @@ import time
 
 import numpy as np
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 from utils.katago.coords import gtp_to_xy  # noqa: E402
 from utils.rating.model_constants import INPUT_DROPOUT, K_AXES, SIZES  # noqa: E402
-from auxiliary.ablations._projection import (  # noqa: E402
+from ablations._projection import (  # noqa: E402
     ShippedProjection, problem_arrays, quantize, variation_npz_rows)
 
 

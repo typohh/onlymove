@@ -11,7 +11,7 @@ YoseTsumego / onlymove.net — a Go (Baduk/Weiqi) tsumego pipeline. KataGo gener
 3. **`pwa/`** — vanilla-JS ESM PWA built with esbuild, deployed as a Cloudflare Worker (`pwa/src/index.js`), with a D1 binding `DB` → database `tsumego-reports`. Schema is `pwa/schema.sql` (idempotent `CREATE … IF NOT EXISTS`); apply new tables/indexes to the remote D1 with `npx wrangler d1 execute tsumego-reports --remote --file=schema.sql`. Routes, tables and the client architecture are in `docs/` — see below.
 4. **`analysis_server/`** — a tiny HTTP server wrapping KataGo for the PWA's analysis fallback when SGFs lack embedded win-rate data. `server.py` runs on the cloud box (stdlib + sgfmill only — deployed with no repo beside it); `worker.py` runs on a fast machine and takes that box's work over while it is up.
 
-Plus `auxiliary/` (diagnostics, surgery scripts, the rating-model research surface; not part of the main flow) and `vast_orchestration.py` (rents Vast.ai GPU instances for the heavy generation steps).
+Plus `auxiliary/` (diagnostics, surgery scripts, the rating-model research surface; not part of the main flow), `ablations/` (repeatable seeded measurements against the shipped fit — the figures docs quote; see its README for the contract), and `vast_orchestration.py` (rents Vast.ai GPU instances for the heavy generation steps).
 
 ### Where the detail lives
 
