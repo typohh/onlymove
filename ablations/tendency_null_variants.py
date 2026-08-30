@@ -35,6 +35,22 @@ they are scored on prediction rather than on reliability. The weights come from
 the SGF's own variation comments through `eval_error_null_models.variation_cells`
 -- the same numbers phase 1 scores, read by the same scanner.
 
+`fixed-0.5` IS THE CONTROL, NOT A CANDIDATE. It is the null the client used
+before the availability null shipped: p = 0.5 on every problem and every axis,
+no per-problem computation at all, so the reading collapses to the raw
+toward-share. It is in the default table because it is what makes the rest of
+the table readable. Under it, the per-problem MENU -- the answer to a tsumego is
+by construction not a tenuki, so nearly every alternative loads higher on that
+axis -- is left inside the statistic instead of being divided out, and a menu is
+a property of the rank band a user is served, which is stable within a user and
+therefore replicates across interleaved halves exactly as a real lean would. So
+if `fixed-0.5` scores as the MOST reliable arm, that is not an argument for it:
+it is the demonstration that split-half reliability is gameable by removing
+information, and that this measurement can only ORDER candidates that have
+already passed the validity question (the fixed null was retired on a measured
+confound -- it flagged tenuki over-reach for ~94% of users -- not on
+reliability). Read the whole table with that row as the yardstick.
+
 The default projection is the SHIPPED fit on its full input. The reading-level
 work currently stands on the activations+bot dev fit instead, which is:
 
@@ -95,20 +111,27 @@ VARIANTS = {
     "linear-order": lambda w, v, r, n: np.maximum(n - r, 1.0),
 }
 
-# The shipped null plus the four parameter-free forms that lead
-# eval_error_null_models' phase 1, in its order. Kept short on purpose: every
-# added variant is another row per axis in a table meant to be read, and the two
-# left out (winrate*visits, linear-order) are the two that predict the picked
-# move WORST of the parameter-free set.
-DEFAULT_VARIANTS = "uniform,visits-linear,winrate-linear,1/order,lcb-fixed"
+# Nulls that are not a weighting of the alternatives at all: p is asserted, and
+# the problem is never consulted. Only the retired client null lives here.
+CONSTANT_P = {"fixed-0.5": 0.5}
+
+# The shipped null, the four parameter-free forms that lead
+# eval_error_null_models' phase 1 (in its order), and the retired fixed null as
+# the control. Kept short on purpose: every added variant is another row per
+# axis in a table meant to be read, and the two left out (winrate*visits,
+# linear-order) are the two that predict the picked move WORST of the
+# parameter-free set.
+DEFAULT_VARIANTS = ("uniform,visits-linear,winrate-linear,1/order,lcb-fixed,"
+                    "fixed-0.5")
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--variants", default=DEFAULT_VARIANTS,
-                    help=f"comma-separated, from {sorted(VARIANTS)}. 'uniform' "
-                         f"is the reference every delta is taken against and is "
-                         f"added if omitted")
+                    help=f"comma-separated, from "
+                         f"{sorted(list(VARIANTS) + list(CONSTANT_P))}. "
+                         f"'uniform' is the reference every delta is taken "
+                         f"against and is added if omitted")
     ap.add_argument("--min-errors", type=int, default=2 * MIN_ERRORS_HALF,
                     help="errors a user needs to enter at all (halved between "
                          "the two splits)")
@@ -126,9 +149,10 @@ def main():
         ap.error("--model and --features go together")
 
     names = [v.strip() for v in args.variants.split(",") if v.strip()]
-    unknown = [v for v in names if v not in VARIANTS]
+    known = set(VARIANTS) | set(CONSTANT_P)
+    unknown = [v for v in names if v not in known]
     if unknown:
-        ap.error(f"unknown variant(s) {unknown}; choose from {sorted(VARIANTS)}")
+        ap.error(f"unknown variant(s) {unknown}; choose from {sorted(known)}")
     if "uniform" in names:
         names.remove("uniform")
     names = ["uniform"] + names
@@ -199,6 +223,14 @@ def main():
 
         var_p = []
         for name in names:
+            const = CONSTANT_P.get(name)
+            if const is not None:
+                # Asserted, never computed: the problem's alternatives are not
+                # consulted at all. Finite everywhere, so it admits exactly the
+                # errors every other variant admits -- an error is directional
+                # or not, and that is decided by the sign alone.
+                var_p.append(np.full(K, float(const)))
+                continue
             wt = np.asarray(VARIANTS[name](w, vis, rank, float(n_alt)),
                             dtype=np.float64)
             above = (wt[:, None] * (s < 0)).sum(axis=0)
@@ -281,8 +313,17 @@ def main():
                   f"{dci:>18}{rho[a]:>9.3f}{drho:>8}{sci:>18}", flush=True)
     print("\nr / rho: odd-half against even-half tendency z across users, per axis.\n"
           "dr / drho: that variant minus 'uniform' on the SAME users and the SAME\n"
-          "bootstrap resamples. Positive = the weighted null reads more stably\n"
-          "than the uniform one the client ships.")
+          "bootstrap resamples. Positive = that null reads more stably than the\n"
+          "uniform one the client ships.")
+    if "fixed-0.5" in names:
+        print("\n'fixed-0.5' is the RETIRED client null and a CONTROL, not a\n"
+              "candidate: p = 0.5 everywhere, so the problem is never consulted\n"
+              "and the per-problem menu stays inside the statistic. A menu is a\n"
+              "property of the rank band a user is served, so it is stable within\n"
+              "a user and replicates across halves like a real lean. If that row\n"
+              "wins, the finding is about this METRIC -- reliability is gameable\n"
+              "by removing information -- and not about that null, which was\n"
+              "retired on a measured confound rather than on stability.")
     print("\nmean drho across axes:")
     for n in names[1:]:
         vals = mean_drho[n]
