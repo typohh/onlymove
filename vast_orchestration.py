@@ -227,14 +227,21 @@ def _ssh_port_answers(host, port):
 
 
 def get_ssh_details(inst):
-    """(host, port) for an instance, choosing the port that actually answers.
+    """(host, port) for an instance, choosing the route that actually answers.
 
-    The proxy port is NOT a fixed offset from the API's ssh_port. Some instances
-    answer on ssh_port + 1 and others on ssh_port itself — measured on one fleet,
-    49060174 wanted +1 while 49127840 wanted the raw port, and assuming either
-    one leaves the other permanently "SSH not ready". Both are tried, +1 first
-    because that is the older and more common case, and the answer is cached so
-    this costs one probe per instance.
+    The DIRECT route is tried first: the instance's own public_ipaddr on
+    whatever it maps to 22/tcp — NOT direct_port_start, which on this image is
+    container port 1111. It skips Vast's proxy entirely, so it is both faster
+    and the only route some instances accept.
+
+    The two PROXY candidates follow, because a direct route is not always
+    offered (the ports map can be missing or unpopulated on a booting box) and
+    the proxy port is NOT a fixed offset from the API's ssh_port: some
+    instances answer on ssh_port + 1 and others on ssh_port itself, and
+    assuming either one leaves the other permanently "SSH not ready". +1 comes
+    first because it is the older and more common case.
+
+    Whatever answers is cached, so this costs one probe per instance.
     """
     host = inst.get("ssh_proxy_host") or inst.get("ssh_host")
     port = inst.get("ssh_proxy_port") or inst.get("ssh_port")
@@ -243,20 +250,19 @@ def get_ssh_details(inst):
     key = (host, int(port))
     if key in _SSH_PORT_CACHE:
         return _SSH_PORT_CACHE[key]
-    # The DIRECT route is a third candidate, not a fallback of last resort: one
-    # instance answered only there, with both proxy ports refusing. Its port is
-    # whatever the instance maps to 22/tcp — NOT direct_port_start, which on this
-    # image is container port 1111.
-    candidates = [(host, int(port) + 1), (host, int(port))]
+    candidates = []
     direct_host = inst.get("public_ipaddr")
     for binding in (inst.get("ports") or {}).get("22/tcp") or []:
         if binding.get("HostPort") and direct_host:
             candidates.append((direct_host, int(binding["HostPort"])))
+    candidates += [(host, int(port) + 1), (host, int(port))]
     for cand_host, cand_port in candidates:
         if _ssh_port_answers(cand_host, cand_port):
             _SSH_PORT_CACHE[key] = (cand_host, cand_port)
             return cand_host, cand_port
-    return host, int(port) + 1        # nothing answered yet; keep the old default
+    # Nothing answered yet — a box that is still booting. Hand back the first
+    # candidate so wait_for_ssh retries on the route we would prefer anyway.
+    return candidates[0]
 
 
 def get_ssh_cmds(host, port):
@@ -867,10 +873,18 @@ def cmd_add():
     #  * ubuntu24.04 — setup_instance's apt line names libzip4t64, which is the
     #    24.04 package; 22.04 calls it libzip4 and the install fails.
     #  * runtime, not devel — nothing is compiled on the box.
+    #
+    # --direct asks for a directly reachable SSH port on the host's public IP
+    # instead of a hop through Vast's SSH proxy, which is what get_ssh_details
+    # prefers. Without it the API reports no 22/tcp binding at all and the
+    # direct candidate does not exist, so the preference is unreachable. It
+    # costs nothing in offer selection — the filters above have never yet left
+    # an offer without direct ports in the pool — and the proxy candidates stay
+    # in get_ssh_details as the fallback if a host declines to map one.
     res = run_vast_cmd([
         "create", "instance", str(best["id"]),
         "--image", "nvidia/cuda:12.8.0-cudnn-runtime-ubuntu24.04",
-        "--disk", "64", "--ssh",
+        "--disk", "64", "--ssh", "--direct",
     ])
     if not isinstance(res, dict) or "new_contract" not in res:
         # run_vast_cmd returns None on empty CLI output; guard so we abort
