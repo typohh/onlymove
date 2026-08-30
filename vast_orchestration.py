@@ -769,8 +769,10 @@ def cmd_add():
     #    forward compat is unavailable on consumer GPUs. This is the DRIVER's
     #    maximum, which is necessary but NOT sufficient: it says nothing about
     #    which toolkit the image ships, and the binary needs a matching RUNTIME.
-    #    Pairing this filter with the CUDA-12.8 template below is what makes it
-    #    sufficient.
+    #    Pairing this filter with the explicit CUDA-12.8 image below is what
+    #    makes it sufficient. It stays a floor and not an equality: drivers are
+    #    backward-compatible with older runtimes, so a 13.x host runs the 12.8
+    #    image fine.
     #  * reliability>0.99 — a full run takes hours with no checkpointing, so a
     #    host that drops offline mid-run costs the whole run.
     #  * cpu_cores_effective>=8 — an absolute floor, enough to feed ONE generate
@@ -851,9 +853,23 @@ def cmd_add():
     print(f"Creating instance ({best.get('gpu_name', '?')}, "
           f"${best['dph_total']:.3f}/hr, "
           f"{best['total_flops'] / best['dph_total']:.1f} TFLOPS/$)...")
+    # A fully explicit registry tag, NOT a Vast template. Vast's own CUDA
+    # template pins vastai/base-image at @vastai-automatic-tag, which the server
+    # resolves per host from (compute capability, driver CUDA version) — a
+    # Vast-side lookup table this repo does not control, and when it stopped
+    # resolving ("No compatible image tag found" for every architecture and
+    # driver we could offer it) it refused every create. An explicit tag
+    # consults no such table. Three properties make this the right one, and any
+    # replacement has to keep all three:
+    #  * a COMPLETE CUDA 12.8 runtime INCLUDING cuDNN — bots/katago_cuda12 links
+    #    both, and setup_instance deliberately installs neither (see the
+    #    cuBLAS/nvJitLink pairing failure documented there).
+    #  * ubuntu24.04 — setup_instance's apt line names libzip4t64, which is the
+    #    24.04 package; 22.04 calls it libzip4 and the install fails.
+    #  * runtime, not devel — nothing is compiled on the box.
     res = run_vast_cmd([
         "create", "instance", str(best["id"]),
-        "--template_hash", "f779495b2d83b2c5b56e3c03f233f0ad",
+        "--image", "nvidia/cuda:12.8.0-cudnn-runtime-ubuntu24.04",
         "--disk", "64", "--ssh",
     ])
     if not isinstance(res, dict) or "new_contract" not in res:
