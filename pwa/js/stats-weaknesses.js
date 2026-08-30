@@ -28,9 +28,9 @@
 // interval makes no claim the interval does not support, so an unresolved axis
 // renders as a dot at the neutral point inside a band spanning most of the
 // scale, which reads as "we don't know" without a sentence having to say so.
-// The claim-shaped affordances still gate on confidence: colour ramps from
-// neutral only past MOTIF_Z, and the mistake-example links appear only where the
-// strength reading is credibly negative.
+// The claim-shaped affordances still gate on confidence: colour appears only past
+// MOTIF_Z (in two steps, see toneWeight), and the mistake-example links appear
+// only where the strength reading is credibly negative.
 //
 // An axis with no named tail is skipped. A placeholder like "style #2" is not a
 // finding a user can act on, and the axis keeps steering selection either way.
@@ -60,10 +60,11 @@ const RANK_FULL_SCALE = 2.0;
 // wandering along the track makes the row unreadable — the reader has to
 // relocate "balanced" on every row before the dot means anything.
 const TENDENCY_FULL_SCALE = 0.25;
-// Colour ramps from fully neutral at the MOTIF_Z gate to fully saturated one
-// further SE out, so a row below the gate carries no colour at all — the pane
-// makes no claim there, and a tinted row reads as one.
-const TONE_FULL_Z = MOTIF_Z + 1;
+// Colour comes in TWO STEPS rather than a continuous ramp: nothing below the
+// MOTIF_Z gate, a muted shade from there to twice it, the full shade beyond. The
+// steps are readable as a legend — a row's shade names which side of 2 SE it
+// falls on — where a smooth ramp only ever said "more confident than that one".
+const TONE_STRONG_Z = 2 * MOTIF_Z;
 
 // Builds the motif table consumed by showDetailedStats.
 // One pane per READING, not one pane carrying both. `kind` is 'strength'
@@ -140,8 +141,21 @@ export function buildMotifPane(kind, history = state.answerHistory) {
     const recallSet = new Set(getRecallCandidates({ history }).map(c => c.problemId));
     for (const row of rows) table.appendChild(buildMotifRow(kind, row, recallSet, history));
     root.appendChild(table);
+    root.appendChild(buildIntervalNote());
 
     return root;
+}
+
+// Names the band's width in the pane's smallest type. Worth one line because
+// the width is NOT the conventional one: an unlabelled band reads as ~95%. The
+// figures are DERIVED from MOTIF_Z rather than written into the sentence, so
+// retuning the shared gate retunes the note with it.
+function buildIntervalNote() {
+    const note = document.createElement('div');
+    note.className = 'wk-note';
+    note.textContent = getTerm('statsMotifCiNote',
+        { z: MOTIF_Z, pct: Math.round((2 * normCdf(MOTIF_Z) - 1) * 100) });
+    return note;
 }
 
 // The two poles of the reading this pane shows, each at its own end of the track
@@ -170,11 +184,14 @@ function buildHeaderRow(kind) {
 const clamp01 = (v) => Math.max(0, Math.min(1, v));
 const rankFrac = (r) => clamp01(0.5 + r / (2 * RANK_FULL_SCALE));
 
-// Colour weight for a statistic sitting z posterior SEs from the population
-// centre: nothing at all below the MOTIF_Z gate, ramping to full one SE past it.
+// Colour weight for a statistic sitting z posterior SEs from its neutral point:
+// none below the MOTIF_Z gate, half-strength between the gate and TONE_STRONG_Z,
+// full beyond it.
 function toneWeight(z) {
     if (!Number.isFinite(z)) return 0;
-    return clamp01((Math.abs(z) - MOTIF_Z) / (TONE_FULL_Z - MOTIF_Z));
+    const a = Math.abs(z);
+    if (a <= MOTIF_Z) return 0;
+    return a <= TONE_STRONG_Z ? 0.5 : 1;
 }
 
 // One metric cell: a track with the neutral point marked, the credible interval
@@ -241,8 +258,10 @@ const EMPTY_CELL = { frac: 0.5, loFrac: 0, hiFrac: 1, tone: 'none', weight: 0 };
 // Reading-specific in three ways that do not generalise: the scale the value sits
 // on, how it is formatted, and whether the two ends are VALENCED. Strength is —
 // worse on motif-heavy problems is bad and better is good — so it takes the
-// red/green pair. Tendency is not: both ends are training directions and neither
-// is a virtue, so it must not reuse those colours.
+// red/green pair. Tendency is not: both ends are the same finding, a lean the
+// player has and could train away, so both take ONE colour and the direction is
+// carried by the dot's side of the centre mark alone. A two-hue pair there read
+// as a valence the reading does not have.
 function cellFor(kind, row) {
     if (kind === 'strength') {
         const g = row.strength;

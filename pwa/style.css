@@ -1351,13 +1351,15 @@ body {
    the population average, with the credible interval as a band and the point
    estimate as a dot.
 
-   Colour is driven by --wk-weight, set per cell in JS from the posterior
-   z-score: 0 below the MOTIF_Z gate, 1 one SE past it. A row the model has not
-   resolved therefore renders in the body text colour with a band spanning most
-   of the track, so "we don't know" is visible without a sentence saying it.
-   The two columns use DIFFERENT palettes on purpose — performance is valenced
-   (weak is bad, strong is good) while tendency is not (both ends are training
-   directions), so tendency must not reuse the red/green pair. */
+   Colour is driven by --wk-weight, set per row in JS from the posterior z-score
+   in two steps: 0 below the MOTIF_Z gate, 0.5 up to twice it, 1 beyond. A row the
+   model has not resolved therefore renders in the body text colour with a band
+   spanning most of the track, so "we don't know" is visible without a sentence
+   saying it, and the two shades above the gate read as a legend for 1 vs 2 SE.
+   The two panes use DIFFERENT palettes on purpose — performance is valenced
+   (weak is bad, strong is good) and takes the red/green pair, while tendency is
+   not: a lean either way is the same finding, so both its ends are red and the
+   direction is read off the dot's side of the centre mark. */
 .wk-table {
     display: flex;
     flex-direction: column;
@@ -1423,8 +1425,9 @@ body {
 
 .wk-row[data-tone="weak"]   { --wk-tone: #d9534f; }
 .wk-row[data-tone="strong"] { --wk-tone: #46a06e; }
-.wk-row[data-tone="under"]  { --wk-tone: #5b8fd6; }
-.wk-row[data-tone="over"]   { --wk-tone: #d9903f; }
+/* One colour for both tendency ends — see the note above. */
+.wk-row[data-tone="under"],
+.wk-row[data-tone="over"]   { --wk-tone: #d9534f; }
 
 .wk-track {
     position: relative;
@@ -1474,6 +1477,17 @@ body {
 .wk-value {
     line-height: 1.15;
     color: color-mix(in srgb, var(--wk-tone) calc(var(--wk-weight) * 100%), currentColor);
+}
+
+/* The interval's own definition, under the table it describes. The quietest
+   type in the pane on purpose: it is read once and then never again, so it must
+   not compete with the rows it explains. */
+.wk-note {
+    font-size: 0.8em;
+    line-height: 1.35;
+    opacity: 0.6;
+    padding-left: 1.5ch;
+    margin: 0.1em 0 0.2em;
 }
 
 /* The list is a third item in the row's single-column stack, under the track it
