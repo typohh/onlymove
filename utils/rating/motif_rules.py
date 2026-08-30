@@ -76,7 +76,12 @@ SEMEAI_BALANCE = 0.25
 # ~20% rule as written (see rule_territory, narrowed for the same reason).
 SEMEAI_MIN_STONES = 10.0
 
-# counting: the top two first moves finish within a hair of each other on score
+# sacrifice: own fractional stones the answer gives up, in excess of the best
+# alternative (own_alive_killed alone; see rule_sacrifice). Measured shares:
+# 8.2% pooled, 3.6%/12.5% by board.
+SACRIFICE_MIN_STONES = 1.5
+
+# yose: the top two first moves finish within a hair of each other on score
 # while the win probability separates hard — the position turns on a margin you
 # have to count rather than on a status you can see.
 # The winrate bar has to be HIGH to select anything. Admission requires exactly
@@ -167,8 +172,8 @@ TERR_PER_STONE = 8.0 # points of swing each flipped stone must be beaten by
 # reporting the other was ignored. (This is the property the DEV motif store does
 # not have: it holds several directions called `ko` from different fits, which is
 # why that path is keyed by an `ax_<hex>` content hash instead of by name.)
-LABEL_SET = ["life and death", "counting", "ko", "opening", "territory",
-             "shape", "tenuki", "sente", "semeai"]
+LABEL_SET = ["life and death", "yose", "ko", "opening", "territory",
+             "shape", "tenuki", "sente", "semeai", "gote", "fast", "sacrifice"]
 if len(set(LABEL_SET)) != len(LABEL_SET):
     raise ValueError(f"duplicate rule name in LABEL_SET: {LABEL_SET}")
 
@@ -186,7 +191,7 @@ if len(set(LABEL_SET)) != len(LABEL_SET):
 # an axis a human has not inspected yet.
 RULE_LABELS = {
     "life and death": {"zh": "死活", "ja": "死活", "ko": "사활"},
-    "counting":       {"zh": "数目", "ja": "目算", "ko": "계가"},
+    "yose":           {"zh": "官子", "ja": "ヨセ", "ko": "끝내기"},
     "ko":             {"zh": "打劫", "ja": "コウ", "ko": "패"},
     "opening":        {"zh": "布局", "ja": "序盤", "ko": "포석"},
     "territory":      {"zh": "实地", "ja": "地",   "ko": "실리"},
@@ -194,6 +199,8 @@ RULE_LABELS = {
     "tenuki":         {"zh": "脱先", "ja": "手抜き", "ko": "손빼기"},
     "sente":          {"zh": "先手", "ja": "先手", "ko": "선수"},
     "semeai":         {"zh": "对杀", "ja": "攻め合い", "ko": "수상전"},
+    "gote":           {"zh": "后手", "ja": "後手", "ko": "후수"},
+    "sacrifice":      {"zh": "弃子", "ja": "捨て石", "ko": "사석"},
 }
 _unknown = sorted(set(RULE_LABELS) - set(LABEL_SET))
 if _unknown:
@@ -312,6 +319,40 @@ def rule_semeai(own, balance=None, min_stones=None, trade_ratio=None):
     return all(abs(float(own[k])) <= bar for k in LD_OTHER)
 
 
+def rule_sacrifice(own, min_stones=None, net=False):
+    """The correct move GIVES UP the solver's own stones.
+
+    `own_alive_killed` is the self-inflicted part of the ownership swing: the
+    solver's fractional stones that are ALIVE under the best refuted
+    alternative and DEAD under the answer — stones the correct move chooses to
+    lose that the wrong move would have kept. When at least `min_stones` of
+    them die, winning the position runs THROUGH the loss, which is what a
+    sacrifice is: the throw-in, the squeeze, the group traded for the capture
+    or the tempo.
+
+    One column, one bar. The other seven parts are deliberately not consulted
+    — a sacrifice usually buys something (a kill, a save, territory), and
+    demanding any particular form of payment would fold this rule into
+    life-and-death or semeai instead of naming the give-up itself.
+
+    `net=True` is the UNCOMPENSATED form: the stones given up must exceed the
+    stones killed AND saved combined by the bar, so a trade — stones bought
+    with stones — no longer fires. What remains is the give-up whose payment
+    is not stones at all: territory, tempo, shape. The absolute form admits
+    trades on purpose (a squeeze that kills is still built on a throw-in);
+    the two are different claims about the same column and are tested as
+    separate variants.
+
+    `own` is the raw ownership row, in stones (see rule_life_and_death on why
+    a threshold in stones needs the pre-standardization values)."""
+    min_stones = SACRIFICE_MIN_STONES if min_stones is None else min_stones
+    lost = abs(float(own["own_alive_killed"]))
+    if not net:
+        return lost >= min_stones
+    gained = abs(float(own["opp_alive_killed"])) + abs(float(own["own_dead_revived"]))
+    return lost - gained >= min_stones
+
+
 def rule_territory(own, base=None, per_stone=None):
     """Score swings by more than the stones changing hands can pay for.
 
@@ -357,7 +398,7 @@ def rule_shape(evals, max_gap=None):
     problem in this corpus has an unambiguous best move and the ones that do not
     are the tail this rule takes.
 
-    Distinct from `rule_counting`, which wants a LARGE winrate gap alongside a
+    Distinct from `rule_yose`, which wants a LARGE winrate gap alongside a
     small score gap: there the position is decided by a margin and the engine is
     sure which move takes it."""
     if len(evals) < 2:
@@ -367,7 +408,7 @@ def rule_shape(evals, max_gap=None):
     return (top[0][0] - top[1][0]) <= max_gap
 
 
-def rule_counting(evals):
+def rule_yose(evals):
     """Score says the two best first moves are equivalent; winrate says they are
     not. That gap is the signature of a position decided by a margin.
 
@@ -460,6 +501,35 @@ def reply_distance(node):
     return _dist(mv[0][1], mv[1][1])
 
 
+def reply_kind(node):
+    """Like reply_distance, but says WHY there is no distance: ("move", d) for a
+    real opposite-colour reply, ("pass", None) when the recorded reply is a
+    pass, (None, None) when there is nothing to measure (no node, no
+    continuation, or a same-colour anomaly).
+
+    Reads the IMMEDIATE first child, where reply_distance walks through
+    _line_moves, which skips passes — so for a "move" reply the two agree
+    exactly, and only the no-distance cases are split apart. reply_distance's
+    conflation is affordable for rule_sente: declining on a pass merely forgoes
+    a firing. rule_gote cannot afford it — a recorded pass in reply to the
+    answer is the opponent ignoring it in the strongest possible form, exactly
+    what that rule exists to detect."""
+    if node is None:
+        return None, None
+    colour, raw = node.get_raw_move()
+    if colour is None or not raw or raw == b"tt":
+        return None, None
+    kids = list(node)
+    if not kids:
+        return None, None
+    ncol, nraw = kids[0].get_raw_move()
+    if ncol is None or ncol.upper() == colour.upper():
+        return None, None
+    if not nraw or nraw == b"tt":
+        return "pass", None
+    return "move", _dist(raw.decode("utf-8"), nraw.decode("utf-8"))
+
+
 def best_refuted_node(variation_nodes, correct):
     """The strongest first move that is NOT the answer, or None.
 
@@ -540,6 +610,64 @@ def rule_sente(answer_reply, refuted_reply, min_dist=None):
         return False
     bar = TENUKI_MIN_DIST if min_dist is None else min_dist
     return answer_reply < bar and refuted_reply >= bar
+
+
+def rule_gote(answer_kind, answer_reply, refuted_reply, min_dist=None):
+    """The opponent may IGNORE the correct move — the mirror of rule_sente.
+
+    The same contrast, reflected: the answer draws a tenuki (or an outright
+    pass), while the best refuted try draws a local reply. The refuted side is
+    again the control that makes the contrast mean something: on a quiet board
+    every move is answered from afar, and reading that as gote would report the
+    board's temperature, not the move's nature. Only when the failed try
+    provokes a local punishment while the answer is left alone has the answer
+    demonstrably closed the position.
+
+    A recorded PASS in reply to the answer counts as being ignored — the
+    strongest form of it — via reply_kind; see there for why reply_distance's
+    None cannot carry that meaning.
+
+    Shares one bar with rule_tenuki/rule_sente for the reason given on
+    rule_sente: the notion on both sides of the contrast is tenuki, and one
+    constant keeps it one notion. DISJOINT from rule_sente by construction —
+    the two place the refuted try's reply on opposite sides of the same bar,
+    so no problem seeds both."""
+    if refuted_reply is None:
+        return False
+    bar = TENUKI_MIN_DIST if min_dist is None else min_dist
+    if refuted_reply >= bar:
+        return False
+    if answer_kind == "pass":
+        return True
+    return answer_reply is not None and answer_reply >= bar
+
+
+def rule_fast(board, correct, max_adjacent=0):
+    """The answer TOUCHES NOTHING: no stone of either colour on any of its
+    four orthogonal neighbours in the ROOT position. Diagonals deliberately do
+    not count — a diagonal or one-space relation is already a light way of
+    playing, and folding it into "contact" would leave the rule firing only on
+    moves to empty space, a different and much rarer concept.
+
+    A contact move answers the position's shape directly; a non-contact move
+    takes speed — it stakes a claim the stones do not yet enforce. The rule is
+    a pure property of the root board and the answer coordinate: no engine
+    values, no tree.
+
+    `max_adjacent` is the boundary: how many orthogonal neighbours may be
+    occupied before the move stops being fast. 0 is the strict reading —
+    measured at 2.0%/0.8% of the corpus (9x9/13x13), the same support level
+    that collapsed the shape axis — and 1 ("at most one point of contact")
+    lands at 28%/17%, the band the other viable rules occupy."""
+    if not correct:
+        return False
+    x, y = _xy(correct[1])
+    size = len(board)
+    if not (0 <= x < size and 0 <= y < size):
+        return False
+    adj = sum(1 for nx, ny in ((x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1))
+              if 0 <= nx < size and 0 <= ny < size and board[ny][nx] != ".")
+    return adj <= max_adjacent
 
 
 def rule_opening(prefix, size):

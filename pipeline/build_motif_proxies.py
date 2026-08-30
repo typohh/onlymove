@@ -69,7 +69,8 @@ from utils.rating.model_constants import SIZES  # noqa: E402
 from utils.rating.motif_rules import (  # noqa: E402
     LABEL_SET, OWNERSHIP_CSV, _mover_eval, _subtree_is_resolved,
     answer_opponent_distance, best_refuted_node, reply_distance,
-    rule_counting, rule_ko, rule_life_and_death, rule_opening, rule_semeai,
+    reply_kind, rule_fast, rule_gote, rule_ko,
+    rule_life_and_death, rule_opening, rule_sacrifice, rule_yose, rule_semeai,
     rule_sente, rule_shape, rule_tenuki, rule_territory)
 
 OUT = os.path.join(PROJECT_ROOT, "axes", "motif_proxies.npz")
@@ -127,7 +128,8 @@ def label_one(args):
     # Whether a ko stands in the ROOT position, computed once: rule_ko needs it
     # as its first test and rule_tenuki needs it as a disqualifier.
     from utils.katago.board_render import simulate
-    root_ko = simulate(setup_sgf, size)[2] is not None
+    root_board, _last, _ko = simulate(setup_sgf, size)
+    root_ko = _ko is not None
     evals = [e for e in (_mover_eval(n) for n in variation_nodes) if e is not None]
     # `shape` ranks only RESOLVED alternatives: an abandoned line is not a rival,
     # it is a line nobody played out.
@@ -139,13 +141,19 @@ def label_one(args):
         # both statuses decided together rather than one of them — and disjoint
         # from it by construction, so no problem seeds both.
         "semeai": rule_semeai(own),
-        "counting": rule_counting(evals),
+        "yose": rule_yose(evals),
         "ko": True if root_ko else rule_ko(setup_sgf, variation_nodes, size),
         "opening": rule_opening(ph[1], size),
         "territory": rule_territory(own),
         "shape": rule_shape(resolved),
         "tenuki": rule_tenuki(opp_dist, root_ko),
         "sente": rule_sente(reply_dist, refuted_dist),
+        # The mirror contrast wants the answer's reply KIND as well: a pass in
+        # reply to the answer is gote's strongest form, and reply_distance's
+        # None cannot say it happened.
+        "gote": rule_gote(reply_kind(answer_node)[0], reply_dist, refuted_dist),
+        "fast": rule_fast(root_board, correct),
+        "sacrifice": rule_sacrifice(own),
     }
     return tid, size, [bool(hit[k]) for k in LABEL_SET]
 
