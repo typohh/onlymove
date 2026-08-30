@@ -11,11 +11,30 @@ by how good (and how deeply searched) each wrong move is.
 
 Phase 1 asks the empirical question underneath it: given an error on a problem,
 how well does each candidate null predict WHICH wrong variation was picked?
-Phase 2 carries the winners through to the directional statistic the client
-computes, and to the per-user flags it prints -- observed against the SHIPPED
-uniform-availability null and against the weighted ones, side by side. (The
-fixed-50% null the client used before the availability null shipped survives
-only as a footnote here.)
+Phase 2 carries a fixed panel of them through to the directional statistic the
+client computes, and to the per-user flags it prints -- observed against the
+SHIPPED uniform-availability null and against the weighted ones, side by side.
+(The fixed-50% null the client used before the availability null shipped
+survives only as a footnote here.)
+
+Phase 2b is the one that ADJUDICATES. Phase 1 scores a null on a question the
+client never asks -- which of ~58 wrong moves gets clicked -- while the tendency
+statistic only ever consumes each problem's toward-probability p, one number per
+axis, against a binary outcome. So 2b scores exactly that: the per-error
+DIRECTIONAL log-loss (and Brier) of toward/away against each null's p, per axis,
+paired over the same errors. A null can win phase 1 and lose here, because
+concentrating the pick distribution on the right move says nothing about
+splitting the alternatives correctly ABOVE and BELOW the answer.
+
+Reliability is deliberately NOT the criterion anywhere in this file. Its
+companion `tendency_null_variants` shows why: the retired fixed-50% null scores
+as by far the most split-half-reliable arm, on all seven axes and both repeats,
+precisely because it RETAINS the per-problem menu confound -- impersonal
+structure that is stable within a user replicates across halves like a real
+lean. Reliability therefore rises with retained confound rather than with
+measurement quality, and that argument does not stop at the fixed null: it
+applies to any pair of nulls differing in how much problem structure they divide
+out. What is left is validity, which is what 2b measures.
 
 Nothing here writes to the repo. Run:
 
@@ -67,6 +86,21 @@ EPS_WR = 1e-3
 # pwa/js/constants.js and pwa/js/motif-stats.js).
 MOTIF_Z = 1.0
 MIN_ERRORS = 10
+
+# The nulls phase 2 carries, as (column tag, build_models name). The uniform
+# availability null -- what ships -- is column 0 always and is not listed here.
+# NAMED, not selected by phase 1: phase 2 asks which null predicts the DIRECTION
+# of an error, which is a different question from which move gets picked, and a
+# panel chosen by the first question could not disagree with it. The three
+# parameter-free entries span the signals a decision node offers (how good the
+# move is, how far the search looked, where it sits in the list); the fitted one
+# is a reference bound, not a shippable candidate.
+PHASE2_PANEL = (
+    ("winrate-lin", "winrate-linear"),
+    ("visits-lin", "visits-linear"),
+    ("1/order", "1/order"),
+    ("zipf+wr*", "order zipf + winrate, uniform tail"),
+)
 
 
 # --------------------------------------------------------------------------
@@ -812,15 +846,17 @@ def main():
               f"{pred:>10.4f} {obs:>10.4f} {obs / max(pred, 1e-9):>7.2f}")
 
     # ---- Phase 2 -----------------------------------------------------------
-    # Two weighted arms, both carried through: the best PARAMETER-FREE candidate
-    # (which could ship as-is, having nothing to fit or store) and the best
-    # candidate overall (which could not, without a doctrine decision about
-    # shipping fitted null parameters).
-    free = [m for m in models if m.n_params == 0 and m.name != "uniform"]
-    best_free = min(free, key=lambda m: nll[m.name])
-    arms = [("free", best_free.name, np.exp(heldout_logp[best_free.name]))]
-    if best.name != best_free.name:
-        arms.append(("fit", best.name, np.exp(heldout_logp[best.name])))
+    # A FIXED PANEL, not a phase-1 winner. Phase 1 ranks nulls on which wrong
+    # MOVE gets picked; phase 2 asks a different question of the same nulls and
+    # must be free to disagree, so the panel is named rather than selected --
+    # three parameter-free candidates spanning the signals available (move
+    # quality, search depth, list position) plus the fitted best for reference.
+    arms = []
+    for tag, name in PHASE2_PANEL:
+        if name not in heldout_logp:
+            raise SystemExit(f"phase 2 panel names {name!r}, which build_models "
+                             f"does not define")
+        arms.append((tag, name, np.exp(heldout_logp[name])))
     phase2(prob_keys, problems, arms, offsets, sizes, counts, gtp_all, matched,
            args)
 
@@ -1054,13 +1090,15 @@ def phase2(prob_keys, problems, arms, offsets, sizes, counts, gtp_all, matched,
     b_obs = np.array(b_obs)                                    # (B, K)
     b_null = np.array(b_null)                                  # (B, n_null, K)
 
-    head = "".join(f"{t:>10}" for t in tags)
+    # Wide enough for the longest tag PHASE2_PANEL can carry, plus a space.
+    wcol = max(10, max(len(t) for t in tags) + 2)
+    head = "".join(f"{t:>{wcol}}" for t in tags)
     print(f"\n--- toward-share per axis: observed, and each availability null ---")
     print(f"{'axis':<16}{'observed':>22}{head}")
-    print("-" * (38 + 10 * n_null))
+    print("-" * (38 + wcol * n_null))
     for k in range(K):
         lo_o, hi_o = np.percentile(b_obs[:, k], [2.5, 97.5])
-        cols = "".join(f"{pnull[j, k]:>10.4f}" for j in range(n_null))
+        cols = "".join(f"{pnull[j, k]:>{wcol}.4f}" for j in range(n_null))
         print(f"{labels[k]:<16}{obs[k]:>8.4f} [{lo_o:.4f},{hi_o:.4f}]{cols}")
 
     print(f"\n--- residual (observed - null), 95% paired bootstrap over problems ---")
@@ -1076,8 +1114,8 @@ def phase2(prob_keys, problems, arms, offsets, sizes, counts, gtp_all, matched,
     print("\nA residual clear of zero is a directional tendency the null does NOT\n"
           "explain; a residual straddling zero means the whole deviation is\n"
           "explained by WHICH wrong moves the problem offers, weighted that way.")
-    for j, (t, nm) in enumerate(zip(tags, names)):
-        print(f"  {t:<8} = {nm}")
+    for t, nm in zip(tags, names):
+        print(f"  {t:<13} = {nm}")
     print(f"\nnon-tie error counts per axis: "
           f"{', '.join(f'{labels[k]}={int(per_prob_n.sum(0)[k]):,}' for k in range(K))}")
     print("FOOTNOTE: the retired fixed-50% null sits at 0.5000 on every axis and\n"
@@ -1148,30 +1186,147 @@ def phase2(prob_keys, problems, arms, offsets, sizes, counts, gtp_all, matched,
 
     print(f"users with >= {MIN_ERRORS} scored errors on an axis : {n_users:,}")
     print(f"flag gate: |Poisson-binomial z| > {MOTIF_Z} (MOTIF_Z), both sides")
-    for j in range(n_null):
-        print(f"\nnull '{tags[j]}' ({names[j]})")
-        if j == 0:
-            print(f"{'axis':<16}{'tested':>8}{'flagged':>16}")
-            print("-" * 40)
-            for k in range(K):
-                t = max(tested[j, k], 1)
-                print(f"{labels[k]:<16}{int(tested[j, k]):>8,}"
-                      f"{int(flag[j, k]):>9,} ({100 * flag[j, k] / t:4.1f}%)")
-            continue
-        print(f"{'axis':<16}{'tested':>8}{'flagged':>16}{'lost':>8}"
-              f"{'gained':>8}{'sign flip':>11}")
-        print("-" * 67)
-        for k in range(K):
+    print(f"\n{'axis':<16}{'null':<13}{'tested':>8}{'flagged':>16}{'lost':>8}"
+          f"{'gained':>8}{'sign flip':>11}")
+    print("-" * 80)
+    for k in range(K):
+        for j in range(n_null):
             t = max(tested[j, k], 1)
-            print(f"{labels[k]:<16}{int(tested[j, k]):>8,}"
+            head = labels[k][:15] if j == 0 else ""
+            deltas = ("" if j == 0 else
+                      f"{int(lost[j, k]):>8,}{int(gained[j, k]):>8,}"
+                      f"{int(flip[j, k]):>11,}")
+            print(f"{head:<16}{tags[j]:<13}{int(tested[j, k]):>8,}"
                   f"{int(flag[j, k]):>9,} ({100 * flag[j, k] / t:4.1f}%)"
-                  f"{int(lost[j, k]):>8,}{int(gained[j, k]):>8,}"
-                  f"{int(flip[j, k]):>11,}")
-    print("\n'lost'/'gained'/'sign flip' are all against the 'uniform' rows above --\n"
+                  f"{deltas}")
+    print("\n'lost'/'gained'/'sign flip' are all against that axis' 'uniform' row --\n"
           "the null the client ships. FOOTNOTE: the retired fixed-50% test would\n"
           "flag "
           + ", ".join(f"{labels[k]}={int(flag_legacy[k]):,}" for k in range(K))
           + ".")
+
+    phase2b(labels, tags, names, prob_p, row_pidx, row_toward, row_nontie,
+            counts, nprob, K)
+
+
+def phase2b(labels, tags, names, prob_p, row_pidx, row_toward, row_nontie,
+            counts, nprob, K):
+    """Score each null on the ONE number the tendency statistic consumes.
+
+    The client never asks a null which of ~58 wrong moves gets clicked. It asks
+    it for p -- the probability that a direction-blind error on THIS problem
+    lands above the answer on THIS axis -- and then scores a binary outcome
+    against it. So the honest criterion is the proper score of that binary
+    prediction, per error, per axis: log-loss (and Brier beside it, since a
+    clipped log-loss is sensitive to the clip and Brier is not).
+
+    Errors are POOLED across users on purpose. A null is a player-free object;
+    anything per-user here would be scoring the player, not the null.
+
+    Every candidate is unfitted, so it needs no folds -- p is a deterministic
+    function of the problem. The fitted arm carries its phase-1 cross-fitting
+    with it, which is what keeps it an honest reference rather than a bound it
+    reaches by having seen these errors.
+    """
+    print("\n" + "=" * 78)
+    print("PHASE 2b -- per-error DIRECTIONAL log-loss: does the null predict "
+          "the SIDE?")
+    print("=" * 78)
+
+    n_null = len(tags)
+    per_prob_ll = np.zeros((n_null, K, nprob))
+    per_prob_br = np.zeros((n_null, K, nprob))
+    per_prob_n = np.zeros((K, nprob))
+    clipped = np.zeros((n_null, K))
+    total_n = np.zeros(K)
+
+    for k in range(K):
+        pk_all = prob_p[:, row_pidx, k]                   # (n_null, n_rows)
+        # One scored set for every null, so the comparison is paired per error.
+        fin = np.isfinite(pk_all).all(axis=0) & row_nontie[:, k]
+        w = counts * fin
+        y = row_toward[:, k].astype(np.float64)
+        per_prob_n[k] = np.bincount(row_pidx, weights=w, minlength=nprob)
+        total_n[k] = float(w.sum())
+        for j in range(n_null):
+            raw = pk_all[j]
+            # A one-sided menu gives p exactly 0 or 1, and an error that lands on
+            # the impossible side then costs infinity. Clip at the same floor the
+            # multiplicative models use, and REPORT the rate: a null that owes
+            # its score to the clip is being scored on the clip.
+            with np.errstate(invalid="ignore"):
+                hit = (raw <= EPS_WR) | (raw >= 1.0 - EPS_WR)
+            clipped[j, k] = float((w * hit).sum())
+            p = np.clip(np.nan_to_num(raw, nan=0.5), EPS_WR, 1.0 - EPS_WR)
+            ll = -(y * np.log(p) + (1.0 - y) * np.log(1.0 - p))
+            br = (y - p) ** 2
+            per_prob_ll[j, k] = np.bincount(row_pidx, weights=w * ll,
+                                            minlength=nprob)
+            per_prob_br[j, k] = np.bincount(row_pidx, weights=w * br,
+                                            minlength=nprob)
+
+    ll = per_prob_ll.sum(2) / np.maximum(total_n, 1)       # (n_null, K)
+    br = per_prob_br.sum(2) / np.maximum(total_n, 1)
+    ll_all = per_prob_ll.sum((1, 2)) / max(total_n.sum(), 1)
+    br_all = per_prob_br.sum((1, 2)) / max(total_n.sum(), 1)
+
+    # Paired bootstrap over PROBLEMS, one resample scored by every null.
+    rng = np.random.default_rng(RNG_SEED)
+    b_d = np.zeros((500, n_null, K))
+    b_d_all = np.zeros((500, n_null))
+    for b in range(500):
+        mult = rng.multinomial(nprob, np.full(nprob, 1.0 / nprob)).astype(float)
+        num = per_prob_ll @ mult                           # (n_null, K)
+        den = per_prob_n @ mult                            # (K,)
+        val = num / np.maximum(den, 1)
+        b_d[b] = val - val[0]
+        tot = num.sum(1) / max(den.sum(), 1)
+        b_d_all[b] = tot - tot[0]
+
+    print(f"\n{'axis':<16}{'null':<13}{'errors':>9}{'logloss':>9}"
+          f"{'delta':>9}{'delta 95% CI':>20}{'brier':>8}{'clip%':>8}")
+    print("-" * 92)
+    for k in range(K):
+        for j in range(n_null):
+            head = labels[k][:15] if j == 0 else ""
+            n_s = f"{int(total_n[k]):,}" if j == 0 else ""
+            if j == 0:
+                d, ci = "", ""
+            else:
+                lo, hi = np.percentile(b_d[:, j, k], [2.5, 97.5])
+                d = f"{ll[j, k] - ll[0, k]:>+9.4f}"
+                ci = f"[{lo:+.4f}, {hi:+.4f}]"
+            print(f"{head:<16}{tags[j]:<13}{n_s:>9}{ll[j, k]:>9.4f}{d:>9}"
+                  f"{ci:>20}{br[j, k]:>8.4f}"
+                  f"{100 * clipped[j, k] / max(total_n[k], 1):>8.2f}")
+    print("-" * 92)
+    for j in range(n_null):
+        if j == 0:
+            d, ci = "", ""
+        else:
+            lo, hi = np.percentile(b_d_all[:, j], [2.5, 97.5])
+            d = f"{ll_all[j] - ll_all[0]:>+9.4f}"
+            ci = f"[{lo:+.4f}, {hi:+.4f}]"
+        n_s = f"{int(total_n.sum()):,}" if j == 0 else ""
+        print(f"{'ALL AXES':<16}{tags[j]:<13}{n_s:>9}{ll_all[j]:>9.4f}{d:>9}"
+              f"{ci:>20}{br_all[j]:>8.4f}"
+              f"{100 * clipped[j].sum() / max(total_n.sum(), 1):>8.2f}")
+
+    print("\nEach row scores one null on the binary outcome the tendency test "
+          "actually\nconsumes: did this error land ABOVE the answer on this "
+          "axis, against that\nnull's p for this problem. delta < 0 = better "
+          "than the uniform availability\nnull the client ships; the interval "
+          "is a paired bootstrap over PROBLEMS,\nthe same resample for every "
+          "null. 'clip%' is the share of scored errors whose\np hit the "
+          f"{EPS_WR:g} floor or ceiling -- a one-sided menu -- and is a "
+          "property of\nthe null, not of the players.")
+    for t, nm in zip(tags, names):
+        print(f"  {t:<13} = {nm}")
+    print("\nThis is the ADJUDICATING table. Phase 1 ranks nulls on which wrong "
+          "move gets\npicked, which the client never asks; reliability "
+          "(tendency_null_variants) rises\nwith RETAINED problem structure and "
+          "so cannot referee between nulls either.\nA null belongs on the "
+          "client when it predicts the SIDE better than uniform.")
 
 
 if __name__ == "__main__":
