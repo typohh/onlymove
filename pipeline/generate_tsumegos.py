@@ -19,7 +19,6 @@ from utils.katago.add_variations import (  # noqa: E402
     deep_follow_playouts,
     first_move_is_well_formed,
     generate_variations_directly_to_sgf,
-    promote_winning_first_move,
 )
 from utils.constants import (  # noqa: E402
     ALL_BOARD_SIZES, DEBUG, DEFAULT_MODEL, debug, read_retired_ids)
@@ -62,7 +61,6 @@ class Stats:
         self.failures_to_create = 0
         self.duplicate_ids_skipped = 0
         self.malformed_discarded = 0
-        self.first_moves_promoted = 0
         self.worker_errors = 0
         self.number_of_moves = RunningStats()
         self.start_time = time.time()
@@ -98,9 +96,6 @@ class Stats:
     def add_malformed_discarded(self):
         self.malformed_discarded += 1
 
-    def add_first_move_promoted(self):
-        self.first_moves_promoted += 1
-
     def add_worker_error(self):
         self.worker_errors += 1
 
@@ -135,8 +130,6 @@ class Stats:
             stats["Duplicate ids skipped"] = self.duplicate_ids_skipped
         if self.malformed_discarded:
             stats["Malformed discarded"] = self.malformed_discarded
-        if self.first_moves_promoted:
-            stats["First move reordered"] = self.first_moves_promoted
         if self.worker_errors:
             stats["Worker errors (skipped)"] = self.worker_errors
 
@@ -288,24 +281,13 @@ def worker_task(problem_finder: ProblemFinder, queries: KatagoQueries, threads_l
                     # one first move that wins on BOTH winrate and score, with every
                     # other candidate losing on both. Multi-solution, seki/half-point
                     # (no both-positive move), and winrate/score-disagreement positions
-                    # break the client's single-canonical-answer contract
-                    # (findBestMoveFromChildren), so they are never written to the corpus.
+                    # break the client's single-canonical-answer contract, so they
+                    # are never written to the corpus.
                     if not first_move_is_well_formed(node):
                         STATS.add_malformed_discarded()
                         with print_lock:
                             print(f"[skip] {filename}: not a single-solution problem; discarding")
                         continue
-
-                    # The solution written first is the one ProblemFinder's is_valid
-                    # verified; the variation comments above are written by their own
-                    # passes and can name a different move. Every backend consumer
-                    # reads the solution off variation_nodes[0], so make the file
-                    # agree with its own evaluations before it is written.
-                    if promote_winning_first_move(node):
-                        STATS.add_first_move_promoted()
-                        with print_lock:
-                            print(f"[fix] {filename}: winning first move was listed late; "
-                                  f"moved to variation 0")
 
                     STATS.add_problem_found(len(moves))
                     os.makedirs(OUTPUT_DIR, exist_ok=True)

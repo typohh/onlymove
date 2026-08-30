@@ -109,61 +109,6 @@ export function setEvalComment(node, winrate, score, visits) {
   return true;
 }
 
-/**
- * Finds the winning move among a node's children by their actual evaluation —
- * NOT by SGF child order. Comments are "<winrate>%/<score>/<visits>" with both
- * numbers reported from BLACK's perspective (bots/analysis.cfg sets
- * reportAnalysisWinratesAs = BLACK), so the best move for the side to play is:
- *   - Black to play -> the HIGHEST winrate (score breaks exact ties)
- *   - White to play -> the LOWEST  winrate (score breaks exact ties)
- *
- * Almost every generated problem happens to list its solution first, but a few
- * generator misfires don't (e.g. 13a38a3f: the listed-first move loses at 0.4%
- * while the real answer wins at 99.2%). Selecting by evaluation makes the
- * correctness check robust to ordering instead of trusting children[0].
- *
- * Falls back to the first child only when NO sibling carries a parseable
- * winrate/score comment.
- * @param {Array} children - Array of SGF nodes (all the same side to move).
- * @returns {object|null} - The winning move node, or null if there are none.
- */
-export function findBestMoveFromChildren(children) {
-    if (!children || children.length === 0) {
-        return null;
-    }
-
-    // All children of a decision node share the side to move; read it off the
-    // first child that carries a colored move.
-    const sideToPlay = children.find(c => c.move && (c.move.c === WGo.B || c.move.c === WGo.W))?.move.c;
-    const blackToPlay = sideToPlay === WGo.B;
-
-    let best = null;
-    let bestWinrate = blackToPlay ? -Infinity : Infinity;
-    let bestScore = blackToPlay ? -Infinity : Infinity;
-    for (const child of children) {
-        const winrate = getWinrateFromComment(child.comment);
-        if (winrate === null) continue;
-        const score = getScoreFromComment(child.comment);
-        // Higher winrate/score is better for Black, lower for White (comments
-        // are Black-perspective). Score only matters on an exact winrate tie.
-        const tieScore = score ?? (blackToPlay ? -Infinity : Infinity);
-        const better = blackToPlay
-            ? (winrate > bestWinrate || (winrate === bestWinrate && tieScore > bestScore))
-            : (winrate < bestWinrate || (winrate === bestWinrate && tieScore < bestScore));
-        if (better) {
-            best = child;
-            bestWinrate = winrate;
-            bestScore = tieScore;
-        }
-    }
-
-    if (best) {
-        return best;
-    }
-    // No sibling had a parseable evaluation: fall back to the first child.
-    return (children[0].comment && children[0].comment.match(/%\//)) ? children[0] : null;
-}
-
 // Standard Go board notation: column letters skip 'I' (A..H, J..T), row is
 // 1-based from the BOTTOM while WGo's y=0 is the TOP row (so row = size - y).
 // toBoardNotation and boardNotationToXy are exact inverses over this alphabet;
@@ -193,13 +138,25 @@ export function boardNotationToXy(move, size) {
 
 /**
  * Checks if a move is correct.
+ *
+ * The answer IS variation 0 of the problem's decision node. That is the corpus
+ * contract, fixed by construction and not inferred: construct_initial_sgf
+ * writes the solution ProblemFinder verified as the first child and every later
+ * annotation pass only appends, so nothing can displace it. Every backend stage
+ * reads the answer positionally — extract_activations' correct_idx,
+ * benchmark_bots' grading, row 0 of the published per-cell block — so reading
+ * it positionally here is what keeps the client on the same move they do.
+ *
+ * Do NOT re-derive this from the evaluation comments. They are a shallower
+ * annotation than the search that verified the solution, so on any file where
+ * the two disagree, picking by comment puts the app on a different answer from
+ * the ratings, the axis vectors and the availability null.
  * @param {object} moveNode - The node of the move to check.
- * @param {Array} allChildren - All sibling nodes.
+ * @param {Array} allChildren - All sibling nodes, in SGF order.
  * @returns {boolean} - True if the move is correct.
  */
 export function isCorrectMove(moveNode, allChildren) {
-    const bestMoveNode = findBestMoveFromChildren(allChildren);
-    return bestMoveNode === moveNode;
+    return !!allChildren && allChildren.length > 0 && allChildren[0] === moveNode;
 }
 
 /**

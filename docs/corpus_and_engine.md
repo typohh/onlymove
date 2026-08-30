@@ -20,9 +20,11 @@ Format is one 8-hex id per line with `#` comments, appended in blocks that say w
 
 By generator design every problem has exactly one correct first move — the `solution` returned by `ProblemFinder.create_problem` — so downstream code can rely on "one canonical answer per problem".
 
-**That answer is also `variation_nodes[0]`, and generation enforces it rather than assuming it.** `promote_winning_first_move` (`utils/katago/add_variations.py`) reorders the decision node's children so the move the *shipped evaluation comments* name leads: highest winrate for the mover, score breaking exact ties — the same rule the client's `findBestMoveFromChildren` applies. The two can disagree at generation time, because the solution written first is what `ProblemFinder.is_valid` verified on a deeper re-read, while the candidates' comments come from later passes at their own playout budgets. **Reorder, don't discard** — such a position is still well-posed, and `first_move_is_well_formed`, the separate single-solution gate, passes it.
+**That answer is `variation_nodes[0]` by construction, and there is nothing to enforce.** `construct_initial_sgf` writes the verified `solution` as the decision node's first child; both deep passes and the shallow pass only ever *append* (`get_child_move` reuses an existing child or calls `new_child()`), so nothing can displace it for the life of the tree.
 
-**The invariant is load-bearing because the two kinds of consumer read the solution differently.** The client picks by evaluation and is order-blind. Every backend stage takes it **positionally** — `extract_activations`' `correct_idx`, `benchmark_bots`' grading — so a misordered file silently feeds a *losing* move's activations into the rating features and into the shipped per-problem axis vector, while still playing correctly in the app.
+**The invariant is load-bearing because every consumer reads the solution positionally** — `extract_activations`' `correct_idx`, `benchmark_bots`' grading, row 0 of the published per-cell block, and the client's `isCorrectMove`. So the answer is never re-derived from the evaluation comments. Those come from the annotation passes at their own playout budgets and are shallower than the re-read `ProblemFinder.is_valid` performed; picking by them is how the client used to end up on a different move from every backend stage.
+
+**A guard used to sit here and has been removed.** `promote_winning_first_move` reordered the decision node's children so the comments' winner led. Two corpus-wide scans showed it had never once changed a shipped file: all 220,463 live problems carry the `DEEP_ENTRY_PLAYOUTS = 1000` comment on `variation_nodes[0]` — the signature only the answer node's own deep read can write — and no root variation anywhere carries a 1000-visit comment at index ≥ 1 (alternatives top out at 900–999). It was removed rather than turned into a check, because a check states that the ordering could be wrong when the construction says it cannot be.
 
 `auxiliary/check_tsumego_sequences.py` re-verifies the corpus; `winner is NOT variation_nodes[0]` must be 0.
 
@@ -50,7 +52,7 @@ Three cheaper-looking substitutes for the predicate are wrong, and were measured
 
 Two boundaries around the predicate:
 
-- **Selection is unchanged and the predicate only narrows the pool.** Black picks by `findBestMoveFromChildren`; white takes lowest winrate then lowest score, so two ghost moves still appear when those differ. **Correctness still reads the unrestricted `findBestMoveFromChildren`** — how far a line was searched must not redefine what counts as the right answer.
+- **Selection is unchanged and the predicate only narrows the pool.** Black shows the first child — the same move `isCorrectMove` accepts; white takes lowest winrate then lowest score, so two ghost moves still appear when those differ. **Correctness never enters here at all**: it is `children[0]`, so how far a line was searched cannot redefine what counts as the right answer.
 - **Resolution says the line was played out, not that it resolves the way the problem claims.** A principal line can end with the solver losing, so whether a resolved line is a win is read from the evaluation the terminal node carries, never from the predicate.
 
 ## Corpus soundness

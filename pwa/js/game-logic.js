@@ -6,7 +6,7 @@ import { state, setAcceptClicks, setAppMode, setReviewStartTime } from './state.
 import { getCurrentNode, getLegalMoveNode, playMoveByIndex, playNextMove } from './board.js';
 import { fadeOverlay } from './overlays.js';
 import { playStoneSound } from './audio.js';
-import { isCorrectMove, findBestMoveFromChildren, tsumegoIdOf, toBoardNotation, toCanonicalXy } from './sgf.js';
+import { isCorrectMove, tsumegoIdOf, toBoardNotation, toCanonicalXy } from './sgf.js';
 import { APP_MODES, MODEL_INPUT_HISTORY_LENGTH } from './constants.js';
 import { MODEL_INDICES, benefitConfidenceForVar } from './recall-model.js';
 import { getTerm } from './i18n.js';
@@ -123,8 +123,9 @@ async function _handleIncorrectMoveSequence(moveIndex, x, y) {
     const currentProblem = state.currentProblem;
     const tsumegoId = tsumegoIdOf(currentProblem?.filename);
     const zipFilename = currentProblem?.zipFilename;
-    const children = getCurrentNode()?.children || [];
-    const correctIndex = children.indexOf(findBestMoveFromChildren(children));
+    // The answer is variation 0 — the corpus contract isCorrectMove reads, and
+    // the same row the published per-cell block puts the null's reference at.
+    const correctIndex = 0;
     let wrongStatsPromise = null;
     if (tsumegoId && zipFilename && state.appMode === APP_MODES.SOLVING) {
         wrongStatsPromise = fetchWrongAttemptStats({

@@ -78,16 +78,19 @@ def _top_level_variations(s):
 
 
 def _select_correct_move(variations_region):
-    """Pick the correct first move by embedded winrate — mirroring the PWA's
-    findBestMoveFromChildren (pwa/js/sgf.js), NOT trusting children[0].
+    """The correct first move: the FIRST top-level variation that plays a stone.
 
-    Each top-level variation is a candidate first move whose first node carries a
-    Black-perspective "<winrate>%/<score>/<visits>" comment. The correct move is the
-    highest winrate for Black to play (lowest for White), score breaking an exact
-    tie. A handful of problems have a mis-ordered variation list where the first
-    branch is NOT the solution — which is exactly why this can't be children[0].
-    Returns (color, "ab") or None; falls back to the first real-move variation
-    only when no candidate carries a parseable winrate."""
+    That is the corpus contract, the same one `isCorrectMove` (pwa/js/sgf.js) and
+    every backend consumer read — construct_initial_sgf writes the verified
+    solution as the decision node's first child and every annotation pass only
+    appends, so variation 0 is the answer. This used to re-derive it from the
+    embedded winrates instead; that is a shallower annotation than the search
+    that verified the solution, and re-deriving it here made this a second,
+    independent definition of the answer that could drift from the contract.
+
+    A pass is skipped rather than returned — it is never the solution, and it can
+    appear among the variations. Returns (color, "ab"), or None if no top-level
+    variation plays a stone."""
     cands = []  # (color, coord, winrate|None, score|None)
     for content in _top_level_variations(variations_region):
         head = content[1:] if content.startswith(";") else content
@@ -102,27 +105,16 @@ def _select_correct_move(variations_region):
         cands.append((mv.group(1), mv.group(2), wr, sc))
     if not cands:
         return None
-    scored = [c for c in cands if c[2] is not None]
-    if not scored:
-        return (cands[0][0], cands[0][1])   # no winrates anywhere: old children[0] behavior
-    black = cands[0][0] == "B"
-
-    def key(c):
-        wr, sc = c[2], c[3]
-        return (wr, sc if sc is not None else (float("-inf") if black else float("inf")))
-
-    best = max(scored, key=key) if black else min(scored, key=key)
-    return (best[0], best[1])
+    return (cands[0][0], cands[0][1])
 
 
 def parse_sgf(sgf_text):
     """Return (size, setup_moves, correct_move).
 
     setup_moves: list of (color, "ab") played in the linear chain before the
-    first variation node. correct_move: (color, "ab") of the CORRECT first move,
-    chosen by embedded winrate across ALL first-level variations (see
-    _select_correct_move) rather than blindly children[0] — a few problems have a
-    mis-ordered variation list. None when there are no variations.
+    first variation node. correct_move: (color, "ab") of the CORRECT first move —
+    the first stone-playing top-level variation, the corpus contract (see
+    _select_correct_move). None when there are no variations.
     """
     size_m = re.search(r"SZ\[(\d+)\]", sgf_text)
     size = int(size_m.group(1)) if size_m else 9

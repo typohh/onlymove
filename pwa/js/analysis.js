@@ -8,7 +8,7 @@ import { loadSgf, playMoveOnBranch, undoMove, getCurrentNode, redraw } from './b
 import { updateAnalysisUI, updateAllUI } from './ui.js';
 import { playStoneSound } from './audio.js';
 import { getTerm } from './i18n.js';
-import { getScoreFromComment, getWinrateFromComment, findBestMoveFromChildren, formatEvalComment, setEvalComment } from './sgf.js';
+import { getScoreFromComment, getWinrateFromComment, formatEvalComment, setEvalComment } from './sgf.js';
 import { APP_MODES, ANALYSIS_STATUS } from './constants.js';
 import { populateMotifBubble } from './motif-bubble.js';
 import { onEnterReview as onboardingEnterReview } from './onboarding.js';
@@ -230,21 +230,19 @@ async function requestAndDisplayAnalysis() {
             let displayChild;
             let candidatesToShow;
             if (isBlackToPlay) {
-                // Show the SAME move the solve path accepts as correct
-                // (findBestMoveFromChildren — winrate-best, score tie-break), NOT
-                // children[0]. A minority of problems have the generator's
-                // first-listed variation be a losing move (e.g. 53dee5db:
-                // children[0]=lg 60.6%/-0.5 loses, real answer ji 78.5%/+2.3), and
-                // trusting document order marked that losing move as the solution —
-                // disagreeing with what isCorrectMove would accept.
+                // Show the SAME move the solve path accepts as correct: the
+                // FIRST child, isCorrectMove's rule. At the decision node that
+                // is the verified answer; deeper it is moveInfos[0], the line
+                // the generator played out; and an API answer is unshifted to
+                // the front by the path below. bestSgfChild is that child where
+                // the SGF has one, bestChild where only the server's answer
+                // does — and the server contributes a SINGLE move, so there is
+                // never a set to rank here.
                 //
-                // The pool narrows to the resolved branches when there are any,
-                // but the RULE stays findBestMoveFromChildren so that display
-                // and isCorrectMove cannot diverge. Correctness itself is never
-                // read off resolution: how far a line was searched must not
-                // redefine what counts as the right answer.
-                displayChild = findBestMoveFromChildren(displayPool || children)
-                    || findBestMoveFromChildren(children) || bestChild;
+                // displayPool (the resolved branches) does not enter: the first
+                // SGF child is the played-out line by construction, and how far
+                // a line was searched must never redefine the right answer.
+                displayChild = bestSgfChild || bestChild;
                 candidatesToShow = [{ x: displayChild.move.x, y: displayChild.move.y }];
             } else if (displayPool) {
                 // Comments are reported with reportAnalysisWinratesAs = BLACK, so

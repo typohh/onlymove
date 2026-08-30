@@ -185,10 +185,10 @@ def first_move_is_well_formed(node):
       - zero winners         → seki / half-point / dame (no move both-positive),
       - a winrate/score disagreement on any move (e.g. 60.6%/-0.5) → ambiguous.
 
-    This says nothing about WHERE the winner sits in the variation list; that is
-    promote_winning_first_move's job. Keeping the two separate is deliberate —
-    a problem whose solution is merely listed late is perfectly well-posed and
-    should be reordered, not discarded.
+    This says nothing about WHERE the answer sits in the variation list, and
+    nothing needs to: construct_initial_sgf writes it as the decision node's
+    first child and every pass in this module only ever appends, so variation 0
+    IS the answer for the life of the tree.
     """
     if node is None:
         return False
@@ -202,50 +202,6 @@ def first_move_is_well_formed(node):
         else:
             ambiguous += 1
     return winners == 1 and ambiguous == 0
-
-
-def winning_first_move(node):
-    """The child the client would accept as the answer, or None if nothing here
-    can be ranked.
-
-    The client's rule: highest winrate for the side to move, score breaking exact
-    ties, first-listed winning an exact tie on both. Split out from
-    promote_winning_first_move so a caller can ASK the question without the
-    answer being reordered as a side effect — a repair must never reorder, since
-    the id, the ratings and the attempt history are all tied to the answer the
-    file already has.
-    """
-    if node is None:
-        return None
-    candidates = _candidate_evals(node)
-    if not candidates:
-        return None
-    # max() returns the first maximal element, matching the client's strict-`>`
-    # scan, so an exact tie on both axes leaves the earlier variation in front.
-    return max(candidates, key=lambda c: (c[1], c[2]))[0]
-
-
-def promote_winning_first_move(node):
-    """Reorder `node`'s children so the winning first move is variation index 0.
-
-    The corpus convention is that variation_nodes[0] IS the solution, and every
-    backend consumer relies on it — pipeline.extract_activations takes its
-    correct_idx from it, pipeline.benchmark_bots grades against it. The generator
-    can break that convention: the solution it writes first is the move
-    ProblemFinder's is_valid re-read verified, while the candidates' comments are
-    written afterwards by their own passes at their own playout budgets, so when
-    the two disagree the first variation is a move the SHIPPED evaluations call a
-    loss. The client has never trusted the position (pwa/js/sgf.js
-    findBestMoveFromChildren picks by evaluation), so the file is reordered here
-    to agree with it rather than discarding an otherwise well-posed problem.
-
-    Selection is winning_first_move's. Returns True if a node was moved.
-    """
-    best = winning_first_move(node)
-    if best is None or best is node[0]:
-        return False
-    best.reparent(node, 0)
-    return True
 
 
 PLAYOUTS_SHALLOW = 30

@@ -108,8 +108,9 @@ def label_one(args):
         return None
     # The answer NODE, matched by coordinate to the winrate-chosen correct move
     # rather than taken as variation_nodes[0]. The two agree by construction
-    # (promote_winning_first_move enforces it) but matching costs nothing and
-    # does not depend on that invariant holding for every file.
+    # (the answer is written first and generation discards any file whose
+    # evaluations name another move) but matching costs nothing and does not
+    # depend on that invariant holding for every file.
     answer_node = None
     if correct:
         for _n in variation_nodes:
