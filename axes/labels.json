@@ -300,10 +300,12 @@
   }
  },
  "components": [
-  "ko",
-  "yose",
-  "tenuki",
   "life and death",
-  "territory"
+  "yose",
+  "ko",
+  "opening",
+  "tenuki",
+  "sente",
+  "semeai"
  ]
 }

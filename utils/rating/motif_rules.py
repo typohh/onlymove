@@ -125,13 +125,20 @@ OPENING_MAX_PREFIX = {9: 18, 13: 46}
 # number of lines: >=3 gives 25.9%/23.4% and >=4 gives 17.2%/15.3%, so 4 is the
 # integer nearest the target.
 #
-# ONE bar serves BOTH rules, and rule_sente has none of its own. Tenuki is a
-# single notion — the opponent played away — and both rules are statements about
-# it, so a second constant would only create the possibility of the two drifting
-# apart while each kept the name. rule_tenuki asks it of the answer against the
-# opponent's LAST move; rule_sente asks it twice, of the reply each first move
-# draws, and wants the answer below the bar and the refuted try at or above it.
+# The bars USED to be one constant, on the argument that tenuki is a single
+# notion both rules state. The 2026-08 boundary sweep overrode that with a
+# measurement: taught at the shared bar of 4 the sente axis mutates (retention
+# .31 against the rule, four seeds agreeing at .88 on some OTHER direction),
+# while at 2 it holds .52 with the sweep's best separability — "must answer
+# within 2, refuted try answered at 2 or beyond" is the criterion the data
+# actually carries as sente. Gote at every bar found the same axis mirrored, so
+# a tighter sente bar is not a tighter tenuki: the two rules now name different
+# distances on purpose, and the drift the shared constant guarded against is
+# exactly what shipped. rule_tenuki asks its bar of the answer against the
+# opponent's LAST move; rule_sente asks its own of the reply each first move
+# draws, wanting the answer below it and the refuted try at or above it.
 TENUKI_MIN_DIST = 4    # lines between a move and the opponent's play
+SENTE_MIN_DIST = 2     # rule_sente's reply-distance bar (13.5% share at 2)
 
 # SHAPE — the two best resolved first moves are CLOSE in winrate, so the position
 # does not announce which is right and the choice rests on judging the shape.
@@ -590,9 +597,10 @@ def rule_sente(answer_reply, refuted_reply, min_dist=None):
     being ignored that says the reply to the answer was compelled — a move both
     tries get is a busy corner, a move only the right one gets is sente.
 
-    ONE bar, TENUKI_MIN_DIST, because there is one notion here and it is tenuki:
-    the rule reads "not a tenuki, against a tenuki". A second constant for the
-    answer side would let the two drift apart while both kept the name.
+    The bar is SENTE_MIN_DIST, this rule's own — tighter than rule_tenuki's on
+    the 2026-08 sweep's evidence; see the constants block for the measurement
+    that split them. Both SIDES of the contrast share the one bar, so the rule
+    still reads "answered locally, against ignored", at one distance.
 
     Declines when either distance is missing, rather than reading an absent
     refutation as a tenuki — which would fire the rule where the corpus knows
@@ -608,7 +616,7 @@ def rule_sente(answer_reply, refuted_reply, min_dist=None):
     Board-independent, for the reason given on rule_tenuki."""
     if answer_reply is None or refuted_reply is None:
         return False
-    bar = TENUKI_MIN_DIST if min_dist is None else min_dist
+    bar = SENTE_MIN_DIST if min_dist is None else min_dist
     return answer_reply < bar and refuted_reply >= bar
 
 
@@ -627,11 +635,11 @@ def rule_gote(answer_kind, answer_reply, refuted_reply, min_dist=None):
     strongest form of it — via reply_kind; see there for why reply_distance's
     None cannot carry that meaning.
 
-    Shares one bar with rule_tenuki/rule_sente for the reason given on
-    rule_sente: the notion on both sides of the contrast is tenuki, and one
-    constant keeps it one notion. DISJOINT from rule_sente by construction —
-    the two place the refuted try's reply on opposite sides of the same bar,
-    so no problem seeds both."""
+    Keeps TENUKI_MIN_DIST as its bar (sente's own is tighter since the 2026-08
+    sweep; see the constants block). Still DISJOINT from rule_sente, now by the
+    ANSWER side: sente needs the answer's reply measured under SENTE_MIN_DIST,
+    this rule needs it at TENUKI_MIN_DIST or beyond (or a pass, which sente
+    declines on) — no reply satisfies both while the sente bar is the lower."""
     if refuted_reply is None:
         return False
     bar = TENUKI_MIN_DIST if min_dist is None else min_dist
