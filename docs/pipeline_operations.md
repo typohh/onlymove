@@ -26,7 +26,7 @@ Hours-long, no checkpointing, mandatory positional size. See *Running the long s
 
 ### `extract_activations`
 
-GPU, resumable by file existence, iterates both sizes. Feeds both the rating features and the motif axis fit. Budget **disk**, not compute: roughly 0.6 MB per 9×9 problem and 1.15 MB per 13×13 one, so a full corpus is on the order of 100 GB. The rate is flat over hours rather than decaying, because the pass is bound by writing rather than by the forward pass — it never pins the GPU hard enough to throttle. A full corpus is a few hours locally and does not need remoting. The npz row order and the `correct_idx` contract are in `corpus_and_engine.md`.
+GPU, resumable by file existence, iterates both sizes. Feeds both the rating features and the motif axis fit. **It aborts without `activations/encoder.npz`** — writing raw vectors into a store every reader expects to be one encoder's output would be silent, so the missing artifact fails loud; `--raw` (for an encoder refresh's fitting subset) requires its own `--out-dir` for the same reason. On resume it fingerprint-verifies every existing file in a background thread and hard-aborts on a file written under a different encoder. The pass pipelines reader threads (SGF parse + net inputs) ahead of a batched forward, slices and encoder-projects on device, and compresses through a writer pool; the encoded store is small enough (~15 GB corpus-wide) that neither disk nor writing is the budget any more. A full corpus is around two hours locally and does not need remoting. The npz row order, the `correct_idx` contract, the encoder artifact and the refresh procedure are in `corpus_and_engine.md`.
 
 ### `extract_ownership_swing`
 

@@ -58,6 +58,8 @@ Each problem's move tree carries a per-branch evaluation — win probability and
 
 **Trunk activations.** A neural Go engine is run on each position and the post-skip-add output of all eighteen residual blocks (eighteen × 384 = 6912 floats) is captured **at every legal cell** for the side to move, along with an index marking which cell is the correct move. This is the only signal that describes the position itself rather than the solver's verdict on it, and it is the only one available per *cell*, which is what later makes per-cell motif vectors possible.
 
+What is *stored* is not the raw vector but a fixed 512-dimensional linear compression of it — per-channel standardization followed by a principal-component projection, fitted once on the cells the system actually compares: correct moves (drawn both uniformly over the problem set and in proportion to how often each problem is attempted) and the wrong moves players have actually chosen, in equal parts. The full vectors exist only transiently inside the capture; every later fit works inside the compressed space. The width is a measured choice, not a modelling one: it is set where refitting the downstream models inside the compressed space reproduces the uncompressed results within run-to-run noise even when the compression's own fit set is deliberately mis-specified, so the store can survive a later redesign of what "cells that matter" means without the raw vectors ever being recomputed.
+
 Two structural facts about this capture propagate everywhere. Rows are in board-scan order, not move-tree order, so the correct move sits wherever its coordinates put it in that order — usually not the first row, occasionally the first, never reliably either — which is why the index is recorded rather than assumed. And the cell set is a **superset** of the move tree's root variations — every clickable move is embedded, some embedded cells have no variation, and the "pass" variation is never embedded at all. Every consumer therefore either selects by the recorded correct index or maps by board coordinate; nothing may index positionally across that boundary.
 
 **Bot ladder pass rates.** A ladder of engine configurations of varying strength solves every problem, giving a per-bot pass rate. This is a difficulty proxy available for the *entire* problem set, including problems no human has ever attempted — which is exactly the population the rating model has to extrapolate to.
@@ -657,7 +659,7 @@ Generation and evaluation take a mandatory board size and run once per size; eve
 ```
 pipeline.generate_tsumegos <size>      → tsumegos/<size>/*.sgf
 pipeline.benchmark_bots <size>         → attempts/<size>/*.txt
-pipeline.extract_activations           → activations/<size>/<id>.npz
+pipeline.extract_activations           → activations/<size>/<id>.npz   (projected through activations/encoder.npz)
 pipeline.extract_ownership_swing        → activations/_signal_cache/ownership_swing.csv
 pipeline.cache_rating_features         → activations/_signal_cache/move_evals_<size>.npz
                                          + correct_vecs_<size>.npy + correct_ids_<size>.json
@@ -669,6 +671,8 @@ pipeline.write_mirt_per_cell           → axes/per_cell/
 pipeline.fit_population_constants      → ratings/population_constants.json
 pipeline.package_for_pwa               → pwa/tsumegos/          (single writer)
 ```
+
+**One step sits outside this sequence.** `pipeline.fit_activation_encoder` (re)fits the frozen compression of section 1.2 into `activations/encoder.npz` — a tracked artifact, since with only compressed files on disk nothing else can reproduce it. It runs only when the encoder is being refreshed, and a refresh forces a full `extract_activations --force` plus `cache_rating_features --rebuild-activation-cache` behind it (`docs/corpus_and_engine.md`).
 
 **The last five are ordered by hard data dependencies, not by convention.** Two of them — `map_rating_to_rank` and `fit_population_constants` — are board-independent and need no GPU, which makes it tempting to treat them as side steps. "Board-independent" is not "detachable": both sit *inside* the sequence.
 
