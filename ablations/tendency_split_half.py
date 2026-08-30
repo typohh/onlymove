@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Split-half reliability of the tendency reading: shipped tail vs dropped tail.
+"""Split-half reliability of the tendency reading: arm A vs arm B projection.
 
 tail_conditioning_sensitivity shows the within-problem sign structure both
 tendency halves are built from is strongly conditioning-dependent — which says
@@ -18,10 +18,24 @@ z_even across users, per axis, for each arm, on the users valid in BOTH arms
 and both halves — fully paired, so the comparison is the projection and
 nothing else. A bootstrap over users gives the CI on the per-axis difference.
 
-The masked arm drops the tail's wide columns to 0 (their pooled mean) and
-scales the surviving activation block by 1/(1-INPUT_DROPOUT) — the
-training-side presentation of survivors beside dropped columns
-(--no-input-scale for the eval-convention variant).
+Arm A is always the SHIPPED fit on its full input. Arm B is one of two things:
+
+  default — the SAME fit with the tail's wide columns dropped to 0 (their
+  pooled mean) and the surviving activation block scaled by 1/(1-INPUT_DROPOUT),
+  the training-side presentation of survivors beside dropped columns
+  (--no-input-scale for the eval-convention variant). This asks which
+  CONDITIONING of one model reads more stably.
+
+  --arm-b-model CKPT --arm-b-features BLOCKS — a DIFFERENT fit, read on its own
+  full input: its trunk and axis head fed the activation PCA plus exactly the
+  per-problem blocks it was trained on, nothing masked and nothing rescaled.
+  This asks which MODEL reads more stably, so a feature ablation that shows no
+  loss on the rating can be scored on the readings it exists to produce. The
+  two fits' axes correspond BY INDEX, which holds only because both were taught
+  the same rule bank in the same order — there is no post-hoc matching here.
+
+Everything after the projection is identical between the modes: the same users,
+the same halves, the same statistic, the same pairing.
 
 CAVEAT: reliability rewards stability, not truth. A distortion that is stable
 within a user — carried, say, by the rank band they are served — replicates
@@ -45,7 +59,8 @@ if PROJECT_ROOT not in sys.path:
 from utils.katago.coords import gtp_to_xy  # noqa: E402
 from utils.rating.model_constants import INPUT_DROPOUT, K_AXES, SIZES  # noqa: E402
 from ablations._projection import (  # noqa: E402
-    ShippedProjection, problem_arrays, quantize, variation_npz_rows)
+    FEATURE_BLOCKS, FittedProjection, ShippedProjection, problem_arrays,
+    quantize, variation_npz_rows)
 
 # The shipped gate: a half's reading exists only on this many directional
 # errors (MIN_ERRORS in pwa/js/motif-stats.js).
@@ -107,25 +122,44 @@ def main():
                          "the two splits)")
     ap.add_argument("--no-input-scale", action="store_true",
                     help="masked arm at eval convention: surviving columns at "
-                         "scale 1 instead of 1/(1-INPUT_DROPOUT)")
+                         "scale 1 instead of 1/(1-INPUT_DROPOUT). Meaningless "
+                         "with --arm-b-model, which masks nothing")
+    ap.add_argument("--arm-b-model", metavar="CKPT",
+                    help="make arm B ANOTHER FIT read on its own full input "
+                         "(e.g. dev_runs/actbot_s3.pt) instead of the masked "
+                         "shipped fit. Axes are paired by index")
+    ap.add_argument("--arm-b-features", choices=FEATURE_BLOCKS,
+                    help="the per-problem block layout --arm-b-model was "
+                         "FITTED on; it is not recoverable from the file")
     ap.add_argument("--boot", type=int, default=2000,
                     help="bootstrap resamples over users for the Δr CI")
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
+    if bool(args.arm_b_model) != bool(args.arm_b_features):
+        ap.error("--arm-b-model and --arm-b-features go together")
 
     import torch
     t0 = time.time()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     P = ShippedProjection(device)
+    # Arm B: another fit on its own input, or the same fit with the tail masked.
+    Q = (FittedProjection(device, args.arm_b_model, args.arm_b_features)
+         if args.arm_b_model else None)
+    bname = "dev" if Q is not None else "mask"
     act_scale = 1.0 if args.no_input_scale else 1.0 / (1.0 - INPUT_DROPOUT)
 
     by_problem, n_users = load_user_errors(args.min_errors)
     corpus = {(s, t) for s in SIZES for t in P.tids_by_size[s]}
     todo = sorted(k for k in by_problem if k in corpus)
     n_att = sum(len(v) for k, v in by_problem.items() if k in corpus)
+    arm_b = (f"{args.arm_b_model} on its own full input "
+             f"(blocks={args.arm_b_features}, fdim {Q.fdim})" if Q is not None
+             else f"the shipped fit with the tail masked, activation scale "
+                  f"{act_scale:.4f}")
     print(f"{n_users} users >= {args.min_errors} errors, {n_att} attempts over "
-          f"{len(todo)} problems, device {device}, masked-arm activation "
-          f"scale {act_scale:.4f}", flush=True)
+          f"{len(todo)} problems, device {device}\n"
+          f"arm A (full): the shipped fit on its own full input "
+          f"(fdim {P.fdim})\narm B ({bname}): {arm_b}", flush=True)
 
     K = K_AXES
     # (arm, user, half, axis) accumulators of the shipped statistic.
@@ -148,16 +182,26 @@ def main():
         rows = np.array(var_rows, dtype=np.intp)
         Z = P.pca(cand[rows])
         tail_full = P.tail(size, tid)
-        tail_mask = tail_full.copy()
-        tail_mask[:P.n_wide] = 0.0             # size flag kept
         n = len(rows)
-        inp = np.concatenate([
-            np.concatenate([Z, np.tile(tail_full, (n, 1))], axis=1),
-            np.concatenate([Z * act_scale, np.tile(tail_mask, (n, 1))], axis=1),
-        ], axis=0).astype(np.float32)
-        g = P.axes(inp)
+        inp_a = np.concatenate([Z, np.tile(tail_full, (n, 1))], axis=1)
+        if Q is None:
+            tail_mask = tail_full.copy()
+            tail_mask[:P.n_wide] = 0.0         # size flag kept
+            inp_b = np.concatenate([Z * act_scale,
+                                    np.tile(tail_mask, (n, 1))], axis=1)
+            # One forward pass over both arms: same fit, so this is also what
+            # keeps the default reproducible against the committed figures.
+            g = P.axes(np.concatenate([inp_a, inp_b], axis=0).astype(np.float32))
+            q = (quantize(g[:n]), quantize(g[n:]))
+        else:
+            # Arm B's own basis, its own tail blocks, its own head. The basis is
+            # the same joint PCA (same corpus, PCA_DIM, SEED), recomputed rather
+            # than assumed.
+            inp_b = np.concatenate([Q.pca(cand[rows]),
+                                    np.tile(Q.tail(size, tid), (n, 1))], axis=1)
+            q = (quantize(P.axes(inp_a.astype(np.float32))),
+                 quantize(Q.axes(inp_b.astype(np.float32))))
         ci = var_rows.index(correct_idx)
-        q = (quantize(g[:n]), quantize(g[n:]))
 
         # Per arm: each alternative cell's sign vs correct, and the problem's
         # null toward-probability per axis (strict comparisons only, exactly
@@ -202,8 +246,8 @@ def main():
     # Pearson on z mixes lean with VOLUME (z grows with sqrt(n) and per-user n
     # varies widely, so heavy users dominate the covariance); the rank
     # correlation is the primary metric, Pearson kept for context.
-    print(f"\n{'axis':<24}{'users':>6}{'r_full':>8}{'r_mask':>8}{'dr':>8}"
-          f"{'dr 95% CI':>18}{'rho_full':>9}{'rho_mask':>9}{'drho':>8}"
+    print(f"\n{'axis':<24}{'users':>6}{'r_full':>8}{'r_' + bname:>8}{'dr':>8}"
+          f"{'dr 95% CI':>18}{'rho_full':>9}{'rho_' + bname:>9}{'drho':>8}"
           f"{'drho 95% CI':>18}")
     valid = (nDir >= MIN_ERRORS_HALF) & (sumPQ > 0)
     with np.errstate(invalid="ignore", divide="ignore"):
@@ -238,7 +282,7 @@ def main():
               f"{f'[{lo:+.3f}, {hi:+.3f}]':>18}{sA:>9.3f}{sB:>9.3f}"
               f"{sB - sA:>8.3f}{f'[{slo:+.3f}, {shi:+.3f}]':>18}", flush=True)
     if dr_all:
-        print(f"\nmean drho (mask - full) across axes: {np.mean(dr_all):+.3f}")
+        print(f"\nmean drho ({bname} - full) across axes: {np.mean(dr_all):+.3f}")
     print(f"total {time.time()-t0:.0f}s", flush=True)
 
 
