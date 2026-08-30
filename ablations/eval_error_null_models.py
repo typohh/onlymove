@@ -2,22 +2,35 @@
 """Which wrong variation does a user pick, given that they erred?
 
 The client's motif TENDENCY reading (pwa/js/motif-stats.js) is a sign test of the
-picked variation's axis loading against the correct one's, with a FIXED 50% null.
-That null assumes an erring user is equally likely to land on either side of the
-answer on every axis -- which is only true if the problem OFFERS a balanced menu
-of wrong moves. This script measures the alternative: a per-problem null built
-from what the decision node actually offers, optionally weighted by how good each
-wrong move is.
+picked variation's axis loading against the correct one's, against the UNIFORM
+AVAILABILITY NULL: uniform over the alternatives the board offered, per problem,
+parameter-free. That null assumes an erring user is equally likely to land on any
+alternative -- which ignores that a decision node's wrong moves are not equally
+tempting. This script measures the alternative: the same per-problem null WEIGHTED
+by how good (and how deeply searched) each wrong move is.
 
 Phase 1 asks the empirical question underneath it: given an error on a problem,
 how well does each candidate null predict WHICH wrong variation was picked?
-Phase 2 carries the winner through to the directional statistic the client uses.
+Phase 2 carries the winners through to the directional statistic the client
+computes, and to the per-user flags it prints -- observed against the SHIPPED
+uniform-availability null and against the weighted ones, side by side. (The
+fixed-50% null the client used before the availability null shipped survives
+only as a footnote here.)
 
 Nothing here writes to the repo. Run:
 
-    ./.venv/bin/python3 -m auxiliary.eval_error_null_models
+    ./.venv/bin/python3 -m ablations.eval_error_null_models
+
+Phase 2 needs a per-cell axis projection. `--embeddings shipped` reads the
+production `axes/per_cell/` store; the DEFAULT `--embeddings actbot` projects the
+variation cells on the fly through a named dev checkpoint (`--model`,
+`--features`), which is the trunk input the reading-level measurements now stand
+on. That default names a `dev_runs/` checkpoint, which the directory's contract
+otherwise reserves for an explicitly-named comparison arm -- `--embeddings
+shipped` is the production-artifact path and stays exact.
 """
 
+import argparse
 import hashlib
 import json
 import os
@@ -35,18 +48,25 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
+from utils.katago.add_variations import parse_eval_comment, parse_eval_visits  # noqa: E402
 from utils.katago.coords import sgf_to_gtp, gtp_to_xy  # noqa: E402
 
 DB_PATH = os.path.join(PROJECT_ROOT, "db", "d1.sqlite")
 TSUMEGO_DIR = os.path.join(PROJECT_ROOT, "tsumegos")
 PER_CELL_DIR = os.path.join(PROJECT_ROOT, "axes", "per_cell")
 LABELS_JSON = os.path.join(PROJECT_ROOT, "axes", "labels.json")
+DEFAULT_DEV_MODEL = os.path.join(PROJECT_ROOT, "dev_runs", "actbot_s3.pt")
+DEFAULT_DEV_FEATURES = "activations+bot"
 
 N_BOOTSTRAP = 2000
 RNG_SEED = 0
 # Winrate floor for the multiplicative models: a variation at a reported 0.0%
 # still gets clicked, and log(0) is not a probability model.
 EPS_WR = 1e-3
+# The gate the client flags a tendency reading at (MOTIF_Z / MIN_ERRORS in
+# pwa/js/constants.js and pwa/js/motif-stats.js).
+MOTIF_Z = 1.0
+MIN_ERRORS = 10
 
 
 # --------------------------------------------------------------------------
@@ -81,9 +101,9 @@ def decision_children(text):
     """Raw SGF text -> (size, [child, ...]) for the FIRST branch point.
 
     Each child is a dict with the first node's move (SGF coordinate string or
-    None for a pass / moveless node), its colour, and the winrate/score parsed
-    off its comment. Children are returned in file order, so children[0] is the
-    answer the generator promoted.
+    None for a pass / moveless node), its colour, and the winrate/score/visits
+    parsed off its comment. Children are returned in file order, so children[0]
+    is the answer the generator promoted.
     """
     m = _SZ_RE.search(text)
     size = int(m.group(1)) if m else None
@@ -143,7 +163,7 @@ def _first_node(text, i):
             move = val
         elif prop == "C":
             comment = val
-    winrate = score = None
+    winrate = score = visits = None
     if comment:
         # UNANCHORED, like every other parser in the repo (parse_eval_comment in
         # utils/katago/add_variations.py): a comment may carry text before the
@@ -152,9 +172,14 @@ def _first_node(text, i):
         if mm:
             winrate = float(mm.group(1))
             score = float(mm.group(2))
+            # The third field is the SEARCH DEPTH behind the estimate. Read
+            # through the repo's own reader rather than a fourth regex here, so
+            # the "no third field means the shallow floor by construction"
+            # convention is stated in exactly one place.
+            visits = parse_eval_visits(comment)
     is_pass = (move is None) or (move == "") or (move == "tt")
     return {"move": move, "colour": colour, "is_pass": is_pass,
-            "winrate": winrate, "score": score}
+            "winrate": winrate, "score": score, "visits": visits}
 
 
 def verify_parser(paths, limit=300):
@@ -189,12 +214,96 @@ def verify_parser(paths, limit=300):
             if colour and colour.upper() != (kid["colour"] or ""):
                 bad += 1
                 break
+            # The evaluation comment, all three fields, against the repo's own
+            # readers. The third one is what the visits-weighted nulls below run
+            # on, so a scanner that captured it differently would silently move
+            # every one of their weights.
+            try:
+                ref_comment = node.get("C")
+            except KeyError:
+                ref_comment = None
+            ref_ws = parse_eval_comment(ref_comment)
+            kid_ws = (None if kid["winrate"] is None
+                      else (kid["winrate"], kid["score"]))
+            if ref_ws != kid_ws:
+                bad += 1
+                break
+            if parse_eval_visits(ref_comment) != (kid["visits"] or 0):
+                bad += 1
+                break
     return len(sample), bad
 
 
 # --------------------------------------------------------------------------
 # Problem table
 # --------------------------------------------------------------------------
+
+def _mover_reader(kids):
+    """A (winrate, score) reader in MOVER perspective for a decision node.
+
+    The comments are BLACK-perspective throughout (bots/analysis.cfg sets
+    reportAnalysisWinratesAs = BLACK), so a White-to-play decision node has to be
+    flipped before "higher is better" means anything.
+    """
+    to_play = kids[0]["colour"] or (kids[1]["colour"] if len(kids) > 1 else "B")
+    black = (to_play == "B")
+
+    def mover(kid):
+        if kid["winrate"] is None:
+            return None, None
+        w = kid["winrate"] / 100.0
+        s = kid["score"]
+        return (w, s) if black else (1.0 - w, -s)
+
+    return mover
+
+
+def variation_cells(size, tid):
+    """Every non-pass root variation of a problem, in SGF order.
+
+    Each entry is {"gtp", "xy", "w", "s", "v"} with w/s in MOVER perspective and
+    v the visit count behind that estimate. cells[0] is the ANSWER -- generation
+    pins it first (promote_winning_first_move) and every backend stage reads it
+    positionally. A variation whose comment carries no evaluation, and a repeat
+    of a cell already listed, are both dropped, so a board point names at most
+    one entry. Returns None when the file is missing, unparseable, or declares a
+    different board size.
+
+    This is the WEIGHT side of a weighted availability null: the same per-cell
+    numbers phase 1 scores its candidate nulls on, exposed so an ablation that
+    already holds a per-cell projection (ablations.tendency_null_variants) can
+    build the same weights without restating the scanner.
+    """
+    path = os.path.join(TSUMEGO_DIR, str(size), tid + ".sgf")
+    try:
+        with open(path, "rb") as fh:
+            text = fh.read().decode("utf-8", "replace")
+    except OSError:
+        return None
+    sz, kids = decision_children(text)
+    if not kids or sz != size:
+        return None
+    mover = _mover_reader(kids)
+    cells = []
+    seen = set()
+    for kid in kids:
+        if kid["is_pass"]:
+            continue
+        mw, ms = mover(kid)
+        if mw is None:
+            continue
+        try:
+            gtp = sgf_to_gtp(kid["move"], size)
+        except Exception:
+            continue
+        xy = gtp_to_xy(gtp)
+        if xy is None or gtp in seen:
+            continue
+        seen.add(gtp)
+        cells.append({"gtp": gtp, "xy": (int(xy[0]), int(xy[1])),
+                      "w": mw, "s": ms, "v": float(kid["visits"])})
+    return cells
+
 
 def _load_problem(args):
     size, tid = args
@@ -208,18 +317,7 @@ def _load_problem(args):
     if not kids or sz != size:
         return (size, tid, None)
     correct = kids[0]
-    # Mover-perspective: the comments are BLACK-perspective throughout
-    # (bots/analysis.cfg sets reportAnalysisWinratesAs = BLACK), so a White-to-play
-    # decision node has to be flipped before "higher is better" means anything.
-    to_play = correct["colour"] or (kids[1]["colour"] if len(kids) > 1 else "B")
-    black = (to_play == "B")
-
-    def mover(kid):
-        if kid["winrate"] is None:
-            return None, None
-        w = kid["winrate"] / 100.0
-        s = kid["score"]
-        return (w, s) if black else (1.0 - w, -s)
+    mover = _mover_reader(kids)
 
     cw, cs = mover(correct)
     # Which child the client's evaluation rule would call the answer -- a
@@ -250,7 +348,7 @@ def _load_problem(args):
         if gtp in seen:
             continue
         seen.add(gtp)
-        wrong.append({"gtp": gtp, "w": mw, "s": ms})
+        wrong.append({"gtp": gtp, "w": mw, "s": ms, "v": float(kid["visits"])})
 
     correct_gtp = None
     if not correct["is_pass"]:
@@ -324,6 +422,38 @@ def from_logits(logits_fn):
 def build_models():
     logw = lambda f: np.log(np.maximum(f["w"], EPS_WR))     # noqa: E731
     logr = lambda f: np.log(f["r"] + 1.0)                   # noqa: E731
+    # Visits are how deeply KataGo searched that move, and the generator spends
+    # search where the search wanted to go -- so it is a SALIENCE signal that
+    # owes nothing to the move's evaluation. Floored at 1 only because log(0)
+    # is not a weight; nothing in the corpus is written below the shallow floor.
+    logv = lambda f: np.log(np.maximum(f["v"], 1.0))        # noqa: E731
+
+    def lcb_logits(f, p):
+        """A one-parameter lower-confidence-bound proxy on the winrate: a move
+        looks good either by being good or by being under-searched, and this is
+        the cheapest statement of that trade. c is in winrate units per
+        1/sqrt(visit)."""
+        return np.log(np.maximum(
+            f["w"] - p[0] / np.sqrt(np.maximum(f["v"], 1.0)), EPS_WR))
+
+    def lcb_fixed(f, p):
+        """The same bound with NO fitted constant: the binomial standard error of
+        the winrate at its own visit count, at a conventional z of 1. Paired with
+        lcb(c) on purpose -- the two differ only in whether the radius scale is
+        estimated, so the gap between them is what fitting that scale buys."""
+        w = np.clip(f["w"], 0.0, 1.0)
+        se = np.sqrt(w * (1.0 - w) / np.maximum(f["v"], 1.0))
+        return np.log(np.maximum(w - se, EPS_WR))
+
+    def norm(logits, offsets, sizes):
+        return logits - np.repeat(group_logsumexp(logits, offsets), sizes)
+
+    def linear_order(f, offsets, sizes, p):
+        """w proportional to (alternatives offered - position), i.e. a straight
+        line down the variation list rather than zipf's curve. Needs the group
+        sizes, so it cannot go through from_logits."""
+        return norm(np.log(np.maximum(np.repeat(sizes, sizes) - f["r"], 1.0)),
+                    offsets, sizes)
 
     def mix_with_uniform(head_logits, offsets, sizes, mix):
         """(1 - mix) * softmax(head) + mix * uniform, per problem.
@@ -351,6 +481,15 @@ def build_models():
         Model("softmax-winrate+score(2 temperatures)", 2,
               from_logits(lambda f, p: f["w"] / p[0] + f["s"] / p[1]),
               [0.3, 5.0], [(0.02, 50.0), (0.05, 500.0)]),
+        Model("visits-linear", 0, from_logits(lambda f, p: logv(f)), [], []),
+        Model("visits-power(alpha)", 1, from_logits(lambda f, p: p[0] * logv(f)),
+              [1.0], [(0.0, 20.0)]),
+        Model("winrate*visits", 0, from_logits(lambda f, p: logw(f) + logv(f)),
+              [], []),
+        Model("lcb(c)", 1, from_logits(lcb_logits), [0.2], [(0.0, 5.0)]),
+        Model("lcb-fixed", 0, from_logits(lcb_fixed), [], []),
+        Model("1/order", 0, from_logits(lambda f, p: -logr(f)), [], []),
+        Model("linear-order", 0, linear_order, [], []),
         Model("variation-order zipf(beta)", 1,
               from_logits(lambda f, p: -p[0] * logr(f)), [1.0], [(0.0, 5.0)]),
         Model("variation-order exponential(tau)", 1,
@@ -388,7 +527,22 @@ def fit_model(model, feats, offsets, sizes, counts):
 # Main
 # --------------------------------------------------------------------------
 
+def parse_args(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap.add_argument("--embeddings", choices=("actbot", "shipped"), default="actbot",
+                    help="per-cell axis projection phase 2 reads. 'shipped' uses "
+                         "the production axes/per_cell/ store; 'actbot' (default) "
+                         "projects the variation cells through --model on the fly")
+    ap.add_argument("--model", default=DEFAULT_DEV_MODEL, metavar="CKPT",
+                    help="checkpoint for --embeddings actbot")
+    ap.add_argument("--features", default=DEFAULT_DEV_FEATURES,
+                    help="the per-problem block layout --model was FITTED on; it "
+                         "is not recoverable from the file")
+    return ap.parse_args(argv)
+
+
 def main():
+    args = parse_args()
     print("=" * 78)
     print("Error-null model evaluation: which wrong variation gets picked?")
     print("=" * 78)
@@ -507,7 +661,7 @@ def main():
     prob_keys = sorted(picks)
     offsets = []
     pidx = []
-    w_all, s_all, r_all, cnt_all, gtp_all = [], [], [], [], []
+    w_all, s_all, v_all, r_all, cnt_all, gtp_all = [], [], [], [], [], []
     cursor = 0
     for pi, key in enumerate(prob_keys):
         info = problems[key]
@@ -515,6 +669,7 @@ def main():
         for r, v in enumerate(info["wrong"]):
             w_all.append(v["w"])
             s_all.append(v["s"] if v["s"] is not None else 0.0)
+            v_all.append(v["v"])
             r_all.append(r)          # position in the SGF's own variation list
             cnt_all.append(picks[key].get(v["gtp"], 0))
             gtp_all.append(v["gtp"])
@@ -522,10 +677,18 @@ def main():
             cursor += 1
     offsets = np.array(offsets, dtype=np.int64)
     feats = {"w": np.array(w_all), "s": np.array(s_all),
+             "v": np.array(v_all, dtype=np.float64),
              "r": np.array(r_all, dtype=np.float64)}
     counts = np.array(cnt_all, dtype=np.float64)
     pidx = np.array(pidx, dtype=np.int64)
     sizes = np.diff(np.append(offsets, len(counts)))
+
+    vv = feats["v"]
+    print(f"\nvisits behind a wrong variation's estimate : "
+          f"median {np.median(vv):.0f}, p10 {np.percentile(vv, 10):.0f}, "
+          f"p90 {np.percentile(vv, 90):.0f}, max {vv.max():.0f}")
+    print(f"  at the shallow floor (30) or below       : "
+          f"{100.0 * float((vv <= 30).mean()):.1f}% of rows")
 
     # ---- paired two-fold split by problem id hash --------------------------
     fold = np.array([
@@ -649,8 +812,17 @@ def main():
               f"{pred:>10.4f} {obs:>10.4f} {obs / max(pred, 1e-9):>7.2f}")
 
     # ---- Phase 2 -----------------------------------------------------------
-    phase2(prob_keys, problems, heldout_logp[best.name], best.name,
-           offsets, sizes, counts, gtp_all, matched)
+    # Two weighted arms, both carried through: the best PARAMETER-FREE candidate
+    # (which could ship as-is, having nothing to fit or store) and the best
+    # candidate overall (which could not, without a doctrine decision about
+    # shipping fitted null parameters).
+    free = [m for m in models if m.n_params == 0 and m.name != "uniform"]
+    best_free = min(free, key=lambda m: nll[m.name])
+    arms = [("free", best_free.name, np.exp(heldout_logp[best_free.name]))]
+    if best.name != best_free.name:
+        arms.append(("fit", best.name, np.exp(heldout_logp[best.name])))
+    phase2(prob_keys, problems, arms, offsets, sizes, counts, gtp_all, matched,
+           args)
 
 
 def _subgroup(mask, offsets, sizes):
@@ -671,8 +843,95 @@ def _oracle_nll(counts, pidx, nprob):
     return -float((counts[nz] * np.log(p[nz])).sum()) / counts.sum()
 
 
-def phase2(prob_keys, problems, heldout_logp, best_name,
-           offsets, sizes, counts, gtp_all, matched):
+# --------------------------------------------------------------------------
+# Phase 2: per-cell axis loadings.
+#
+# Two sources, same interface. `shipped` reads the production axes/per_cell/
+# store; `actbot` projects a problem's variation cells through a named
+# checkpoint on the fly. BOTH quantize to the client's own resolution before
+# any comparison, because the null and the observed sign are both STRICT
+# comparisons and a difference below 0.01 is a tie to the client.
+# --------------------------------------------------------------------------
+
+class ShippedCells:
+    """Per-cell axis vectors as pipeline.write_mirt_per_cell published them."""
+
+    source = f"the shipped axes/per_cell/ store ({PER_CELL_DIR})"
+
+    def __init__(self, K):
+        self.K = K
+
+    def cells(self, size, tid, wanted):
+        path = os.path.join(PER_CELL_DIR, str(size), tid + ".npz")
+        try:
+            with np.load(path, allow_pickle=False) as d:
+                emb = np.asarray(d["embeddings"])
+                xys = np.asarray(d["xys"], dtype=np.int32)
+        except OSError:
+            return None
+        if emb.ndim != 2 or emb.shape[1] != self.K:
+            return None
+        q = _quantize(emb)
+        out = {}
+        for i, (x, y) in enumerate(xys):
+            xy = (int(x), int(y))
+            if xy in wanted:
+                out[xy] = q[i]
+        return out
+
+
+class FittedCells:
+    """The same vectors projected on the fly through a named checkpoint, so a
+    dev fit can be read at the cells the client actually compares. Only the
+    wanted cells go through the trunk -- the availability null lives on the
+    problem's root variations, never on the whole board scan."""
+
+    def __init__(self, K, model_path, features):
+        import torch
+        from ablations._projection import FittedProjection
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        if device.type == "cpu":
+            # One problem's variation cells is a few dozen rows, and at that
+            # size the intra-op thread pool spends more on synchronisation than
+            # on the matmuls: measured ~13x slower at 4 threads than at 1.
+            torch.set_num_threads(1)
+        self.K = K
+        self.P = FittedProjection(device, model_path, features)
+        self.source = (f"{model_path} projected on the fly "
+                       f"(blocks={features}, fdim {self.P.fdim}, device {device})")
+
+    def cells(self, size, tid, wanted):
+        from ablations._projection import problem_arrays
+        try:
+            cand, xys, _ = problem_arrays(size, tid)
+        except OSError:
+            return None
+        lut = {(int(x), int(y)): i for i, (x, y) in enumerate(xys)}
+        keys = [xy for xy in wanted if xy in lut]
+        if not keys:
+            return None
+        rows = np.array([lut[xy] for xy in keys], dtype=np.intp)
+        inp = np.concatenate(
+            [self.P.pca(cand[rows]),
+             np.tile(self.P.tail(size, tid), (len(rows), 1))], axis=1)
+        q = _quantize(self.P.axes(inp.astype(np.float32)))
+        return {xy: q[i] for i, xy in enumerate(keys)}
+
+
+def _quantize(a):
+    """Client resolution, single-sourced with the other ablations."""
+    from ablations._projection import quantize
+    return quantize(np.asarray(a, dtype=np.float64))
+
+
+def phase2(prob_keys, problems, arms, offsets, sizes, counts, gtp_all, matched,
+           args):
+    """Carry the candidate nulls through to the statistic the client prints.
+
+    `arms` is [(tag, model name, per-row probability)] for the WEIGHTED nulls;
+    the uniform-availability null (what ships) is always the first column and
+    the reference every residual and every flag delta is taken against.
+    """
     print("\n" + "=" * 78)
     print("PHASE 2 -- directional (toward-the-motif) share per axis")
     print("=" * 78)
@@ -680,53 +939,64 @@ def phase2(prob_keys, problems, heldout_logp, best_name,
     labels = json.load(open(LABELS_JSON))["components"]
     K = len(labels)
     nprob = len(prob_keys)
-    p_null = np.exp(heldout_logp)
+
+    src = (ShippedCells(K) if args.embeddings == "shipped"
+           else FittedCells(K, args.model, args.features))
+    print(f"per-cell axis source: {src.source}")
+
+    # Null column 0 is ALWAYS the shipped uniform-availability null.
+    tags = ["uniform"] + [t for t, _, _ in arms]
+    names = ["uniform over the alternatives offered"] + [n for _, n, _ in arms]
+    row_p = [None] + [p for _, _, p in arms]
+    n_null = len(tags)
 
     n_rows = len(counts)
     row_toward = np.zeros((n_rows, K), dtype=bool)
     row_nontie = np.zeros((n_rows, K), dtype=bool)
     # Per-problem null probability of erring TOWARD the motif, conditioned on a
     # non-tie exactly as the client's sign test conditions.
-    prob_p_w = np.full((nprob, K), np.nan)
-    prob_p_u = np.full((nprob, K), np.nan)
+    prob_p = np.full((n_null, nprob, K), np.nan)
 
-    n_no_npz = 0
+    n_no_cells = 0
     n_unmapped = 0
     n_used = 0
 
     t0 = time.time()
     for pi, key in enumerate(prob_keys):
-        if pi % 8000 == 0 and pi:
+        if pi % 4000 == 0 and pi:
             print(f"  {pi}/{nprob} problems ({time.time() - t0:.0f}s)", flush=True)
         size, tid = key
-        path = os.path.join(PER_CELL_DIR, str(size), tid + ".npz")
-        try:
-            with np.load(path, allow_pickle=False) as d:
-                emb = np.asarray(d["embeddings"], dtype=np.float64)
-                xys = np.asarray(d["xys"], dtype=np.int32)
-        except OSError:
-            n_no_npz += 1
-            continue
-        if emb.shape[1] != K:
-            n_no_npz += 1
-            continue
-        lut = {(int(x), int(y)): i for i, (x, y) in enumerate(xys)}
-
         info = problems[key]
         cxy = gtp_to_xy(info["correct_gtp"]) if info["correct_gtp"] else None
-        if cxy is None or cxy not in lut:
+        if cxy is None:
             n_unmapped += 1
             continue
-        c_emb = emb[lut[cxy]]
+        cxy = (int(cxy[0]), int(cxy[1]))
 
         lo, hi = int(offsets[pi]), int(offsets[pi] + sizes[pi])
         rows = np.arange(lo, hi)
+        # (x, y) always, never a position: the npz is a board scan, the SGF's
+        # variations are a pruned list, and the two orders do not correspond.
+        v_xy = [gtp_to_xy(gtp_all[r]) for r in rows]
+        v_xy = [None if xy is None else (int(xy[0]), int(xy[1])) for xy in v_xy]
+        wanted = {xy for xy in v_xy if xy is not None}
+        wanted.add(cxy)
+
+        cellmap = src.cells(size, tid, wanted)
+        if cellmap is None:
+            n_no_cells += 1
+            continue
+        c_emb = cellmap.get(cxy)
+        if c_emb is None:
+            n_unmapped += 1
+            continue
+
         v_emb = np.full((len(rows), K), np.nan)
         ok = np.zeros(len(rows), dtype=bool)
-        for j, r in enumerate(rows):
-            idx = lut.get(gtp_to_xy(gtp_all[r]))
-            if idx is not None:
-                v_emb[j] = emb[idx]
+        for j, xy in enumerate(v_xy):
+            e = cellmap.get(xy) if xy is not None else None
+            if e is not None:
+                v_emb[j] = e
                 ok[j] = True
         if not ok.any():
             n_unmapped += 1
@@ -742,15 +1012,18 @@ def phase2(prob_keys, problems, heldout_logp, best_name,
         row_toward[lo:hi] = toward
         row_nontie[lo:hi] = nontie
 
-        for weights, dest in ((p_null[rows], prob_p_w),
-                              (ok / max(ok.sum(), 1), prob_p_u)):
-            mass_nt = (weights[:, None] * nontie).sum(axis=0)
-            mass_tw = (weights[:, None] * toward).sum(axis=0)
+        for j in range(n_null):
+            w = ok.astype(np.float64) if row_p[j] is None else row_p[j][rows] * ok
+            # p = mass strictly ABOVE the correct cell / mass strictly above or
+            # below it. Ties drop WITH their weight, which is what makes this
+            # the same conditioning computeAltStats' strict counts apply.
+            mass_nt = (w[:, None] * nontie).sum(axis=0)
+            mass_tw = (w[:, None] * toward).sum(axis=0)
             good = mass_nt > 1e-12
-            dest[pi, good] = mass_tw[good] / mass_nt[good]
+            prob_p[j, pi, good] = mass_tw[good] / mass_nt[good]
 
-    print(f"\nproblems with a usable per-cell embedding  : {n_used:,} of {nprob:,}")
-    print(f"  missing / wrong-K npz                    : {n_no_npz:,}")
+    print(f"\nproblems with a usable per-cell projection : {n_used:,} of {nprob:,}")
+    print(f"  no per-cell vectors for the problem      : {n_no_cells:,}")
     print(f"  correct cell or all variations unmapped  : {n_unmapped:,}")
 
     # ---- aggregate, weighted by the SAME per-axis error counts -------------
@@ -762,46 +1035,54 @@ def phase2(prob_keys, problems, heldout_logp, best_name,
                                         minlength=nprob)
         per_prob_n[:, k] = np.bincount(row_pidx, weights=counts * row_nontie[:, k],
                                        minlength=nprob)
-    ok_w = np.isfinite(prob_p_w)
-    ok_u = np.isfinite(prob_p_u)
-    mass_w = np.where(ok_w, per_prob_n * np.nan_to_num(prob_p_w), 0.0)
-    mass_u = np.where(ok_u, per_prob_n * np.nan_to_num(prob_p_u), 0.0)
-    n_w = np.where(ok_w, per_prob_n, 0.0)
-    n_u = np.where(ok_u, per_prob_n, 0.0)
+    okj = np.isfinite(prob_p)
+    mass = np.where(okj, per_prob_n[None] * np.nan_to_num(prob_p), 0.0)
+    nmass = np.where(okj, per_prob_n[None], 0.0)
 
     obs = per_prob_tw.sum(0) / np.maximum(per_prob_n.sum(0), 1)
-    pw = mass_w.sum(0) / np.maximum(n_w.sum(0), 1)
-    pu = mass_u.sum(0) / np.maximum(n_u.sum(0), 1)
+    pnull = mass.sum(1) / np.maximum(nmass.sum(1), 1)          # (n_null, K)
 
-    # bootstrap over problems, paired across the three quantities
+    # bootstrap over problems, paired across observed and every null
     rng = np.random.default_rng(RNG_SEED)
-    b_obs, b_pw, b_res = [], [], []
+    b_obs, b_null = [], []
     for _ in range(500):
         mult = rng.multinomial(nprob, np.full(nprob, 1.0 / nprob))[:, None]
-        o = (mult * per_prob_tw).sum(0) / np.maximum((mult * per_prob_n).sum(0), 1)
-        w = (mult * mass_w).sum(0) / np.maximum((mult * n_w).sum(0), 1)
-        b_obs.append(o)
-        b_pw.append(w)
-        b_res.append(o - w)
-    b_obs = np.array(b_obs)
-    b_pw = np.array(b_pw)
-    b_res = np.array(b_res)
+        b_obs.append((mult * per_prob_tw).sum(0)
+                     / np.maximum((mult * per_prob_n).sum(0), 1))
+        b_null.append((mult[None] * mass).sum(1)
+                      / np.maximum((mult[None] * nmass).sum(1), 1))
+    b_obs = np.array(b_obs)                                    # (B, K)
+    b_null = np.array(b_null)                                  # (B, n_null, K)
 
-    print(f"\n{'axis':<16} {'observed':>19} {'null(weighted)':>19} "
-          f"{'null(uniform)':>14} {'client':>7} {'residual (obs - null)':>25}")
-    print("-" * 106)
+    head = "".join(f"{t:>10}" for t in tags)
+    print(f"\n--- toward-share per axis: observed, and each availability null ---")
+    print(f"{'axis':<16}{'observed':>22}{head}")
+    print("-" * (38 + 10 * n_null))
     for k in range(K):
         lo_o, hi_o = np.percentile(b_obs[:, k], [2.5, 97.5])
-        lo_w, hi_w = np.percentile(b_pw[:, k], [2.5, 97.5])
-        lo_r, hi_r = np.percentile(b_res[:, k], [2.5, 97.5])
-        print(f"{labels[k]:<16} {obs[k]:>7.4f} [{lo_o:.4f},{hi_o:.4f}] "
-              f"{pw[k]:>7.4f} [{lo_w:.4f},{hi_w:.4f}] {pu[k]:>14.4f} "
-              f"{0.5:>7.2f} {obs[k] - pw[k]:>+9.4f} [{lo_r:+.4f},{hi_r:+.4f}]")
-    print("\nA residual clear of zero is a real directional tendency; a residual\n"
-          "straddling zero means the whole deviation from the client's 50% null is\n"
-          "explained by WHICH wrong moves the problem offers.")
+        cols = "".join(f"{pnull[j, k]:>10.4f}" for j in range(n_null))
+        print(f"{labels[k]:<16}{obs[k]:>8.4f} [{lo_o:.4f},{hi_o:.4f}]{cols}")
+
+    print(f"\n--- residual (observed - null), 95% paired bootstrap over problems ---")
+    print(f"{'axis':<16}" + "".join(f"{'vs ' + t:>26}" for t in tags))
+    print("-" * (16 + 26 * n_null))
+    for k in range(K):
+        cells = ""
+        for j in range(n_null):
+            res = b_obs[:, k] - b_null[:, j, k]
+            lo_r, hi_r = np.percentile(res, [2.5, 97.5])
+            cells += f"{obs[k] - pnull[j, k]:>+9.4f} [{lo_r:+.4f},{hi_r:+.4f}]".rjust(26)
+        print(f"{labels[k]:<16}{cells}")
+    print("\nA residual clear of zero is a directional tendency the null does NOT\n"
+          "explain; a residual straddling zero means the whole deviation is\n"
+          "explained by WHICH wrong moves the problem offers, weighted that way.")
+    for j, (t, nm) in enumerate(zip(tags, names)):
+        print(f"  {t:<8} = {nm}")
     print(f"\nnon-tie error counts per axis: "
           f"{', '.join(f'{labels[k]}={int(per_prob_n.sum(0)[k]):,}' for k in range(K))}")
+    print("FOOTNOTE: the retired fixed-50% null sits at 0.5000 on every axis and\n"
+          "every problem; it is not a column here because it is not a null the\n"
+          "client stands against any more.")
 
     # ---- what it would change for a user ----------------------------------
     print("\n" + "=" * 78)
@@ -821,56 +1102,76 @@ def phase2(prob_keys, problems, heldout_logp, best_name,
         pi = int(row_pidx[r])
         acc = users.get(user_id)
         if acc is None:
-            acc = users[user_id] = {"n": np.zeros(K), "tw": np.zeros(K),
-                                    "p": np.zeros(K), "v": np.zeros(K)}
+            acc = users[user_id] = {"n": np.zeros((n_null, K)),
+                                    "tw": np.zeros((n_null, K)),
+                                    "p": np.zeros((n_null, K)),
+                                    "v": np.zeros((n_null, K))}
         nt = row_nontie[r]
-        p = prob_p_w[pi]
-        use = nt & np.isfinite(p)
-        acc["n"][use] += 1
-        acc["tw"][use] += row_toward[r][use]
-        acc["p"][use] += p[use]
-        acc["v"][use] += p[use] * (1 - p[use])
+        tw = row_toward[r]
+        for j in range(n_null):
+            p = prob_p[j, pi]
+            use = nt & np.isfinite(p)
+            acc["n"][j][use] += 1
+            acc["tw"][j][use] += tw[use]
+            acc["p"][j][use] += p[use]
+            acc["v"][j][use] += p[use] * (1 - p[use])
 
-    MOTIF_Z = 1.0
-    MIN_ERRORS = 10
     n_users = 0
-    agree = np.zeros(K)
-    flag_old = np.zeros(K)
-    flag_new = np.zeros(K)
-    flip_sign = np.zeros(K)
-    lost = np.zeros(K)
-    gained = np.zeros(K)
-    tested = np.zeros(K)
+    tested = np.zeros((n_null, K))
+    flag = np.zeros((n_null, K))
+    lost = np.zeros((n_null, K))
+    gained = np.zeros((n_null, K))
+    flip = np.zeros((n_null, K))
+    flag_legacy = np.zeros(K)
     for acc in users.values():
         ok = acc["n"] >= MIN_ERRORS
         if not ok.any():
             continue
         n_users += 1
-        share = np.where(ok, acc["tw"] / np.maximum(acc["n"], 1), np.nan)
-        z_old = (share - 0.5) / np.sqrt(0.25 / np.maximum(acc["n"], 1))
-        z_new = (acc["tw"] - acc["p"]) / np.sqrt(np.maximum(acc["v"], 1e-9))
-        fo = ok & (np.abs(z_old) > MOTIF_Z)
-        fn = ok & (np.abs(z_new) > MOTIF_Z)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            z = ((acc["tw"] - acc["p"])
+                 / np.sqrt(np.maximum(acc["v"], 1e-9)))
+        f = ok & (np.abs(z) > MOTIF_Z)
         tested += ok
-        flag_old += fo
-        flag_new += fn
-        agree += ok & (fo == fn) & (~fo | (np.sign(z_old) == np.sign(z_new)))
-        flip_sign += fo & fn & (np.sign(z_old) != np.sign(z_new))
-        lost += fo & ~fn
-        gained += fn & ~fo
+        flag += f
+        # Everything is measured against null 0, the shipped uniform one.
+        for j in range(1, n_null):
+            both = f[0] & f[j]
+            lost[j] += f[0] & ~f[j]
+            gained[j] += f[j] & ~f[0]
+            flip[j] += both & (np.sign(z[0]) != np.sign(z[j]))
+        # The retired fixed-50% test, for the footnote only.
+        with np.errstate(invalid="ignore", divide="ignore"):
+            share = acc["tw"][0] / np.maximum(acc["n"][0], 1)
+            z50 = (share - 0.5) / np.sqrt(0.25 / np.maximum(acc["n"][0], 1))
+        flag_legacy += ok[0] & (np.abs(z50) > MOTIF_Z)
 
     print(f"users with >= {MIN_ERRORS} scored errors on an axis : {n_users:,}")
-    print(f"\n{'axis':<16} {'tested':>8} {'flagged now':>13} {'flagged w/ null':>16} "
-          f"{'lost':>7} {'gained':>7} {'sign flip':>10}")
-    print("-" * 82)
-    for k in range(K):
-        t = max(tested[k], 1)
-        print(f"{labels[k]:<16} {int(tested[k]):>8,} "
-              f"{int(flag_old[k]):>6,} ({100*flag_old[k]/t:4.1f}%) "
-              f"{int(flag_new[k]):>7,} ({100*flag_new[k]/t:4.1f}%) "
-              f"{int(lost[k]):>7,} {int(gained[k]):>7,} {int(flip_sign[k]):>10,}")
-    print("\n'flagged now' = the shipped 50% sign test; 'flagged w/ null' = the same\n"
-          "count against the per-problem availability null (Poisson-binomial z).")
+    print(f"flag gate: |Poisson-binomial z| > {MOTIF_Z} (MOTIF_Z), both sides")
+    for j in range(n_null):
+        print(f"\nnull '{tags[j]}' ({names[j]})")
+        if j == 0:
+            print(f"{'axis':<16}{'tested':>8}{'flagged':>16}")
+            print("-" * 40)
+            for k in range(K):
+                t = max(tested[j, k], 1)
+                print(f"{labels[k]:<16}{int(tested[j, k]):>8,}"
+                      f"{int(flag[j, k]):>9,} ({100 * flag[j, k] / t:4.1f}%)")
+            continue
+        print(f"{'axis':<16}{'tested':>8}{'flagged':>16}{'lost':>8}"
+              f"{'gained':>8}{'sign flip':>11}")
+        print("-" * 67)
+        for k in range(K):
+            t = max(tested[j, k], 1)
+            print(f"{labels[k]:<16}{int(tested[j, k]):>8,}"
+                  f"{int(flag[j, k]):>9,} ({100 * flag[j, k] / t:4.1f}%)"
+                  f"{int(lost[j, k]):>8,}{int(gained[j, k]):>8,}"
+                  f"{int(flip[j, k]):>11,}")
+    print("\n'lost'/'gained'/'sign flip' are all against the 'uniform' rows above --\n"
+          "the null the client ships. FOOTNOTE: the retired fixed-50% test would\n"
+          "flag "
+          + ", ".join(f"{labels[k]}={int(flag_legacy[k]):,}" for k in range(K))
+          + ".")
 
 
 if __name__ == "__main__":
