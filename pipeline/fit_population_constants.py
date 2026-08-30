@@ -729,8 +729,11 @@ def main():
     # anchor, and the failure is invisible — an unanchored estimator still returns
     # a number, it just tracks wherever it last drifted.
     print("Fitting population rank prior ...")
-    # The raw curve file (both board keys), not apply_m: the grid derivation reads
-    # per-size knots to map the corpus into rank space the way se_floor does.
+    # fit_rank_prior maps each user's rating through the shipped curve.
+    apply_m = load_rating_to_rank(args.ratings_dir)
+    # The raw curve file (both board keys) is ALSO passed, not redundantly with
+    # apply_m: the grid derivation reads per-size knots to map the corpus into
+    # rank space the way se_floor does.
     with open(os.path.join(args.ratings_dir, "rating_to_rank.json")) as _f:
         _curves = json.load(_f)
     rp, rp_info = fit_rank_prior(by_user, params, apply_m, out["fat_finger_rate"],
