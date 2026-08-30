@@ -1040,7 +1040,8 @@ def main():
                          "trunk's parameters at a given width, so read it "
                          "against the relu control rather than alone.")
     ap.add_argument("--features",
-                    choices=("production", "activations", "activations+bot"),
+                    choices=("production", "activations", "activations+bot",
+                             "activations+bot+delta"),
                     default="production",
                     help="WHICH per-problem blocks the trunk sees. `production` is "
                          "the shipped layout (activation PCA + bot winrate + move "
@@ -1050,7 +1051,15 @@ def main():
                          "additionally keeps bot winrate and drops only the "
                          "answer-derived blocks (move evals, ownership, phase) — "
                          "the ones that become correct-move conditioning when the "
-                         "trunk is fanned out per cell. The ablation is "
+                         "trunk is fanned out per cell. `activations+bot+delta` is "
+                         "a DEV ARM ONLY (utils.rating.features.DEV_ONLY_BLOCKS): "
+                         "act+bot plus the correct-cell MINUS best-alternative-cell "
+                         "activation contrast in the same joint-PCA basis, with a "
+                         "has_alt indicator column. It is answer-derived and can "
+                         "never be the shipped layout — measure it against "
+                         "`activations+bot` on the same folds and read the paired "
+                         "difference. It needs the alt-vector cache "
+                         "(features.build_alt_vec_cache) to exist. The ablation is "
                          "selected inside utils.rating.features, not by slicing "
                          "the matrix here, so no arm restates where the "
                          "activation block ends. Every arm keeps the size flag "
@@ -1169,7 +1178,8 @@ def main():
     feat, keys, key_idx, input_dim = load_joint_mirt_features(
         SIZES, PCA_DIM, SEED,
         blocks={"production": "all", "activations": "activations",
-                "activations+bot": "activations+bot"}[args.features])
+                "activations+bot": "activations+bot",
+                "activations+bot+delta": "activations+bot+delta"}[args.features])
     fdim = feat.shape[1]
     print(f"loaded in {time.time() - t0:.0f}s: {len(keys)} problems, feat "
           f"{fdim} (dropout region {input_dim}), blocks={args.features}",

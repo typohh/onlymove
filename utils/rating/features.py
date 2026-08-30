@@ -417,6 +417,143 @@ def load_joint_alt_activations(sizes, tids_by_size, pca_dim, seed):
     return out, int(k)
 
 
+def _no_alternative_tids(sizes):
+    """{size: {tid}} for the problems whose move-eval cache records NO non-pass
+    alternative (`alt_xy` = (-1, -1)).
+
+    This is what separates a real state from missing data in the alt cache. A NaN
+    alt row is written by _load_alt_vec_chunk in exactly one situation — the
+    coordinate says there is no alternative — because every other failure raises
+    out of the worker. That makes the NaN safe to READ as "no alternative", and
+    reading it that way without checking would be assuming an invariant this
+    module elsewhere checks (see _assert_ids_unique). So the two are cross-checked
+    at load: a NaN row for a problem that HAS a runner-up coordinate is cache
+    corruption, not a legitimate absence, and it must not be quietly encoded as one.
+    """
+    out = {}
+    for size in sizes:
+        path = os.path.join(CACHE_DIR, f"move_evals_{size}.npz")
+        if not os.path.exists(path):
+            raise FileNotFoundError(
+                f"move-feature cache {path} missing — run "
+                f"`./.venv/bin/python3 -m pipeline.cache_rating_features` first")
+        d = np.load(path, allow_pickle=False)
+        if "alt_xy" not in d.files:
+            raise FileNotFoundError(
+                f"{path} has no alt_xy — re-run "
+                f"`./.venv/bin/python3 -m pipeline.cache_rating_features`")
+        out[size] = {str(t) for t, xy in zip(d["tids"].tolist(), d["alt_xy"])
+                     if int(xy[0]) < 0}
+    return out
+
+
+def load_joint_act_delta(sizes, tids_by_size, pca_dim, seed):
+    """CANDIDATE BLOCK, DEV ARMS ONLY (see the last paragraph). The correct-vs-
+    best-alternative activation CONTRAST: the correct cell's joint-PCA vector minus
+    the runner-up cell's, plus a has_alt indicator column. Returns
+    {(size, tid): vec(k + 1)}, k + 1.
+
+    ONE basis for both cells — the correct-move block's, through
+    load_joint_activations and load_joint_alt_activations, which already share it.
+    The subtraction commutes with the whole linear chain except its additive
+    centres, which cancel outright:
+
+        z_c - z_a = ( ((x_c - m1)/s1 - pca_mean) @ C.T - m2 )/s2
+                  - ( ((x_a - m1)/s1 - pca_mean) @ C.T - m2 )/s2
+                  = ( ((x_c - x_a)/s1) @ C.T ) / s2
+
+    so m1, pca_mean and m2 leave no trace and only the two scalings survive. The
+    block is therefore the raw difference of the two stored vectors placed on the
+    shared axes, and it is NOT re-standardized afterwards, for load_joint_alt_-
+    activations' reason: the magnitude of the contrast is the quantity of interest
+    (how far the runner-up sits from the answer), and re-centring a difference
+    against the population would price a tight problem relative to the average
+    tightness rather than stating it.
+
+    WHY A DIFFERENCE RATHER THAN THE ALTERNATIVE'S OWN VECTOR. The concatenated
+    form was measured and rejected (methodology.md: worse on both measures), and
+    the reason recorded there is WIDTH — a second full activation block gives the
+    difficulty head a second chance to fingerprint the individual problem, which is
+    also why a LOW correlation between the two blocks is not evidence of
+    complementary signal. The difference is the one form that objection does not
+    reach in the same way: the correct cell and the runner-up sit on the same board
+    and share their position-global components, so subtracting cancels the identity
+    those blocks were memorizing and leaves the move-local part — the tightness the
+    two cells differ by. That is a claim the battery tests, not one this loader
+    asserts; the width cost is still paid and still has to be earned.
+
+    THE has_alt COLUMN. A problem with no non-pass alternative is a real state, not
+    missing data, so it cannot be dropped (that removes a live problem from the
+    rated set) — but neither can the fact be encoded by the delta itself. A ZERO
+    delta says the runner-up is indistinguishable from the answer, i.e. maximal
+    confusability, which is the OPPOSITE of what having no runner-up means; a large
+    delta would be an invented magnitude. So the block is two parts: the delta,
+    zero-filled where there is no alternative, and an indicator that states the
+    fact. The zero is then inert behind a column that says why it is zero, rather
+    than a value the trunk must read as a measurement. Where the corpus has no such
+    problem the indicator is simply constant and the trunk ignores it.
+
+    A tid absent from the correct-cell map is absent here too, so it reaches
+    joint_feature_tail's _missing_block_error like any other gap.
+
+    NEVER PRODUCTION_BLOCKS. This block is answer-derived twice over — the correct
+    cell is the answer, and the runner-up is defined by ranking against it — so
+    under pipeline.write_mirt_per_cell's fan-out, where the trunk is evaluated at
+    every legal cell with this tail held fixed, it hands every alternative cell a
+    description of the correct move. That is the contamination the tail-conditioning
+    ablation measures (a large share of alternative cells change SIGN when the wide
+    tail moves), and it is why PRODUCTION_BLOCKS keeps only bot winrate. If the
+    contrast ever earns a place it would feed the difficulty heads alone, which is a
+    separate architecture change, not a layout change.
+    """
+    missing = [s for s in sizes if not os.path.exists(_cache_alt_vecs_path(s))]
+    if missing:
+        sizes_arg = ", ".join(str(s) for s in missing)
+        raise FileNotFoundError(
+            f"alt-activation cache missing for size(s) {sizes_arg} "
+            f"({', '.join(_cache_alt_vecs_path(s) for s in missing)}). The delta "
+            f"block cannot be assembled without it. Build it with:\n"
+            f"  ./.venv/bin/python3 -c 'from utils.rating.features import "
+            f"build_alt_vec_cache; "
+            f"[build_alt_vec_cache(s) for s in ({sizes_arg},)]'\n"
+            f"That reads every problem's activation .npz once (long, disk-bound, "
+            f"resumable only in the sense that a complete file is reused whole), "
+            f"and it must run AFTER pipeline.cache_rating_features, whose alt_xy "
+            f"array supplies the runner-up coordinate.")
+    corr, k = load_joint_activations(sizes, tids_by_size, pca_dim, seed)
+    alt, k_alt = load_joint_alt_activations(sizes, tids_by_size, pca_dim, seed)
+    if k_alt != k:
+        raise RuntimeError(
+            f"correct-cell block is k={k} but the alternative block is k={k_alt}; "
+            f"they are defined to share one basis, so the difference between them "
+            f"is not a contrast — delete the joint-PCA cache and reload")
+    no_alt = _no_alternative_tids(sizes)
+    zero = np.zeros(k, dtype=np.float32)
+    has = np.ones(1, dtype=np.float32)
+    hasnt = np.zeros(1, dtype=np.float32)
+    out = {}
+    for size in sizes:
+        for t in tids_by_size[size]:
+            key = (size, t)
+            c = corr.get(key)
+            if c is None:
+                continue                      # the activation block's own gap; it raises there
+            a = alt.get(key)
+            if a is None:
+                if t not in no_alt[size]:
+                    raise RuntimeError(
+                        f"alt-activation cache has a non-finite row for {t} (size "
+                        f"{size}), but its move-eval alt_xy names a real runner-up "
+                        f"cell — the row is CORRUPT, not a problem without an "
+                        f"alternative, and encoding it as one would state a fact "
+                        f"that is not true. Rebuild with "
+                        f"build_alt_vec_cache({size}, force=True).")
+                out[key] = np.concatenate([zero, hasnt])
+            else:
+                out[key] = np.concatenate([(c - a).astype(np.float32), has])
+    return out, int(k) + 1
+
+
 def load_first_time_attempts():
     """Return a DataFrame of first-time attempts: one row per (user_id, problem),
     columns [user_id, problem, success, size, created_at].
@@ -1021,10 +1158,26 @@ def load_joint_tail_blocks(sizes, tids_by_size):
 
 # The block LAYOUTS a fit can be assembled on. Which one ships is
 # model_constants.PRODUCTION_BLOCKS; the rest are comparison arms.
-FEATURE_BLOCKS = ("all", "activations", "activations+bot")
+FEATURE_BLOCKS = ("all", "activations", "activations+bot", "activations+bot+delta")
+
+# Layouts that may be MEASURED but never SHIPPED. A layout lands here when it is
+# answer-derived and the trunk it would feed is fanned out per cell — the fan-out
+# holds the wide tail fixed at the correct move's values, so such a block describes
+# every alternative cell by the answer. Stated as a set rather than a comment so the
+# constraint is checked instead of remembered: PRODUCTION_BLOCKS naming one of these
+# is a mistake that produces two well-formed files and no error anywhere downstream.
+DEV_ONLY_BLOCKS = ("activations+bot+delta",)
+
+if PRODUCTION_BLOCKS in DEV_ONLY_BLOCKS:
+    raise RuntimeError(
+        f"model_constants.PRODUCTION_BLOCKS is {PRODUCTION_BLOCKS!r}, which is a "
+        f"DEV-ONLY layout (DEV_ONLY_BLOCKS): it is answer-derived, so "
+        f"pipeline.write_mirt_per_cell would condition every alternative cell on the "
+        f"correct move. A dev-only block can only ship by feeding the difficulty heads "
+        f"alone, which is an architecture change, not a layout change.")
 
 
-def load_joint_blocks(blocks, sizes, tids_by_size):
+def load_joint_blocks(blocks, sizes, tids_by_size, pca_dim=None, seed=None):
     """(wide, n_wide) for ONE layout: the per-problem blocks between the activation
     block and the board-size flag, in trunk order.
 
@@ -1040,12 +1193,28 @@ def load_joint_blocks(blocks, sizes, tids_by_size):
     block. "all" is every block load_joint_tail_blocks states. The size flag is not a
     block and stays in every layout (it is the board the problem is on, not a property
     measured about it), so the layouts differ in columns and in nothing else.
+
+    "activations+bot+delta" is a DEV ARM (DEV_ONLY_BLOCKS): "activations+bot" plus the
+    correct-vs-alternative activation contrast, which is answer-derived and so unusable
+    as per-cell conditioning for the reason just given. `pca_dim` and `seed` exist for
+    it — the contrast is taken in the joint-PCA basis, which those two identify — and
+    every other layout ignores them.
     """
     if blocks == "all":
         return load_joint_tail_blocks(sizes, tids_by_size)
     if blocks == "activations+bot":
         bw, nb = load_joint_bot_winrate(sizes, tids_by_size)
         return (("bot_winrate", bw),), nb
+    if blocks == "activations+bot+delta":
+        if pca_dim is None or seed is None:
+            raise ValueError(
+                "the 'activations+bot+delta' layout needs pca_dim and seed: the "
+                "contrast is taken in the joint-PCA basis, and a basis identified by "
+                "different settings than the activation block's is a different "
+                "coordinate system — call load_joint_blocks(..., pca_dim=..., seed=...)")
+        bw, nb = load_joint_bot_winrate(sizes, tids_by_size)
+        dl, nd = load_joint_act_delta(sizes, tids_by_size, pca_dim, seed)
+        return (("bot_winrate", bw), ("act_delta", dl)), nb + nd
     if blocks == "activations":
         return (), 0
     raise ValueError(f"blocks must be one of {FEATURE_BLOCKS}, got {blocks!r}")
@@ -1206,7 +1375,10 @@ def load_joint_mirt_features(sizes, pca_dim, seed, blocks=PRODUCTION_BLOCKS):
         raise ValueError(f"blocks must be one of {FEATURE_BLOCKS}, got {blocks!r}")
     tids_by_size = corpus_tids_by_size(sizes)
     act, k_act = load_joint_activations(sizes, tids_by_size, pca_dim, seed)
-    wide, n_wide = load_joint_blocks(blocks, sizes, tids_by_size)
+    # pca_dim/seed are passed for the layouts that take a block in the joint-PCA basis
+    # (the dev delta arm); every other layout ignores them, so the shipped layouts are
+    # assembled exactly as before.
+    wide, n_wide = load_joint_blocks(blocks, sizes, tids_by_size, pca_dim, seed)
     keys = [(s, t) for s in sizes for t in tids_by_size[s]]
     key_idx = {key: i for i, key in enumerate(keys)}
     input_dim = k_act + n_wide
