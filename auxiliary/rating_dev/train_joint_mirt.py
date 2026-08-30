@@ -249,6 +249,14 @@ BURN_IN_EPOCHS = 300
 # to PROFILES (their ability), since a user with one of each need not have one of
 # each inside every window.
 MIN_BOTH_OUTCOMES = 1
+# Difficulty coefficient in the `selection` second-pass form (see
+# JointMIRT.second_pass_loss). FIXED, not fitted: the term exists so that
+# choosing an easier-looking cell over a harder one is not free, and a fitted
+# coefficient would trade against the axis contrast the form is meant to
+# isolate. 1.0 puts it on the same footing as the axis term, whose loadings are
+# RMS-normalised and whose positions carry their own ridge — a first cut, and
+# stated as such, since nothing has measured what the ratio should be.
+SELECTION_KAPPA = 1.0
 
 
 def build_profiles_at(df, window_months, overlap=True):
@@ -607,6 +615,91 @@ class JointMIRT:
             b, a, c, _g = self.problem_params(feat)
         self.train(was)
         return torch.cat([feat, b[:, None], a[:, None], c[:, None]], dim=1)
+
+    def cell_params(self, feat):
+        """(b, a, c, g) for ARBITRARY CELLS — the same heads problem_params runs,
+        with every GAUGE READ AND NEVER UPDATED.
+
+        That is the whole reason this is not problem_params. Both gauges are
+        defined over the ATTEMPT STREAM at the correct cell: b's whitening sets
+        the rating's units and g's divisor sets the axis scale, and the second
+        pass feeds cells nobody's outcome is attached to. Letting it tick either
+        EMA would put an auxiliary objective in charge of the shipped scales —
+        the same argument axis_values makes for the teaching loss, one cell over.
+
+        The LAPSE IS DETACHED here. lambda is a global slip rate fitted from
+        outcomes, and every row the second pass sees is a failure by
+        construction, so a live gradient would let a stream that is 100% zeros
+        raise it. The second pass is meant to shape the trunk and the heads, not
+        the user or population parameters, and lambda is neither of the latter's
+        to move from this side.
+        """
+        torch, nn = self.torch, self.nn
+        h = self.trunk(self._drop(feat, INPUT_DROPOUT))
+        o = self.head(h)
+        b = (o[:, 0] - self.b_mu) / self.b_sd
+        a_src = (self.a_raw.expand(o.shape[0]) if self.global_slope
+                 else o[:, 1])
+        a = nn.functional.softplus(a_src).clamp(min=SLOPE_FLOOR)
+        lam = self.lapse().detach()
+        c = (1.0 - 2.0 * lam) * torch.sigmoid(o[:, 2])
+        if self.axis_from_trunk:
+            g_in = h if self.axis_trunk_coupled else h.detach()
+        else:
+            g_in = self._drop(feat, self.axis_dropout)
+            if self.axis_reads_rating:
+                g_in = torch.cat([g_in, b.detach()[:, None], a.detach()[:, None],
+                                  c.detach()[:, None]], dim=1)
+        g = self.g_lin(g_in)
+        # Same read-only rule as the gauges above: with --axis-gauge the stored
+        # divisor, otherwise this call's own batch, and the EMA is untouched
+        # either way.
+        g = (g / self.g_rms if self.g_gauge
+             else g / (g.pow(2).mean(dim=0, keepdim=True).sqrt() + 1e-6))
+        return b, a, c, g
+
+    def second_pass_loss(self, mode, pfeat, cfeat, prof, uid, kappa):
+        """The wrong attempt seen from the PICKED move's side.
+
+        theta and v are DETACHED throughout, so the user parameters stay
+        identified purely by the ordinary (pass-1) outcomes and this term shapes
+        only the trunk and the heads. Without that, an objective whose every row
+        is a failure would push abilities down on nothing but the fact that the
+        player got the problem wrong — which pass 1 has already priced once.
+
+        `censored`  the ordinary 4PL likelihood evaluated at the PICKED cell's
+                    own (b, a, c, g), against outcome 0. It says the player was
+                    beaten by THIS cell, which is strictly more than "beaten by
+                    this problem".
+
+        `selection` Bradley-Terry, picked over correct: the player chose the
+                    picked cell out of the two, so the axis contrast
+                    v . (g_picked - g_correct) plus a difficulty term should
+                    favour it. Both cells go through ONE call so they share the
+                    axis divisor and are on one scale. THE EXACT FORM IS A FIRST
+                    CUT — the difficulty coefficient kappa is fixed rather than
+                    fitted, and a two-alternative Luce model over the answer and
+                    one played cell is the simplest reading of a choice that was
+                    really made over every legal point.
+        """
+        torch = self.torch
+        th = self.theta(prof).squeeze(-1).detach()
+        v = (self.v - self.v.mean(dim=0, keepdim=True)) if self.center_v else self.v
+        vu = v[uid].detach()
+        if mode == "censored":
+            b, a, c, g = self.cell_params(pfeat)
+            lam = self.lapse().detach()
+            z = (a * (th - b) + (g * vu).sum(-1)).clamp(-35, 35)
+            p = (c + (1.0 - c - lam) * torch.sigmoid(z)).clamp(EPS, 1 - EPS)
+            return torch.nn.functional.binary_cross_entropy(
+                p, torch.zeros_like(p))
+        if mode == "selection":
+            n = pfeat.shape[0]
+            b_, _a, _c, g_ = self.cell_params(torch.cat([pfeat, cfeat], dim=0))
+            s = (((g_[:n] - g_[n:]) * vu).sum(-1)
+                 + kappa * (b_[n:] - b_[:n])).clamp(-35, 35)
+            return torch.nn.functional.softplus(-s).mean()
+        raise ValueError(f"unknown second-pass mode {mode!r}")
 
     def forward(self, prof, uid, feat):
         torch = self.torch
@@ -1065,6 +1158,32 @@ def main():
                          "activation block ends. Every arm keeps the size flag "
                          "outside the dropout region, so INPUT_DROPOUT masks the "
                          "same fraction of what each is given.")
+    ap.add_argument("--second-pass", choices=("none", "censored", "selection"),
+                    default="none",
+                    help="present every WRONG first-time attempt to the network a "
+                         "SECOND time, from the PICKED move's perspective: the "
+                         "trunk is fed that cell's activation vector beside the "
+                         "SAME problem tail, producing the cell's own (b, a, c, "
+                         "g). The outcome row the model already trains on says "
+                         "only that the player failed the problem; this says "
+                         "WHICH cell beat them, which is the one thing the "
+                         "attempt log records and the fit currently discards. "
+                         "theta and v are DETACHED in the second term, so the "
+                         "user parameters stay identified by the ordinary "
+                         "outcomes alone and this shapes the trunk and heads "
+                         "only. `censored` scores the 4PL at the picked cell "
+                         "against outcome 0; `selection` is a Bradley-Terry "
+                         "picked-over-correct term. `none` (default) is exactly "
+                         "today's model — no extra rows, no extra RNG draws, so "
+                         "it is bit-compatible with runs predating the flag. "
+                         "Correct attempts are never doubled: there the two "
+                         "perspectives are the same cell.")
+    ap.add_argument("--second-pass-weight", type=float, default=1.0,
+                    help="multiplier on the second-pass term. It is a separate "
+                         "additive loss and enters NOTHING else — not the stop "
+                         "split, not the reported train logloss, not the "
+                         "teaching MSE, not the orthogonality penalties — so "
+                         "this scales the whole of its influence.")
     ap.add_argument("--global-slope", action="store_true",
                     help="one discrimination for the whole corpus on dimension "
                          "1 (the Rasch reduction), difficulty still per-problem. "
@@ -1370,6 +1489,88 @@ def main():
     # number and this one only when putting it beside production.
     i_ho = torch.tensor(np.where(ho_rows)[0], device=device)
 
+    # --- THE SECOND PASS's own inputs: one trunk row per distinct (problem,
+    # picked cell) pair, and a per-attempt-row pointer into them.
+    #
+    # THE PAIRS ARE BUILT FROM TRAINING ROWS ONLY (`tr_rows` below, narrowed
+    # again to tr_eff inside the seed loop). A held-out user's picks must never
+    # reach the trunk: they are held out to measure what the model does with
+    # accounts it has not seen, and a trunk shaped by their choices has seen
+    # them. The row mask is not enough on its own either — a pair table built
+    # over every row would carry held-out users' cells even if no row indexed
+    # them, so the exclusion happens where the pairs are ENUMERATED.
+    #
+    # The feature row is the problem's own, with the activation block SWAPPED for
+    # the picked cell's and the tail left exactly as it is: that tail is the bot
+    # winrate and the board flag, both properties of the position rather than of
+    # the answer, which is what makes the layout legal to fan out per cell at all
+    # (utils.rating.features.load_joint_blocks).
+    pick_pair = None            # per prof_df row -> pair id; -1 = no second pass
+    pick_feat_t = None          # (n_pairs, fdim) the picked cells' trunk inputs
+    if args.second_pass != "none":
+        from utils.rating.features import (
+            load_first_time_picks, load_joint_picked_activations,
+            PICKED_IS_CORRECT, PICKED_NOT_EMBEDDED, PICKED_NO_NPZ)
+        # Rebuilt from `keys` rather than re-listing the corpus: keys is
+        # [(s, t) for s in sizes for t in tids_by_size[s]] over the same sorted
+        # per-size lists, so this reproduces the tid set the activation basis was
+        # keyed on and the joint-PCA cache hits instead of refitting.
+        tids_by_size = {s: [t for (ss, t) in keys if ss == s] for s in SIZES}
+        picks = load_first_time_picks()
+        # The trainer keys users by the first 8 characters of the id (see
+        # user_of_profile), so the pick map is re-keyed the same way — matching on
+        # the raw id would miss every row whose profile name is the truncation.
+        picks = {(str(u)[:8], str(t)): v for (u, t), v in picks.items()}
+        pvec, k_pick, pstat = load_joint_picked_activations(
+            SIZES, tids_by_size, PCA_DIM, SEED)
+        if k_pick >= fdim:
+            raise SystemExit(
+                f"the picked-cell block is {k_pick} wide against a {fdim}-wide "
+                f"feature row: the activation block cannot be substituted into "
+                f"a row it does not fit inside")
+        prof_arr = prof_df["profile"].astype(str).to_numpy()
+        prob_arr = prof_df["problem"].astype(str).to_numpy()
+        pair_id, pair_rows = {}, []
+        pick_pair = np.full(len(prof_df), -1, np.int64)
+        n_nomove = n_answer = n_noembed = n_nonpz = 0
+        wrong = (y == 0) & tr_rows
+        for i in np.flatnonzero(wrong):
+            p = picks.get((prof_arr[i][:8], prob_arr[i]))
+            if p is None:
+                n_nomove += 1
+                continue
+            key = (p[0], prob_arr[i], p[1], p[2])
+            vec = pvec.get(key)
+            if vec is None:
+                st = pstat.get(key)
+                if st == PICKED_IS_CORRECT:
+                    n_answer += 1
+                elif st == PICKED_NOT_EMBEDDED:
+                    n_noembed += 1
+                elif st == PICKED_NO_NPZ:
+                    n_nonpz += 1
+                else:
+                    n_nomove += 1        # the pick names a tid outside the corpus
+                continue
+            j = pair_id.get(key)
+            if j is None:
+                j = len(pair_rows)
+                pair_id[key] = j
+                row = feat[key_idx[(p[0], prob_arr[i])]].copy()
+                row[:k_pick] = vec
+                pair_rows.append(row)
+            pick_pair[i] = j
+        pick_feat_t = torch.tensor(np.asarray(pair_rows, dtype=np.float32),
+                                   device=device)
+        print(f"  SECOND PASS {args.second_pass} (weight "
+              f"{args.second_pass_weight}): {int((pick_pair >= 0).sum())} of "
+              f"{int(wrong.sum())} wrong TRAINING rows carry a picked cell, over "
+              f"{len(pair_rows)} distinct (problem, cell) pairs", flush=True)
+        print(f"    excluded: {n_nomove} with no usable recorded move, "
+              f"{n_answer} that played the answer (no contrast), {n_noembed} "
+              f"whose cell is not embedded, {n_nonpz} with no activation file",
+              flush=True)
+
     # --- THE TWO-STAGE AXIS REFERENCE, BUILT ON FIRST USE. It carries the
     # feature matrix the EIGEN warm start is derived from, the tid index the
     # end-of-run reference criterion is scored on, and that criterion's external
@@ -1599,6 +1800,28 @@ def main():
                   f"users; the resulting axis gain is biased AGAINST this model.",
                   flush=True)
 
+        # The second pass, narrowed to the rows THIS fit trains on. tr_eff is
+        # already tr_rows minus the axis fold, so re-deriving the pointer from it
+        # rather than from tr_rows means an --axis-holdout-fold run cannot reach
+        # an excluded user's picks through the second term either.
+        pick_t = p2_rows_t = p2_pairs_t = None
+        if pick_pair is not None:
+            keep = np.zeros(len(prof_df), bool)
+            keep[tr_eff.cpu().numpy()] = True
+            pp = np.where(keep, pick_pair, -1)
+            _p2 = np.flatnonzero(pp >= 0)
+            if len(_p2):
+                pick_t = torch.tensor(pp, device=device)
+                p2_rows_t = torch.tensor(_p2, device=device)
+                p2_pairs_t = torch.tensor(pp[_p2], device=device)
+            else:
+                # No usable pick survives this fit's row mask, so there is no
+                # second pass to run. Left as None rather than as empty tensors:
+                # a mean over no rows is NaN, and a NaN added to the loss is a
+                # dead fit reported as a trained one.
+                print("  SECOND PASS: no picked cell survives this fit's "
+                      "training rows — the second term is inactive", flush=True)
+
         opt = torch.optim.Adam(m.param_groups(args.lr_net, args.lr_field))
         base_lrs = [gp["lr"] for gp in opt.param_groups]
 
@@ -1793,6 +2016,21 @@ def main():
                             # and the comparison cannot see the cost.
                             se = (gz[mk] - teach_tgt[pid[mk]]) ** 2
                             loss = loss + tw * (se * teach_w).mean()
+                if pick_t is not None:
+                    # A SEPARATE ADDITIVE TERM, and nothing else. It reads its own
+                    # forward on the picked cells and touches neither `pred` nor
+                    # `gh`, so the reported train logloss, the stop split, the
+                    # teaching MSE and both orthogonality penalties are computed
+                    # over exactly the rows they were before — the picked cells
+                    # have no banked directions to be taught toward and no
+                    # outcome of their own to score.
+                    pj = pick_t[bi]
+                    sel = pj >= 0
+                    if bool(sel.any()):
+                        bi2 = bi[sel]
+                        loss = loss + args.second_pass_weight * m.second_pass_loss(
+                            args.second_pass, pick_feat_t[pj[sel]],
+                            tfeat[tp[bi2]], tprof[bi2], tu[bi2], SELECTION_KAPPA)
                 # divergence barrier, over the corpus with dropout off
                 if not args.no_barriers:
                   m.train(False)
@@ -1867,6 +2105,21 @@ def main():
                       f"stale {flat}/{args.flat_patience}"
                       + ("  (held: teaching)" if _moving and not in_burn else ""),
                       flush=True)
+                # ITS OWN LINE, never folded into the two above. The second-pass
+                # term is on a different population (picked cells) and, for
+                # `selection`, a different statistic altogether, so adding it to
+                # a logloss would produce a number that is neither. Measured in
+                # EVAL mode over the whole second-pass row set, matching how the
+                # train and stop-split figures are taken.
+                if p2_rows_t is not None:
+                    with torch.no_grad():
+                        _l2 = float(m.second_pass_loss(
+                            args.second_pass, pick_feat_t[p2_pairs_t],
+                            tfeat[tp[p2_rows_t]], tprof[p2_rows_t],
+                            tu[p2_rows_t], SELECTION_KAPPA))
+                    print(f"    pass2[{args.second_pass}] {_l2:.4f}  "
+                          f"[{len(p2_rows_t)} rows, weight "
+                          f"{args.second_pass_weight}]", flush=True)
                 if probe_rows is not None and (
                         (ep + 1) % PROBE_EVERY == 0 or ep == args.epochs - 1):
                     m.train(False)

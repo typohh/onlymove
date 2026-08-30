@@ -554,22 +554,246 @@ def load_joint_act_delta(sizes, tids_by_size, pca_dim, seed):
     return out, int(k) + 1
 
 
-def load_first_time_attempts():
+# --------------------------------------------------------------------------------
+# PICKED-CELL activations — the cell a player actually played on a wrong attempt.
+#
+# Same construction as the correct-cell and best-alternative caches: RAW N_FEATS
+# rows on disk, projected through the shared joint-PCA basis at LOAD time, so the
+# cache survives a PCA_DIM or SEED change and is built once. What differs is the
+# KEY: the population is (problem, cell) PAIRS rather than problems, because one
+# problem collects many distinct wrong moves, so the row list cannot be aligned to
+# correct_ids and carries its own (tid, x, y) index.
+
+# Why a row can be absent. These are kept APART rather than folded into one
+# "missing" because they mean different things and a consumer reports them
+# separately: only the first is a defect, and none of them is a reason to
+# substitute a vector.
+PICKED_OK = 0             # embedded, and not the answer
+PICKED_NOT_EMBEDDED = 1   # the coordinate is not one of the position's legal cells
+PICKED_IS_CORRECT = 2     # the recorded move IS the answer — the solver failed
+                          # deeper in the tree — so there is no picked-vs-correct
+                          # contrast to read, and the two perspectives coincide
+PICKED_NO_NPZ = 3         # no activation file for that problem. An ORDINARY state
+                          # here rather than the corruption it is elsewhere: a
+                          # removed or retired problem keeps its attempt rows, so
+                          # the DB legitimately names tids the corpus no longer has
+
+
+def _cache_picked_vecs_path(size):
+    return os.path.join(CACHE_DIR, f"picked_vecs_{size}.npz")
+
+
+def _load_picked_vec_chunk(task):
+    """Worker: the PICKED cells' vectors for a chunk of (tid, x, y) keys.
+
+    Items arrive sorted by tid so each .npz is opened once per run of keys that
+    share a problem; a chunk boundary only costs one extra open.
+
+    The cell is addressed by (x, y) against the npz's own `xys`, NEVER by row
+    position — the npz is board-scan order over every legal cell, so a positional
+    guess reads a different move's activations while looking entirely healthy.
+    The answer's own coordinate is read from `correct_idx` for the same reason.
+
+    A row that is not written is NaN and carries a status saying why. An
+    unreadable .npz still raises, so corruption is never encoded as an absence.
+    """
+    start, act_dir, items = task
+    out = np.full((len(items), N_FEATS), np.nan, dtype=np.float16)
+    st = np.full(len(items), PICKED_OK, dtype=np.int8)
+    cur_tid, cand, row_of, cxy = None, None, None, None
+    for i, (tid, npz_name, xy) in enumerate(items):
+        if npz_name is None:
+            st[i] = PICKED_NO_NPZ
+            continue
+        if tid != cur_tid:
+            npz_path = os.path.join(act_dir, npz_name)
+            try:
+                with np.load(npz_path) as s:
+                    xys = np.asarray(s["xys"])
+                    cand = np.asarray(s["candidates"])
+                    ci = int(s["correct_idx"])
+            except Exception as e:
+                raise RuntimeError(f"corrupt/unreadable .npz at {npz_path}") from e
+            row_of = {(int(a), int(b)): j for j, (a, b) in enumerate(xys)}
+            cxy = (int(xys[ci][0]), int(xys[ci][1]))
+            cur_tid = tid
+        if xy == cxy:
+            st[i] = PICKED_IS_CORRECT
+            continue
+        j = row_of.get(xy)
+        if j is None:
+            st[i] = PICKED_NOT_EMBEDDED
+            continue
+        out[i] = cand[j].astype(np.float16)
+    return start, out, st
+
+
+def build_picked_vec_cache(size, workers=None, force=False):
+    """Build/refresh one board's PICKED-cell activation cache — picked_vecs_<size>.npz,
+    holding `tid`, `xy`, `vecs` (raw N_FEATS float16) and `status`, row-aligned.
+
+    ONE file rather than the .npy + .json pair the correct-cell cache uses,
+    because a row here needs a third array: `status` says why an absent row is
+    absent, and the four causes above are not interchangeable. Folding them into
+    a bare NaN would make "the player's move is not a legal cell" and "this
+    problem no longer exists" the same fact.
+
+    INCREMENTAL and RECONCILING IN BOTH DIRECTIONS, like the other roll-ups here:
+    each row is a pure per-(problem, cell) read, so rows already cached are reused
+    and only new keys are loaded, while keys the DB no longer produces are
+    dropped. The key set grows with the attempt log, so a stale cache is the
+    ordinary state after a fetch_database rather than an exceptional one.
+    """
+    workers = workers or os.cpu_count() or 1
+    act_dir = os.path.join(PROJECT_ROOT, "activations", str(size))
+    if not os.path.isdir(act_dir):
+        raise SystemExit(f"no activations dir for size {size}: {act_dir}")
+    picks = load_first_time_picks()
+    want = sorted({(tid, x, y) for (_u, tid), (sz, x, y) in picks.items()
+                   if sz == size})
+    if not want:
+        raise SystemExit(
+            f"size {size}: no first-time wrong attempts with a decodable move — "
+            f"nothing to cache. Run `python -m pipeline.fetch_database` first.")
+    n = len(want)
+
+    path = _cache_picked_vecs_path(size)
+    old_row, old_vecs, old_stat = {}, None, None
+    if not force and os.path.exists(path):
+        d = np.load(path, allow_pickle=False)
+        cand = d["vecs"]                       # decompress ONCE (NpzFile re-reads)
+        if cand.shape[1] == N_FEATS:
+            old_vecs, old_stat = cand, d["status"]
+            old_row = {(str(t), int(x), int(y)): i for i, (t, (x, y))
+                       in enumerate(zip(d["tid"].tolist(), d["xy"].tolist()))}
+        if list(old_row) == want and old_vecs is not None:
+            print(f"[size {size}] picked-cell cache up to date ({n} pairs)",
+                  flush=True)
+            return
+
+    npz = {f[:-4]: f for f in os.listdir(act_dir) if f.endswith(".npz")}
+    _assert_activations_subset_of_corpus(size, sorted(npz))
+    missing = [k for k in want if k not in old_row]
+    departed = len(old_row) - (n - len(missing))
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    print(f"[size {size}] picked-cell cache: {n} (problem, cell) pairs "
+          f"({len(missing)} to load, {n - len(missing)} reused"
+          f"{f', {departed} departed pruned' if departed else ''}) -> {path} "
+          f"({n * N_FEATS * 2 / 1e9:.2f} GB)", flush=True)
+
+    new_vecs, new_stat = {}, {}
+    chunk = 2048
+    tasks = [(s, act_dir,
+              [(t, npz.get(t), (x, y)) for t, x, y in missing[s:s + chunk]])
+             for s in range(0, len(missing), chunk)]
+    t0, done = time.time(), 0
+    if tasks:
+        with ProcessPoolExecutor(max_workers=workers) as ex:
+            for (start, arr, sts), (_, _, items) in zip(
+                    ex.map(_load_picked_vec_chunk, tasks), tasks):
+                for j, (t, _f, xy) in enumerate(items):
+                    new_vecs[(t, xy[0], xy[1])] = arr[j]
+                    new_stat[(t, xy[0], xy[1])] = sts[j]
+                done += len(items)
+                rate = done / max(time.time() - t0, 1e-9)
+                print(f"\r  {done}/{len(missing)} ({rate:.0f}/s)", end="", flush=True)
+        print(flush=True)
+
+    vecs = np.empty((n, N_FEATS), dtype=np.float16)
+    stat = np.empty(n, dtype=np.int8)
+    for i, k in enumerate(want):
+        if k in old_row:
+            vecs[i], stat[i] = old_vecs[old_row[k]], old_stat[old_row[k]]
+        else:
+            vecs[i], stat[i] = new_vecs[k], new_stat[k]
+    tmp = f"{path}.tmp{os.getpid()}.npz"
+    try:
+        np.savez(tmp, tid=np.array([t for t, _x, _y in want]),
+                 xy=np.array([(x, y) for _t, x, y in want], dtype=np.int32),
+                 vecs=vecs, status=stat)
+        os.replace(tmp, path)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.remove(tmp)   # never leave a rejected build to be mistaken for a cache
+        raise
+    n_ok = int((stat == PICKED_OK).sum())
+    print(f"[size {size}] wrote {n} picked-cell rows in {time.time() - t0:.0f}s "
+          f"({n_ok} usable, {int((stat == PICKED_IS_CORRECT).sum())} played the "
+          f"answer, {int((stat == PICKED_NOT_EMBEDDED).sum())} not an embedded "
+          f"cell, {int((stat == PICKED_NO_NPZ).sum())} with no activation file)",
+          flush=True)
+
+
+def load_joint_picked_activations(sizes, tids_by_size, pca_dim, seed):
+    """The PICKED cell's activations, projected through the SAME joint-PCA basis the
+    correct-move block uses. Returns ({(size, tid, x, y): vec}, k, {key: status}).
+
+    Same basis, not a refit, for load_joint_alt_activations' reason: the point is
+    that the played cell lands in the correct move's coordinate system, so one
+    trunk can be fed either. A separate basis would put them on different axes
+    and make the two readings incomparable.
+
+    The status map carries only the keys that did NOT yield a vector, so a caller
+    can report WHY a row is absent instead of counting one undifferentiated gap.
+    Keys for problems outside `tids_by_size` are dropped silently — a pick on a
+    departed problem is an ordinary consequence of attempt rows outliving their
+    tsumego, and it is already absent from every problem-keyed structure.
+    """
+    basis = load_joint_activation_basis(sizes, tids_by_size, pca_dim, seed)
+    m1, s1, C = basis["m1"], basis["s1"], basis["C"]
+    pca_mean, m2, s2 = basis["pca_mean"], basis["m2"], basis["s2"]
+    out, status, k = {}, {}, C.shape[0]
+    for size in sizes:
+        path = _cache_picked_vecs_path(size)
+        if not os.path.exists(path):
+            raise FileNotFoundError(
+                f"picked-cell activation cache {path} missing — build it with "
+                f"utils.rating.features.build_picked_vec_cache({size})")
+        d = np.load(path, allow_pickle=False)
+        tids, xy, vecs, stat = d["tid"], d["xy"], d["vecs"], d["status"]
+        corpus = set(tids_by_size[size])
+        keep = [i for i, t in enumerate(tids.tolist()) if str(t) in corpus]
+        for s0 in range(0, len(keep), 4096):
+            sl = np.array(keep[s0:s0 + 4096], dtype=np.intp)
+            X = np.asarray(vecs[sl], dtype=np.float32)
+            Z = (((X - m1) / s1 - pca_mean) @ C.T - m2) / s2
+            for j, i in enumerate(sl.tolist()):
+                key = (size, str(tids[i]), int(xy[i][0]), int(xy[i][1]))
+                if int(stat[i]) == PICKED_OK:
+                    out[key] = Z[j].astype(np.float32)
+                else:
+                    status[key] = int(stat[i])
+    return out, int(k), status
+
+
+def load_first_time_attempts(with_move=False):
     """Return a DataFrame of first-time attempts: one row per (user_id, problem),
-    columns [user_id, problem, success, size, created_at].
+    columns [user_id, problem, success, size, created_at] (plus `move` when
+    `with_move`).
 
     Reads the canonical binary db/d1.sqlite directly (opened
     read-only) instead of replaying the ~290k-INSERT text dump into an in-memory
     DB on every call: fetch_database keeps the two artifacts in sync and treats
-    the binary as the merge target, so this is the cheaper, equivalent source."""
+    the binary as the merge target, so this is the cheaper, equivalent source.
+
+    `with_move` carries the played COORDINATE alongside the outcome. It is an
+    argument here rather than a second query elsewhere because the dedup rule —
+    earliest attempt per (user, problem) — is what decides WHICH attempt's move
+    is returned, and a copy of that rule would agree only by coincidence: the
+    move has to belong to the same attempt whose success/size/date the rest of
+    the row describes. Older clients recorded no move, so the column is empty for
+    a large share of rows and every consumer has to treat that as missing rather
+    than as a pass."""
     if not os.path.exists(SQLITE_PATH):
         raise SystemExit(
             f"Missing {SQLITE_PATH}. Run `python -m pipeline.fetch_database` first.")
+    cols = "user_id, problem, success, size, created_at"
+    if with_move:
+        cols += ", move"
     con = sqlite3.connect(f"file:{SQLITE_PATH}?mode=ro", uri=True)
     try:
         df = pd.read_sql_query(
-            "SELECT user_id, problem, success, size, created_at "
-            "FROM tsumego_reports WHERE is_repeat = 0",
+            f"SELECT {cols} FROM tsumego_reports WHERE is_repeat = 0",
             con)
     finally:
         con.close()
@@ -579,6 +803,41 @@ def load_first_time_attempts():
             .reset_index(drop=True))
     df["success"] = df["success"].astype(int)
     return df
+
+
+def load_first_time_picks():
+    """{(user_id, problem): (size, x, y)} — the cell each FIRST-TIME WRONG attempt
+    actually played, for the attempts that recorded one.
+
+    The key is (user, problem) rather than the attempt's own id because that is
+    what a first-time attempt IS after the dedup in load_first_time_attempts: one
+    row per pair. So a caller holding a training row can look its pick up without
+    carrying an attempt identifier through the profile explosion.
+
+    SUCCESSES ARE ABSENT BY CONSTRUCTION, not filtered as an afterthought: on a
+    correct attempt the played cell IS the answer, so the pick carries nothing the
+    correct-cell vector does not already carry. An attempt with no recorded move
+    (older clients wrote none) is simply not in the map, and so is one whose move
+    does not decode — both are missing data, and a caller must count them rather
+    than substitute anything.
+
+    The GTP -> (x, y) conversion is imported INSIDE the function, following
+    utils.rating.motif_rules: this module is read by the whole rating side and
+    importing it must not drag in the KataGo half of utils/."""
+    from utils.katago.coords import gtp_to_xy
+    df = load_first_time_attempts(with_move=True)
+    df = df[(df["success"] == 0) & df["move"].notna() & (df["move"] != "")]
+    out = {}
+    for uid, tid, size, mv in zip(df["user_id"], df["problem"], df["size"],
+                                  df["move"]):
+        try:
+            xy = gtp_to_xy(str(mv))
+        except (IndexError, ValueError):
+            continue                      # malformed coordinate: missing, not a pass
+        if xy is None:
+            continue                      # a recorded pass has no cell to read
+        out[(str(uid), str(tid))] = (int(size), int(xy[0]), int(xy[1]))
+    return out
 
 
 def build_profiles(df):
