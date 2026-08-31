@@ -160,18 +160,22 @@ function trainingFocusMotifs() {
         // `tail` is the NAMED tail describing the category, which for an
         // overplay is the opposite of its serve direction — an overplay of a
         // one-sided motif serves anti-motif problems but is described through
-        // the motif's own name, with a "too much" qualifier.
+        // the motif's own name, as something the user overvalues.
         const name = localizedMotif(labels[String(k)], tail);
         if (!name) continue;
-        // Each kind is a different statement and needs its own wording. A bare
+        // Each kind is a different statement and gets its own SENTENCE. A bare
         // name is not one of them: it reads as "weak at this" by implication
         // only, which leaves the one finding that IS about skill looking like a
         // label somebody forgot to finish, and makes a tendency line shown bare
         // beside a positive strength reading in the stats table look like a
-        // contradiction rather than two statements about one motif.
-        const text = kind === 'overplay' ? getTerm('trainingFocusTooMuch', { motif: name })
-                   : kind === 'underplay' ? getTerm('trainingFocusTooLittle', { motif: name })
-                   : getTerm('trainingFocusBadTiming', { motif: name });
+        // contradiction rather than two statements about one motif. The
+        // sentence is localized WHOLE rather than assembled from a name and a
+        // qualifier — the motif sits in a different place in each language, and
+        // Korean needs a phrasing that avoids an object particle the motif
+        // names do not all take the same form of.
+        const text = kind === 'overplay' ? getTerm('trainingFocusOvervalued', { motif: name })
+                   : kind === 'underplay' ? getTerm('trainingFocusUndervalued', { motif: name })
+                   : getTerm('trainingFocusWeak', { motif: name });
         scored.push({ z, text });
     }
     scored.sort((a, b) => b.z - a.z);

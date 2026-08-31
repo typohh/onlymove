@@ -15,7 +15,7 @@
 //   weak <-> strong   the 3PL residual slope on the motif loading, in ranks.
 //                     0 = the motif costs you nothing beyond the problem's
 //                     difficulty.
-//   underplay <-> overplay
+//   undervalued <-> overvalued
 //                     the share of your wrong answers that erred TOWARD the
 //                     motif rather than away from it. The neutral point is the
 //                     AVAILABILITY NULL — the share a direction-blind error on
@@ -69,8 +69,9 @@ const TONE_STRONG_Z = 2 * MOTIF_Z;
 // Builds the motif table consumed by showDetailedStats.
 // One pane per READING, not one pane carrying both. `kind` is 'strength'
 // (weak <-> strong: how the user SCORES on motif-heavy problems) or 'tendency'
-// (underplay <-> overplay: which way their mistakes LEAN, against the
-// availability null). They answer different questions and are read one at a
+// (undervalued <-> overvalued: which way their mistakes LEAN, against the
+// availability null — a wrong pick that loads HIGHER on the motif than the
+// answer did is the user valuing it above what the board offered). They answer different questions and are read one at a
 // time, so a reader comparing rows within a pane is comparing like with like
 // instead of scanning across two axes at once.
 export function buildMotifPane(kind, history = state.answerHistory) {
