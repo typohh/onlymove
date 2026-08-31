@@ -113,6 +113,19 @@ WORKING_WINDOW = 3000               # RECALL_CANDIDATE_HISTORY_LENGTH, in attemp
 LN_C_LAMBDA = 5.0         # client L2 on LN_C: lambda=10 mean-reduced == 5 on the sum
 LN_S_TRAIN_MIN, LN_S_TRAIN_MAX = -5.0, 8.0
 
+# The first-success step entered the schedule with the 2026-07-28 commit.
+# Deployment is manual and clients refresh their inlined constants lazily, so the
+# days right after it carry both schedules at once; the era split leaves them out
+# of both sides rather than assigning them to either.
+STEP_LIVE_DATE = "2026-07-28"
+STEP_SETTLED_DATE = "2026-08-01"
+
+# Relative-interval bands for the matched-ratio contrast: gap over the STEP-LESS
+# predicted stability. Bands span the range both schedules actually serve into;
+# outside them the data thins to nothing.
+X_BANDS = (0.05, 0.15, 0.30, 0.60, 1.20)
+MIN_MATCHED_PER_CELL = 2
+
 
 # ---------------------------------------------------------------------------
 # Small stats helpers.
@@ -352,6 +365,152 @@ def _print_rung_table(events, min_n, retention, max_rung):
             s1 = math.sqrt(y1.mean() * (1 - y1.mean()) / len(y1))
             print(f"  rung 0 vs rung 1: {y1.mean() - y0.mean():+.4f} "
                   f"({(y1.mean() - y0.mean()) / math.sqrt(s0 ** 2 + s1 ** 2):.1f} sd)")
+
+
+def report_matched_ratio(events, x0):
+    """The rung contrast in the form that survives a schedule change.
+
+    Every rate in this file is realized on intervals the live scheduler chose, so
+    a change to the schedule — the first-success step stretching rung >= 1
+    intervals — moves the rates it is checked against, and any statistic pooled
+    across the change mixes two schedules. Conditioning on the era is the obvious
+    repair and ages badly: the uncorrected era stops growing the moment the
+    correction ships. Conditioning on the RELATIVE interval instead — the gap
+    over the step-less predicted stability, the coordinate in which the step is
+    nothing but a horizontal shift of where serves land — is era-robust in
+    principle, and measured, it is not sufficient alone: at the SAME relative
+    interval, rung >= 1 serves after the step clear several points below serves
+    before it, because who reaches a given ratio changed with the schedule (an
+    early-relative-to-window serve under the stretched schedule is a requested
+    review or a stale-bundle client, not a scheduler-typical draw). This report
+    prints that failure directly, then applies the repair: a Mantel-Haenszel
+    odds ratio over (user, relative-interval band) strata, rung >= 1 against
+    rung 0. Habit, era and schedule all cancel inside a stratum, so every era
+    pools into one statistic, and the pre/post agreement it prints is the check
+    that it worked. The implied interval multiplier applies that odds shift at
+    the post-lapse cells' own realized rate — the same self-consistency target
+    the population fit uses.
+    """
+    kappa, growth, ln_c = x0
+    print("\n" + "=" * 78)
+    print("MATCHED-RATIO CONTRAST -- rung >= 1 vs rung 0 at the same relative interval")
+    print("=" * 78)
+
+    def x_of(e):
+        if e["z"] is None:
+            return None
+        lnS = min(max(ln_c + kappa * (e["z"] - Z0) + growth * e["r"],
+                      LN_S_TRAIN_MIN), LN_S_TRAIN_MAX)
+        return e["gap_days"] / math.exp(lnS)
+
+    def era_of(e):
+        d = e["at"][:10]
+        if d < STEP_LIVE_DATE:
+            return "pre"
+        if d >= STEP_SETTLED_DATE:
+            return "post"
+        return None
+
+    # The naive transport's failure, stated with numbers: rung >= 1 clear at the
+    # same ratio band, pre vs post.
+    print(f"\nrung >= 1 clear at the SAME relative interval, before vs after the step")
+    print(f"{'x band':<16}{'pre n':>7}{'pre':>8}{'post n':>7}{'post':>8}")
+    for lo, hi in zip(X_BANDS, X_BANDS[1:]):
+        cells = {"pre": [0, 0], "post": [0, 0]}
+        for e in events:
+            if e["r"] < 1 or (x := x_of(e)) is None or not (lo <= x < hi):
+                continue
+            if (era := era_of(e)) is not None:
+                cells[era][0] += e["y"]
+                cells[era][1] += 1
+        f = {k: (f"{v[0] / v[1]:7.1%}" if v[1] >= 40 else "      -") for k, v in cells.items()}
+        print(f"[{lo:.2f}, {hi:.2f})  {cells['pre'][1]:>7}{f['pre']:>8}"
+              f"{cells['post'][1]:>7}{f['post']:>8}")
+    print("(a gap here at equal ratio is selection moving with the schedule --\n"
+          " the reason the contrast below is stratified rather than pooled)")
+
+    def mh(sel):
+        strata = defaultdict(lambda: [[0, 0], [0, 0]])
+        for e in sel:
+            x = x_of(e)
+            if x is None:
+                continue
+            band = next((i for i, (lo, hi) in enumerate(zip(X_BANDS, X_BANDS[1:]))
+                         if lo <= x < hi), None)
+            if band is None:
+                continue
+            c = strata[(e["user"], band)][0 if e["r"] == 0 else 1]
+            c[0] += e["y"]
+            c[1] += 1
+        num = den = 0.0
+        used = 0
+        k = [0, 0]
+        n = [0, 0]
+        for c0, c1 in strata.values():
+            if c0[1] < MIN_MATCHED_PER_CELL or c1[1] < MIN_MATCHED_PER_CELL:
+                continue
+            A, B = c1[0], c1[1] - c1[0]
+            C, D = c0[0], c0[1] - c0[0]
+            t = A + B + C + D
+            num += A * D / t
+            den += B * C / t
+            used += 1
+            k[0] += c0[0]
+            n[0] += c0[1]
+            k[1] += c1[0]
+            n[1] += c1[1]
+        if den <= 0 or num <= 0:
+            return None
+        return {"or": num / den, "strata": used,
+                "p0": k[0] / n[0] if n[0] else float("nan"),
+                "p1": k[1] / n[1] if n[1] else float("nan"),
+                "n0": n[0], "n1": n[1]}
+
+    out = {"all": mh(events),
+           "pre": mh([e for e in events if era_of(e) == "pre"]),
+           "post": mh([e for e in events if era_of(e) == "post"])}
+    print(f"\n{'era':<6}{'strata':>7}{'OR':>7}{'r0 rate':>9}{'r1+ rate':>10}{'n r0/r1+':>14}")
+    for name in ("all", "pre", "post"):
+        m = out[name]
+        if m is None:
+            print(f"{name:<6}      -")
+            continue
+        print(f"{name:<6}{m['strata']:>7}{m['or']:>7.2f}{m['p0']:>9.1%}{m['p1']:>10.1%}"
+              f"{m['n0']:>8,}/{m['n1']:<,}")
+
+    implied = None
+    m = out["all"]
+    if m is not None and 0 < m["p0"] < 1:
+        odds1 = (m["p0"] / (1 - m["p0"])) * m["or"]
+        p1 = odds1 / (1 + odds1)
+        if 0 < p1 < 1 and p1 > m["p0"]:
+            implied = math.log(m["p0"]) / math.log(p1)
+            print(f"\nimplied interval multiplier at the post-lapse operating rate: "
+                  f"x{implied:.2f}  (ln(p0)/ln(p1) at p0={m['p0']:.3f}, OR-shifted p1={p1:.3f})")
+
+    # The era-pinned reads the sections quoting realized rates need: the
+    # diagnosis anchor (serves the step never touched) and where the corrected
+    # schedule has landed so far.
+    def rate(sel):
+        n = len(sel)
+        return (sum(e["y"] for e in sel) / n if n else float("nan")), n
+
+    pre_up, n_pre_up = rate([e for e in events if e["r"] >= 1 and era_of(e) == "pre"])
+    post_r1, n_post_r1 = rate([e for e in events if e["r"] == 1 and era_of(e) == "post"])
+    post_r0, n_post_r0 = rate([e for e in events if e["r"] == 0 and era_of(e) == "post"])
+    print(f"\nrealized clear, era-pinned: rung>=1 pre-step {pre_up:.1%} (n={n_pre_up:,}); "
+          f"post-step rung 1 {post_r1:.1%} (n={n_post_r1:,}) vs rung 0 {post_r0:.1%} "
+          f"(n={n_post_r0:,})")
+
+    return {"or_all": None if out["all"] is None else out["all"]["or"],
+            "or_pre": None if out["pre"] is None else out["pre"]["or"],
+            "or_post": None if out["post"] is None else out["post"]["or"],
+            "strata_all": 0 if out["all"] is None else out["all"]["strata"],
+            "strata_post": 0 if out["post"] is None else out["post"]["strata"],
+            "implied_interval": implied,
+            "rung_up_clear_pre": pre_up, "n_pre_up": n_pre_up,
+            "rung1_clear_post": post_r1, "n_post_r1": n_post_r1,
+            "rung0_clear_post": post_r0, "n_post_r0": n_post_r0}
 
 
 def report_within_user(events, max_rung=6):
@@ -1354,6 +1513,7 @@ def main(argv=None):
         return
 
     report_by_rung(events, args.min_n, (kappa, growth, ln_c_prior))
+    matched = report_matched_ratio(events, (kappa, growth, ln_c_prior))
     within_user = report_within_user(events)
     report_by_month(events, args.min_n)
     report_recent_windows(events, args.min_n, (kappa, growth, ln_c_prior))
@@ -1382,6 +1542,7 @@ def main(argv=None):
                             (kappa, growth, ln_c_prior), args.min_n, args.all_chains)
     return {
         "events": len(events), "totals": dict(totals), "skipped": dict(skipped),
+        "matched": matched,
         "within_user": within_user, "decay": decay, "correction": correction,
         "heldout": heldout, "growth_forms": growth_forms,
         "per_user_step": per_user_step,

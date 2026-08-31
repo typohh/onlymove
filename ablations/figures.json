@@ -1170,8 +1170,8 @@
       "tier": "about",
       "note": "share of repeat attempts excluded by the clean-chain filter (chains beginning before repeats were reliably logged)",
       "measured": {
-        "at": "2026-08-31T19:49:23Z",
-        "git": "5be11276b63+dirty",
+        "at": "2026-08-31T20:27:59Z",
+        "git": "61246210d40+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -1184,8 +1184,8 @@
       "tier": "about",
       "note": "its degrees of freedom",
       "measured": {
-        "at": "2026-08-31T19:49:23Z",
-        "git": "5be11276b63+dirty",
+        "at": "2026-08-31T20:27:59Z",
+        "git": "61246210d40+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -1198,8 +1198,8 @@
       "tier": "about",
       "note": "Cochran's heterogeneity statistic for the per-user step at the 5-events-per-cell cut",
       "measured": {
-        "at": "2026-08-31T19:49:23Z",
-        "git": "5be11276b63+dirty",
+        "at": "2026-08-31T20:27:59Z",
+        "git": "61246210d40+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -1212,8 +1212,8 @@
       "tier": "about",
       "note": "held-out nats the retention computation trails a constant rate by",
       "measured": {
-        "at": "2026-08-31T19:49:23Z",
-        "git": "5be11276b63+dirty",
+        "at": "2026-08-31T20:27:59Z",
+        "git": "61246210d40+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -1226,8 +1226,8 @@
       "tier": "about",
       "note": "share of those users whose own odds ratio runs in the expected direction, at the 20-events cut",
       "measured": {
-        "at": "2026-08-31T19:49:23Z",
-        "git": "5be11276b63+dirty",
+        "at": "2026-08-31T20:27:59Z",
+        "git": "61246210d40+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -1240,8 +1240,8 @@
       "tier": "about",
       "note": "share of those users whose own odds ratio runs in the expected direction, at the 5-events cut",
       "measured": {
-        "at": "2026-08-31T19:49:23Z",
-        "git": "5be11276b63+dirty",
+        "at": "2026-08-31T20:27:59Z",
+        "git": "61246210d40+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -1254,8 +1254,78 @@
       "tier": "about",
       "note": "held-out nats a free effect per rung buys — the upper bound on any reshaping of the streak term",
       "measured": {
-        "at": "2026-08-31T19:49:23Z",
-        "git": "5be11276b63+dirty",
+        "at": "2026-08-31T20:27:59Z",
+        "git": "61246210d40+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "recall.matched_ratio_era_gap": {
+      "value": 0.05943564459577755,
+      "fmt": ".2f",
+      "text": "0.06",
+      "producer": "ablations.recall_figures",
+      "tier": "about",
+      "note": "absolute pre/post gap of the matched contrast — the check that stratifying removed the schedule change",
+      "measured": {
+        "at": "2026-08-31T20:27:59Z",
+        "git": "61246210d40+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "recall.matched_ratio_or": {
+      "value": 1.6747979580044967,
+      "fmt": ".2f",
+      "text": "1.67",
+      "producer": "ablations.recall_figures",
+      "tier": "about",
+      "note": "within-(user, matched relative-interval band) MH odds of clearing, post-success vs post-lapse — schedule-invariant, all eras pooled",
+      "measured": {
+        "at": "2026-08-31T20:27:59Z",
+        "git": "61246210d40+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "recall.matched_ratio_or_post": {
+      "value": 1.6302049484118442,
+      "fmt": ".2f",
+      "text": "1.63",
+      "producer": "ablations.recall_figures",
+      "tier": "about",
+      "note": "…and on serves after it settled",
+      "measured": {
+        "at": "2026-08-31T20:27:59Z",
+        "git": "61246210d40+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "recall.matched_ratio_or_pre": {
+      "value": 1.6896405930076217,
+      "fmt": ".2f",
+      "text": "1.69",
+      "producer": "ablations.recall_figures",
+      "tier": "about",
+      "note": "the same contrast on serves before the first-success step entered the schedule",
+      "measured": {
+        "at": "2026-08-31T20:27:59Z",
+        "git": "61246210d40+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "recall.matched_step_interval": {
+      "value": 1.5537980405375549,
+      "fmt": ".2f",
+      "text": "1.55",
+      "producer": "ablations.recall_figures",
+      "tier": "about",
+      "note": "interval multiplier the matched contrast implies at the post-lapse operating rate",
+      "measured": {
+        "at": "2026-08-31T20:27:59Z",
+        "git": "61246210d40+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -1268,8 +1338,8 @@
       "tier": "about",
       "note": "separation of the second success from the first, in sd, within user",
       "measured": {
-        "at": "2026-08-31T19:49:23Z",
-        "git": "5be11276b63+dirty",
+        "at": "2026-08-31T20:27:59Z",
+        "git": "61246210d40+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -1282,8 +1352,8 @@
       "tier": "about",
       "note": "separation of the post-success from the post-lapse state, in sd, within user",
       "measured": {
-        "at": "2026-08-31T19:49:23Z",
-        "git": "5be11276b63+dirty",
+        "at": "2026-08-31T20:27:59Z",
+        "git": "61246210d40+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -1296,8 +1366,8 @@
       "tier": "about",
       "note": "users with no post-success rows inside the window the on-device model trains on",
       "measured": {
-        "at": "2026-08-31T19:49:23Z",
-        "git": "5be11276b63+dirty",
+        "at": "2026-08-31T20:27:59Z",
+        "git": "61246210d40+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -1310,8 +1380,8 @@
       "tier": "about",
       "note": "pooled within-user post-lapse/post-success odds ratio, users with at least 10 events in each cell",
       "measured": {
-        "at": "2026-08-31T19:49:23Z",
-        "git": "5be11276b63+dirty",
+        "at": "2026-08-31T20:27:59Z",
+        "git": "61246210d40+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -1324,8 +1394,8 @@
       "tier": "about",
       "note": "pooled within-user post-lapse/post-success odds ratio, users with at least 20 events in each cell",
       "measured": {
-        "at": "2026-08-31T19:49:23Z",
-        "git": "5be11276b63+dirty",
+        "at": "2026-08-31T20:27:59Z",
+        "git": "61246210d40+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -1338,8 +1408,8 @@
       "tier": "about",
       "note": "pooled within-user post-lapse/post-success odds ratio, users with at least 5 events in each cell",
       "measured": {
-        "at": "2026-08-31T19:49:23Z",
-        "git": "5be11276b63+dirty",
+        "at": "2026-08-31T20:27:59Z",
+        "git": "61246210d40+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -1352,8 +1422,8 @@
       "tier": "about",
       "note": "median post-success rows per user inside that same window",
       "measured": {
-        "at": "2026-08-31T19:49:23Z",
-        "git": "5be11276b63+dirty",
+        "at": "2026-08-31T20:27:59Z",
+        "git": "61246210d40+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -1366,8 +1436,8 @@
       "tier": "about",
       "note": "reciprocal of that slope: how many times too wide the model's spread is",
       "measured": {
-        "at": "2026-08-31T19:49:23Z",
-        "git": "5be11276b63+dirty",
+        "at": "2026-08-31T20:27:59Z",
+        "git": "61246210d40+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -1380,8 +1450,8 @@
       "tier": "about",
       "note": "held-out Platt slope on the retention model's own log-odds, split by user",
       "measured": {
-        "at": "2026-08-31T19:49:23Z",
-        "git": "5be11276b63+dirty",
+        "at": "2026-08-31T20:27:59Z",
+        "git": "61246210d40+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -1394,8 +1464,8 @@
       "tier": "about",
       "note": "highest post-lapse clear rate across those same bins",
       "measured": {
-        "at": "2026-08-31T19:49:23Z",
-        "git": "5be11276b63+dirty",
+        "at": "2026-08-31T20:27:59Z",
+        "git": "61246210d40+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -1408,8 +1478,22 @@
       "tier": "about",
       "note": "lowest post-lapse clear rate across elapsed-gap bins from 0.5 to 16 days",
       "measured": {
-        "at": "2026-08-31T19:49:23Z",
-        "git": "5be11276b63+dirty",
+        "at": "2026-08-31T20:27:59Z",
+        "git": "61246210d40+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "recall.rung0_clear_poststep": {
+      "value": 0.6669405642289784,
+      "fmt": "%.0f",
+      "text": "67",
+      "producer": "ablations.recall_figures",
+      "tier": "about",
+      "note": "post-lapse clear rate over the same serves — the parity target",
+      "measured": {
+        "at": "2026-08-31T20:27:59Z",
+        "git": "61246210d40+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -1422,8 +1506,8 @@
       "tier": "about",
       "note": "pooled post-lapse clear rate, against the 0.80 window-open ceiling",
       "measured": {
-        "at": "2026-08-31T19:49:23Z",
-        "git": "5be11276b63+dirty",
+        "at": "2026-08-31T20:27:59Z",
+        "git": "61246210d40+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -1436,8 +1520,8 @@
       "tier": "about",
       "note": "post-lapse clear-rate points, users who reach the next rung minus users who never do; negative means composition suppresses the step",
       "measured": {
-        "at": "2026-08-31T19:49:23Z",
-        "git": "5be11276b63+dirty",
+        "at": "2026-08-31T20:27:59Z",
+        "git": "61246210d40+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -1450,8 +1534,22 @@
       "tier": "about",
       "note": "post-lapse clear-rate points per doubling of the elapsed gap over those bins; positive is a rise, not decay",
       "measured": {
-        "at": "2026-08-31T19:49:23Z",
-        "git": "5be11276b63+dirty",
+        "at": "2026-08-31T20:27:59Z",
+        "git": "61246210d40+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "recall.rung1_clear_poststep": {
+      "value": 0.7238252267106348,
+      "fmt": "%.0f",
+      "text": "72",
+      "producer": "ablations.recall_figures",
+      "tier": "about",
+      "note": "realized clear of first-rung serves since the step settled",
+      "measured": {
+        "at": "2026-08-31T20:27:59Z",
+        "git": "61246210d40+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -1464,8 +1562,8 @@
       "tier": "about",
       "note": "rise in mean cold-solve log-odds from the post-lapse to the post-success state",
       "measured": {
-        "at": "2026-08-31T19:49:23Z",
-        "git": "5be11276b63+dirty",
+        "at": "2026-08-31T20:27:59Z",
+        "git": "61246210d40+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -1478,8 +1576,8 @@
       "tier": "about",
       "note": "that multiplier as a share of the interval correction the realized rates require at the first success",
       "measured": {
-        "at": "2026-08-31T19:49:23Z",
-        "git": "5be11276b63+dirty",
+        "at": "2026-08-31T20:27:59Z",
+        "git": "61246210d40+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -1492,8 +1590,22 @@
       "tier": "about",
       "note": "stability multiplier the difficulty term already draws from that rise",
       "measured": {
-        "at": "2026-08-31T19:49:23Z",
-        "git": "5be11276b63+dirty",
+        "at": "2026-08-31T20:27:59Z",
+        "git": "61246210d40+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "recall.rung_up_clear_prestep": {
+      "value": 0.8060680606806068,
+      "fmt": "%.0f",
+      "text": "81",
+      "producer": "ablations.recall_figures",
+      "tier": "about",
+      "note": "realized clear of rung >= 1 serves scheduled without the step — the diagnosis-era anchor",
+      "measured": {
+        "at": "2026-08-31T20:27:59Z",
+        "git": "61246210d40+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -1506,8 +1618,8 @@
       "tier": "about",
       "note": "held-out nats a first-success step buys over the shipped linear streak term",
       "measured": {
-        "at": "2026-08-31T19:49:23Z",
-        "git": "5be11276b63+dirty",
+        "at": "2026-08-31T20:27:59Z",
+        "git": "61246210d40+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }

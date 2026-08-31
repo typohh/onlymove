@@ -51,6 +51,26 @@ reads the statistics its checks return:
                                     minus among users who never do; negative
                                     means composition suppresses the step
                                     rather than creating it.
+  recall.matched_ratio_or           the ERA-ROBUST form of the rung contrast:
+                                    within-(user, matched relative-interval band)
+                                    MH odds of clearing, post-success vs
+                                    post-lapse — the schedule cancels inside each
+                                    stratum, so serves before and after the
+                                    first-success step pool into one statistic.
+  recall.matched_ratio_or_pre/_post the same contrast restricted to serves before
+                                    the step entered the schedule / after it
+                                    settled, and
+  recall.matched_ratio_era_gap      the absolute gap between those two — the
+                                    check that the stratification actually
+                                    removed the schedule change.
+  recall.matched_step_interval      the interval multiplier the matched contrast
+                                    implies at the post-lapse operating rate.
+  recall.rung_up_clear_prestep      realized clear of rung >= 1 serves the step
+                                    never touched — the diagnosis-era anchor the
+                                    "at or through the ceiling" claim rests on.
+  recall.rung1_clear_poststep       realized clear of first-rung serves since the
+  recall.rung0_clear_poststep       step settled, and the post-lapse rate it is
+                                    moment-matched toward over the same serves.
 
     ./.venv/bin/python3 -m ablations.recall_figures
 """
@@ -132,6 +152,20 @@ def measure():
     require("rung0_climbers" in within and "rung0_non_climbers" in within,
             "the within-user comparison reports no composition split")
 
+    # --- the era-robust matched-ratio contrast ------------------------------
+    matched = stats["matched"]
+    require(matched is not None, "the matched-ratio contrast did not run")
+    for field in ("or_all", "or_pre", "or_post", "implied_interval"):
+        require(matched.get(field) is not None,
+                f"the matched-ratio contrast reports no {field}")
+    require(matched["strata_all"] >= 100,
+            f"only {matched['strata_all']} matched strata — too thin to quote")
+    require(matched["strata_post"] >= 20,
+            f"only {matched['strata_post']} post-step matched strata")
+    require(matched["n_pre_up"] >= 500 and matched["n_post_r1"] >= 100
+            and matched["n_post_r0"] >= 500,
+            "an era-pinned rate rests on too few serves to quote")
+
     step = stats["per_user_step"]
     require(step is not None, "the per-user step decomposition did not run")
     for cut in CUTS:
@@ -164,6 +198,7 @@ def measure():
                                        - within["rung0_non_climbers"]),
         "cuts": step["cuts"],
         "density": step["density"],
+        "matched": matched,
     }
 
 
@@ -235,6 +270,30 @@ def figures():
                            cuts[cut]["direction_share"], "%.0f",
                            f"share of those users whose own odds ratio runs in the "
                            f"expected direction, at the {cut}-events cut"))
+    mm = m["matched"]
+    figs += [
+        Figure("recall.matched_ratio_or", mm["or_all"], ".2f",
+               "within-(user, matched relative-interval band) MH odds of clearing, "
+               "post-success vs post-lapse — schedule-invariant, all eras pooled"),
+        Figure("recall.matched_ratio_or_pre", mm["or_pre"], ".2f",
+               "the same contrast on serves before the first-success step entered "
+               "the schedule"),
+        Figure("recall.matched_ratio_or_post", mm["or_post"], ".2f",
+               "…and on serves after it settled"),
+        Figure("recall.matched_ratio_era_gap", abs(mm["or_pre"] - mm["or_post"]), ".2f",
+               "absolute pre/post gap of the matched contrast — the check that "
+               "stratifying removed the schedule change"),
+        Figure("recall.matched_step_interval", mm["implied_interval"], ".2f",
+               "interval multiplier the matched contrast implies at the post-lapse "
+               "operating rate"),
+        Figure("recall.rung_up_clear_prestep", mm["rung_up_clear_pre"], "%.0f",
+               "realized clear of rung >= 1 serves scheduled without the step — "
+               "the diagnosis-era anchor"),
+        Figure("recall.rung1_clear_poststep", mm["rung1_clear_post"], "%.0f",
+               "realized clear of first-rung serves since the step settled"),
+        Figure("recall.rung0_clear_poststep", mm["rung0_clear_post"], "%.0f",
+               "post-lapse clear rate over the same serves — the parity target"),
+    ]
     return figs
 
 
@@ -272,6 +331,14 @@ def main():
     d = m["density"]
     print(f"post-success rows per user  : {100 * d['none_share']:.0f}% have none, "
           f"median {d['median']:.0f}, {100 * d['twenty_plus_share']:.0f}% have 20+")
+    mm = m["matched"]
+    print(f"matched-ratio contrast      : OR {mm['or_all']:.2f} "
+          f"(pre {mm['or_pre']:.2f} / post {mm['or_post']:.2f}, "
+          f"{mm['strata_all']} strata)   implied interval x{mm['implied_interval']:.2f}")
+    print(f"era-pinned realized rates   : rung>=1 pre-step "
+          f"{100 * mm['rung_up_clear_pre']:.1f}%; post-step rung 1 "
+          f"{100 * mm['rung1_clear_post']:.1f}% vs rung 0 "
+          f"{100 * mm['rung0_clear_post']:.1f}%")
     print(f"first-step selection        : cold-solve log-odds {m['dz']:+.2f} -> "
           f"x{m['visible_stability']:.2f} of stability, "
           f"{100 * m['visible_share']:.0f}% of the x{m['parity1']:.2f} the realized "
