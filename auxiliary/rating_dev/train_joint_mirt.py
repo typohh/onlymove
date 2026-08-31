@@ -658,29 +658,46 @@ class JointMIRT:
              else g / (g.pow(2).mean(dim=0, keepdim=True).sqrt() + 1e-6))
         return b, a, c, g
 
-    def second_pass_loss(self, mode, pfeat, cfeat, prof, uid, kappa):
-        """The wrong attempt seen from the PICKED move's side.
+    def second_pass_loss(self, mode, pfeat, cfeat, prof, uid, kappa, y=None):
+        """The attempt seen from a CANDIDATE cell's side.
 
         theta and v are DETACHED throughout, so the user parameters stay
         identified purely by the ordinary (pass-1) outcomes and this term shapes
-        only the trunk and the heads. Without that, an objective whose every row
-        is a failure would push abilities down on nothing but the fact that the
-        player got the problem wrong — which pass 1 has already priced once.
+        only the trunk and the heads. Without that, an objective built out of
+        one outcome would push abilities around on nothing but the fact that the
+        player got the problem right or wrong — which pass 1 has already priced.
 
-        `censored`  the ordinary 4PL likelihood evaluated at the PICKED cell's
-                    own (b, a, c, g), against outcome 0. It says the player was
-                    beaten by THIS cell, which is strictly more than "beaten by
-                    this problem".
+        `censored`  RETIRED, kept only so the recorded run remains reproducible.
+                    The 4PL evaluated at the PICKED cell against outcome 0. Its
+                    defect is structural rather than a weight: EVERY row is a
+                    zero, so nothing counterweights pushing P down, and the trunk
+                    separates picked from correct cells too weakly for the
+                    collateral to miss pass 1. Measured at weight 1.0: a limit
+                    cycle, combined held-out 0.6249, survey rho -0.185.
 
-        `selection` Bradley-Terry, picked over correct: the player chose the
-                    picked cell out of the two, so the axis contrast
-                    v . (g_picked - g_correct) plus a difficulty term should
-                    favour it. Both cells go through ONE call so they share the
-                    axis divisor and are on one scale. THE EXACT FORM IS A FIRST
-                    CUT — the difficulty coefficient kappa is fixed rather than
-                    fitted, and a two-alternative Luce model over the answer and
-                    one played cell is the simplest reading of a choice that was
-                    really made over every legal point.
+        `selection` RETIRED, same reason one level up. Bradley-Terry picked-over-
+                    correct with a FIXED kappa, and still one-sided — every row
+                    says "the player chose the wrong cell", never "the player
+                    declined it". Measured on fold 0: combined 0.5319 against the
+                    none-control's 0.5040, axis adds exactly 0.0000 (the loadings
+                    degenerated), survey rho -0.2201.
+
+        `two-sided` THE SUCCESSOR, and the difference is the negative rows. A
+                    correct attempt is evidence too: the player was offered the
+                    same wrong cells and did NOT take one. So a correct training
+                    attempt on a problem with recorded wrong picks enters as an
+                    outcome-0 row against ONE wrong cell sampled by how often the
+                    population really picked it, and the wrong attempts stay as
+                    outcome-1 rows. Now the term can be satisfied by DISCRIMINATING
+                    rather than by pushing every candidate down, which is exactly
+                    what the two retired forms could not do.
+
+                    The score is  s_u(x) = v_u . g_x - theta_u * b_x,  so the
+                    difficulty coefficient is the USER'S OWN ABILITY rather than
+                    a fixed constant: a stronger player is more repelled by a
+                    cell the model prices as hard, which is the thing kappa was
+                    standing in for. Both cells go through ONE call, so they
+                    share the axis divisor and sit on one scale.
         """
         torch = self.torch
         th = self.theta(prof).squeeze(-1).detach()
@@ -699,6 +716,16 @@ class JointMIRT:
             s = (((g_[:n] - g_[n:]) * vu).sum(-1)
                  + kappa * (b_[n:] - b_[:n])).clamp(-35, 35)
             return torch.nn.functional.softplus(-s).mean()
+        if mode == "two-sided":
+            if y is None:
+                raise ValueError("two-sided needs per-row outcomes")
+            n = pfeat.shape[0]
+            b_, _a, _c, g_ = self.cell_params(torch.cat([pfeat, cfeat], dim=0))
+            s_cand = (g_[:n] * vu).sum(-1) - th * b_[:n]
+            s_corr = (g_[n:] * vu).sum(-1) - th * b_[n:]
+            p = torch.sigmoid((s_cand - s_corr).clamp(-35, 35)).clamp(
+                EPS, 1 - EPS)
+            return torch.nn.functional.binary_cross_entropy(p, y)
         raise ValueError(f"unknown second-pass mode {mode!r}")
 
     def forward(self, prof, uid, feat):
@@ -1166,9 +1193,14 @@ def main():
                          "activation block ends. Every arm keeps the size flag "
                          "outside the dropout region, so INPUT_DROPOUT masks the "
                          "same fraction of what each is given.")
-    ap.add_argument("--second-pass", choices=("none", "censored", "selection"),
+    ap.add_argument("--second-pass",
+                    choices=("none", "censored", "selection", "two-sided"),
                     default="none",
-                    help="present every WRONG first-time attempt to the network a "
+                    help="TWO-SIDED IS THE LIVE ARM; `censored` and `selection` "
+                         "are RETIRED and kept only so their recorded runs stay "
+                         "reproducible (both measured worse than the none "
+                         "control on fold 0 — see JointMIRT.second_pass_loss). "
+                         "present every WRONG first-time attempt to the network a "
                          "SECOND time, from the PICKED move's perspective: the "
                          "trunk is fed that cell's activation vector beside the "
                          "SAME problem tail, producing the cell's own (b, a, c, "
@@ -1184,8 +1216,17 @@ def main():
                          "picked-over-correct term. `none` (default) is exactly "
                          "today's model — no extra rows, no extra RNG draws, so "
                          "it is bit-compatible with runs predating the flag. "
-                         "Correct attempts are never doubled: there the two "
-                         "perspectives are the same cell.")
+                         "Under the two RETIRED forms correct attempts are never "
+                         "doubled — there the two perspectives are the same "
+                         "cell — and that one-sidedness is what killed them: "
+                         "every row said the player took a wrong cell and none "
+                         "said they declined one, so the term was satisfiable by "
+                         "pushing all candidates down rather than by telling them "
+                         "apart. `two-sided` adds the declining rows: a correct "
+                         "attempt on a problem with recorded wrong picks enters "
+                         "as an outcome-0 row against ONE wrong cell drawn by "
+                         "population pick-count (seeded on the MODEL SEED, so "
+                         "seeds differ in their counterfactuals too).")
     ap.add_argument("--second-pass-weight", type=float, default=1.0,
                     help="multiplier on the second-pass term. It is a separate "
                          "additive loss and enters NOTHING else — not the stop "
@@ -1521,6 +1562,7 @@ def main():
     # (utils.rating.features.load_joint_blocks).
     pick_pair = None            # per prof_df row -> pair id; -1 = no second pass
     pick_feat_t = None          # (n_pairs, fdim) the picked cells' trunk inputs
+    pick_cands = None           # problem row -> (pair ids, cumulative pick weight)
     if args.second_pass != "none":
         from utils.rating.features import (
             load_first_time_picks, load_joint_picked_activations,
@@ -1544,7 +1586,7 @@ def main():
                 f"a row it does not fit inside")
         prof_arr = prof_df["profile"].astype(str).to_numpy()
         prob_arr = prof_df["problem"].astype(str).to_numpy()
-        pair_id, pair_rows = {}, []
+        pair_id, pair_rows, cand_count = {}, [], {}
         pick_pair = np.full(len(prof_df), -1, np.int64)
         n_nomove = n_answer = n_noembed = n_nonpz = 0
         wrong = (y == 0) & tr_rows
@@ -1574,6 +1616,9 @@ def main():
                 row[:k_pick] = vec
                 pair_rows.append(row)
             pick_pair[i] = j
+            cand_count.setdefault(int(prob_idx[i]), {})
+            cand_count[int(prob_idx[i])][j] = \
+                cand_count[int(prob_idx[i])].get(j, 0) + 1
         pick_feat_t = torch.tensor(np.asarray(pair_rows, dtype=np.float32),
                                    device=device)
         print(f"  SECOND PASS {args.second_pass} (weight "
@@ -1584,6 +1629,45 @@ def main():
               f"{n_answer} that played the answer (no contrast), {n_noembed} "
               f"whose cell is not embedded, {n_nonpz} with no activation file",
               flush=True)
+        if args.second_pass == "two-sided":
+            # THE NEGATIVE ROWS' SAMPLING POOL, per problem: which wrong cells
+            # this problem drew and how often. Counted over TRAINING rows only —
+            # the loop above never visits any other row — because a held-out
+            # user's choice must not decide which counterfactual cell a training
+            # row is scored against either. That is the same rule as the pair
+            # table's, and it has to reach the WEIGHTS, not just the membership.
+            pick_cands = {}
+            for pi, d in cand_count.items():
+                ids = np.fromiter(d.keys(), np.int64, len(d))
+                w = np.fromiter(d.values(), np.float64, len(d))
+                pick_cands[pi] = (ids, np.cumsum(w / w.sum()))
+            n_corr_rows = int(((y == 1) & tr_rows).sum())
+            n_corr_ok = int(sum(1 for i in np.flatnonzero((y == 1) & tr_rows)
+                                if int(prob_idx[i]) in pick_cands))
+            n_pos = int((pick_pair >= 0).sum())
+            q1 = n_pos / max(n_corr_ok + n_pos, 1)
+            base = -(q1 * np.log(max(q1, EPS))
+                     + (1 - q1) * np.log(max(1 - q1, EPS)))
+            print(f"    two-sided negatives: {n_corr_ok} of {n_corr_rows} "
+                  f"correct TRAINING rows sit on a problem with >=1 recorded "
+                  f"wrong pick ({n_corr_rows - n_corr_ok} have none, so the "
+                  f"attempt contributes nothing)", flush=True)
+            # TWO REFERENCE LINES, and the higher one is the real one. The score
+            # is a DIFFERENCE of two cells' scores, so it carries no intercept:
+            # at s_cand = s_corr every row predicts 0.5 and the loss is exactly
+            # log 2, which is where an untrained fit sits. The base-rate figure
+            # below it is what a model WITH a free bias could score by learning
+            # the mix and nothing else — unreachable here by construction. So
+            # log 2 is the no-skill point to beat, and every mnat under it is
+            # discrimination rather than calibration. Printing only the base rate
+            # would set a bar this form cannot clear by shifting and make a
+            # healthy run look stuck above it.
+            print(f"    pass-2 outcome mix: {n_pos} outcome-1 (played the cell) "
+                  f"/ {n_corr_ok} outcome-0 (declined it) = {q1:.1%} positive. "
+                  f"NO-SKILL = {np.log(2.0):.4f} (the form is a score DIFFERENCE, "
+                  f"so it has no intercept and cannot shift toward the mix); "
+                  f"base-rate {base:.4f} is what a free bias would buy and is "
+                  f"NOT reachable here", flush=True)
 
     # --- THE TWO-STAGE AXIS REFERENCE, BUILT ON FIRST USE. It carries the
     # feature matrix the EIGEN warm start is derived from, the tid index the
@@ -1818,16 +1902,39 @@ def main():
         # already tr_rows minus the axis fold, so re-deriving the pointer from it
         # rather than from tr_rows means an --axis-holdout-fold run cannot reach
         # an excluded user's picks through the second term either.
-        pick_t = p2_rows_t = p2_pairs_t = None
+        pick_t = pick_y_t = p2_rows_t = p2_pairs_t = p2_y_t = None
         if pick_pair is not None:
             keep = np.zeros(len(prof_df), bool)
             keep[tr_eff.cpu().numpy()] = True
             pp = np.where(keep, pick_pair, -1)
+            py = np.ones(len(prof_df), np.float32)
+            if args.second_pass == "two-sided":
+                # THE NEGATIVE ROWS, drawn HERE rather than beside the pair
+                # table because the draw is keyed on the MODEL SEED: two seeds
+                # are meant to differ in their counterfactuals as well as in
+                # their initialisation, and a draw taken once outside the loop
+                # would hand every seed the same one and understate the spread.
+                rng2 = np.random.default_rng(seed)
+                corr_rows = np.flatnonzero(keep & (y == 1))
+                u = rng2.random(len(corr_rows))
+                n_neg = 0
+                for j_, i in enumerate(corr_rows):
+                    c = pick_cands.get(int(prob_idx[i]))
+                    if c is None:
+                        continue        # nobody ever failed this problem
+                    ids, cum = c
+                    pp[i] = ids[int(np.searchsorted(cum, u[j_], side="right"))]
+                    py[i] = 0.0
+                    n_neg += 1
+                print(f"  two-sided seed {seed}: {n_neg} negative rows sampled "
+                      f"by pick-count weight", flush=True)
             _p2 = np.flatnonzero(pp >= 0)
             if len(_p2):
                 pick_t = torch.tensor(pp, device=device)
+                pick_y_t = torch.tensor(py, device=device)
                 p2_rows_t = torch.tensor(_p2, device=device)
                 p2_pairs_t = torch.tensor(pp[_p2], device=device)
+                p2_y_t = torch.tensor(py[_p2], device=device)
             else:
                 # No usable pick survives this fit's row mask, so there is no
                 # second pass to run. Left as None rather than as empty tensors:
@@ -2044,7 +2151,8 @@ def main():
                         bi2 = bi[sel]
                         loss = loss + args.second_pass_weight * m.second_pass_loss(
                             args.second_pass, pick_feat_t[pj[sel]],
-                            tfeat[tp[bi2]], tprof[bi2], tu[bi2], SELECTION_KAPPA)
+                            tfeat[tp[bi2]], tprof[bi2], tu[bi2], SELECTION_KAPPA,
+                            y=pick_y_t[bi2])
                 # divergence barrier, over the corpus with dropout off
                 if not args.no_barriers:
                   m.train(False)
@@ -2130,7 +2238,7 @@ def main():
                         _l2 = float(m.second_pass_loss(
                             args.second_pass, pick_feat_t[p2_pairs_t],
                             tfeat[tp[p2_rows_t]], tprof[p2_rows_t],
-                            tu[p2_rows_t], SELECTION_KAPPA))
+                            tu[p2_rows_t], SELECTION_KAPPA, y=p2_y_t))
                     print(f"    pass2[{args.second_pass}] {_l2:.4f}  "
                           f"[{len(p2_rows_t)} rows, weight "
                           f"{args.second_pass_weight}]", flush=True)
