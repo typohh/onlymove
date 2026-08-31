@@ -52,6 +52,25 @@ _KEY_RE = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$")
 _SUFFIX_LOOKALIKES = {"js", "mjs", "py", "json", "npz", "csv", "sql", "cfg", "sgf", "txt"}
 SPAN_RE = re.compile(r'<span data-fig="([a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+)">([^<]*)</span>')
 
+# A GUARD is an invisible assertion a document places beside a sentence whose
+# wording depends on a figure staying inside a range without quoting it — "and
+# nothing else", "a handful", "on N of the K axes". A span keeps a quoted number
+# current; a guard is for the prose around it, which no rewriter can fix, so a
+# violated guard fails the run and the build until a person rewrites the sentence.
+# Syntax, as an HTML comment adjacent to the claim:
+#     <!-- fig-guard: KEY OP NUMBER -->        e.g.  some.count == 0
+#     <!-- fig-guard: NUMBER OP KEY OP NUMBER -->    e.g.  0.5 <= some.share <= 0.9
+# OP is one of == != < <= > >=, evaluated against the ledger's RAW value.
+# `pwa/scripts/figures-check.mjs` evaluates the same grammar at build time, and
+# the methodology page generator strips the comments before publishing.
+GUARD_RE = re.compile(r"<!--\s*fig-guard:\s*(.*?)\s*-->")
+_G_NUM = r"-?\d+(?:\.\d+)?"
+_G_OP = r"==|!=|<=|>=|<|>"
+_G_KEY = r"[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+"
+_GUARD_EXPR_RE = re.compile(
+    rf"^(?:(?P<lo>{_G_NUM})\s*(?P<lop>{_G_OP})\s*)?(?P<key>{_G_KEY})\s*"
+    rf"(?:(?P<rop>{_G_OP})\s*(?P<hi>{_G_NUM}))?$")
+
 
 class AblationError(RuntimeError):
     """A producer met something it did not expect. Never caught inside this package."""
@@ -248,6 +267,49 @@ def check_documents(ledger):
             if problem not in problems:       # one line per (document, key), not per language block
                 problems.append(problem)
     require(not problems, "documents disagree with the ledger:\n  " + "\n  ".join(problems))
+    return n
+
+
+_OPS = {
+    "==": lambda a, b: a == b, "!=": lambda a, b: a != b,
+    "<": lambda a, b: a < b, "<=": lambda a, b: a <= b,
+    ">": lambda a, b: a > b, ">=": lambda a, b: a >= b,
+}
+
+
+def eval_guard(expr, entries):
+    """One guard expression against the ledger's raw values. Returns the failure
+    as a string, or None when the guard holds. A malformed expression or an
+    unledgered key is itself a failure — a guard nobody can evaluate guards nothing."""
+    m = _GUARD_EXPR_RE.match(expr)
+    if m is None or (m.group("lop") is None and m.group("rop") is None):
+        return f"unparseable guard {expr!r}"
+    key = m.group("key")
+    if key not in entries:
+        return f"guard {expr!r}: {key} has no ledger entry"
+    value = entries[key]["value"]
+    if m.group("lop") is not None and not _OPS[m.group("lop")](float(m.group("lo")), value):
+        return f"guard {expr!r} violated: {key} is {value}"
+    if m.group("rop") is not None and not _OPS[m.group("rop")](value, float(m.group("hi"))):
+        return f"guard {expr!r} violated: {key} is {value}"
+    return None
+
+
+def check_guards(ledger):
+    """Every fig-guard in every document holds against the ledger. Returns the
+    number of guards checked; raises listing every violation at once. Evaluation
+    reads the LEDGER only — never a producer — so this is as cheap as the span
+    check regardless of what tier the guarded figure comes from."""
+    entries = ledger["figures"]
+    problems, n = [], 0
+    for doc_rel in DOCUMENTS:
+        _, text = _scan(doc_rel)
+        for m in GUARD_RE.finditer(text):
+            n += 1
+            problem = eval_guard(m.group(1), entries)
+            if problem is not None:
+                problems.append(f"{doc_rel}: {problem} — rewrite the sentence beside it")
+    require(not problems, "document claims disagree with the ledger:\n  " + "\n  ".join(problems))
     return n
 
 

@@ -36,6 +36,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 from ablations._figures import Figure, require  # noqa: E402
+from utils.rating.fit_rank_curves import FLOOR_MAX  # noqa: E402
 from utils.rating.model_constants import CALIBRATION_P, SLOPE_FLOOR  # noqa: E402
 from utils.rating.ratings_io import apply_M, load_M, read_problem_params  # noqa: E402
 
@@ -67,6 +68,12 @@ def measure():
 
     above = p["floor"] > CALIBRATION_P
     near = (p["floor"] >= NEAR_CALIBRATION_LO) & ~above
+    # The client clamps floors at FLOOR_MAX, just under the calibration
+    # probability, to keep the response curve's offset finite. A floor in
+    # (FLOOR_MAX, CALIBRATION_P] is clamped despite its rating being perfectly
+    # defined — the case the "catches the sentinel problems and nothing else"
+    # claim asserts empty, which only holds while this count is zero.
+    between = (p["floor"] > FLOOR_MAX) & ~above
     m_ratings, m_internal = load_M(TSUMEGOS_DIR)
     require(len(m_ratings) >= 2, "the published rating→rank curve has too few knots")
     ranks = np.array([apply_M(x, m_ratings, m_internal) for x in p["rating"][above]]) \
@@ -77,6 +84,7 @@ def measure():
         "floor_p999": float(np.percentile(p["floor"], 99.9)),
         "n_above": int(above.sum()),
         "n_near": int(near.sum()),
+        "n_between_clamp": int(between.sum()),
         "rank_weakest": float(ranks.min()) if ranks.size else float("nan"),
         "rank_strongest": float(ranks.max()) if ranks.size else float("nan"),
         "slope_min": float(p["slope"].min()),
@@ -98,6 +106,10 @@ def figures():
         Figure("published.floor_near_calibration", m["n_near"], "d",
                f"published problems with a floor in [{NEAR_CALIBRATION_LO}, {CALIBRATION_P}] — "
                f"the approach band, below the threshold"),
+        Figure("published.floor_between_clamp_and_calibration", m["n_between_clamp"], "d",
+               f"published problems with a floor in ({FLOOR_MAX}, {CALIBRATION_P}] — clamped "
+               f"by the client despite a defined rating; the clamp catches only the "
+               f"sentinel problems exactly while this is zero"),
         Figure("published.slope_min", m["slope_min"], ".2f",
                "smallest published discrimination slope"),
     ]
@@ -123,6 +135,8 @@ def main():
     print(f"\nfloor vs the {CALIBRATION_P} calibration probability")
     print(f"{'in [' + str(NEAR_CALIBRATION_LO) + ', ' + str(CALIBRATION_P) + ']':>26}"
           f"{m['n_near']:>10,d}   approaching, rating still defined")
+    print(f"{'in (' + str(FLOOR_MAX) + ', ' + str(CALIBRATION_P) + ']':>26}"
+          f"{m['n_between_clamp']:>10,d}   clamped by the client with a defined rating")
     print(f"{'above it':>26}{m['n_above']:>10,d}   rating is a SENTINEL "
           f"(epsilon clip), landing at "
           f"{value_to_rank(m['rank_weakest'])}..{value_to_rank(m['rank_strongest'])}")

@@ -1,5 +1,33 @@
 {
   "figures": {
+    "corpus.expected_id_collisions": {
+      "value": 5.658216996351257,
+      "fmt": ".0f",
+      "text": "6",
+      "producer": "ablations.corpus_figures",
+      "tier": "about",
+      "note": "expected accidental id collisions among the published problems, n(n-1)/2^33 — each one a silently discarded candidate, never a corrupted record",
+      "measured": {
+        "at": "2026-08-31T19:09:37Z",
+        "git": "45f9496126c+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "corpus.id_rejection_odds": {
+      "value": 19481.578750175766,
+      "fmt": "~1000",
+      "text": "19,000",
+      "producer": "ablations.corpus_figures",
+      "tier": "about",
+      "note": "one-in-N odds that a fresh candidate's id is already taken, 2^32/n",
+      "measured": {
+        "at": "2026-08-31T19:09:37Z",
+        "git": "45f9496126c+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
     "corpus.problems_13": {
       "value": 113541,
       "fmt": "~1000",
@@ -8,8 +36,8 @@
       "tier": "about",
       "note": "published 13×13 problems, to the nearest thousand",
       "measured": {
-        "at": "2026-08-31T14:31:39Z",
-        "git": "364dc15c126+dirty",
+        "at": "2026-08-31T19:09:37Z",
+        "git": "45f9496126c+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -22,8 +50,8 @@
       "tier": "about",
       "note": "published 9×9 problems, to the nearest thousand",
       "measured": {
-        "at": "2026-08-31T14:31:39Z",
-        "git": "364dc15c126+dirty",
+        "at": "2026-08-31T19:09:37Z",
+        "git": "45f9496126c+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -36,8 +64,78 @@
       "tier": "about",
       "note": "problems in the published index, to the nearest thousand",
       "measured": {
-        "at": "2026-08-31T14:31:39Z",
-        "git": "364dc15c126+dirty",
+        "at": "2026-08-31T19:09:37Z",
+        "git": "45f9496126c+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "motif.fixed_null_worst_flag_pct": {
+      "value": 0.7794759825327511,
+      "fmt": "%.0f",
+      "text": "78",
+      "producer": "ablations.motif_null_figures",
+      "tier": "methodology",
+      "note": "share of testable users the retired fixed-50% test flags on that axis",
+      "measured": {
+        "at": "2026-08-31T19:15:06Z",
+        "git": "45f9496126c+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "motif.menu_worst_toward_pct": {
+      "value": 0.6736851601779507,
+      "fmt": "%.0f",
+      "text": "67",
+      "producer": "ablations.motif_null_figures",
+      "tier": "methodology",
+      "note": "toward-side share of offered-alternative weight on the most menu-skewed axis (yose)",
+      "measured": {
+        "at": "2026-08-31T19:15:06Z",
+        "git": "45f9496126c+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "motif.null_axes_measured": {
+      "value": 7,
+      "fmt": "d",
+      "text": "7",
+      "producer": "ablations.motif_null_figures",
+      "tier": "methodology",
+      "note": "shipped axes the availability-null measurement runs over",
+      "measured": {
+        "at": "2026-08-31T19:15:06Z",
+        "git": "45f9496126c+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "motif.null_sign_reversals": {
+      "value": 5,
+      "fmt": "d",
+      "text": "5",
+      "producer": "ablations.motif_null_figures",
+      "tier": "methodology",
+      "note": "axes whose population error lean changes sign between the fixed even split and the shipped visits-linear availability null",
+      "measured": {
+        "at": "2026-08-31T19:15:06Z",
+        "git": "45f9496126c+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "motif.shipped_null_worst_flag_pct": {
+      "value": 0.4170305676855895,
+      "fmt": "%.0f",
+      "text": "42",
+      "producer": "ablations.motif_null_figures",
+      "tier": "methodology",
+      "note": "share of testable users the shipped null's test flags on that axis",
+      "measured": {
+        "at": "2026-08-31T19:15:06Z",
+        "git": "45f9496126c+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -50,38 +148,52 @@
       "tier": "methodology",
       "note": "published problems whose floor exceeds the calibration probability 0.8, so their rating is a sentinel rather than an 80%-clear point",
       "measured": {
-        "at": "2026-08-31T13:53:54Z",
-        "git": "6c92e8b5d18+dirty",
+        "at": "2026-08-31T19:09:46Z",
+        "git": "45f9496126c+dirty",
         "db_max_id": 457114,
-        "data_version": "d0cb02d7066a787e"
+        "data_version": "f6fba7b749bc0ecb"
       }
     },
     "published.floor_above_calibration_rank_strongest": {
-      "value": -14.199644052069761,
+      "value": -14.11826601867854,
       "fmt": "rank",
       "text": "15k",
       "producer": "ablations.published_params_figures",
       "tier": "methodology",
       "note": "strongest rank a sentinel rating maps to",
       "measured": {
-        "at": "2026-08-31T13:53:54Z",
-        "git": "6c92e8b5d18+dirty",
+        "at": "2026-08-31T19:09:46Z",
+        "git": "45f9496126c+dirty",
         "db_max_id": 457114,
-        "data_version": "d0cb02d7066a787e"
+        "data_version": "f6fba7b749bc0ecb"
       }
     },
     "published.floor_above_calibration_rank_weakest": {
-      "value": -44.53513846676701,
+      "value": -45.44583790056497,
       "fmt": "rank",
-      "text": "45k",
+      "text": "46k",
       "producer": "ablations.published_params_figures",
       "tier": "methodology",
       "note": "weakest rank a sentinel rating maps to through the published curve",
       "measured": {
-        "at": "2026-08-31T13:53:54Z",
-        "git": "6c92e8b5d18+dirty",
+        "at": "2026-08-31T19:09:46Z",
+        "git": "45f9496126c+dirty",
         "db_max_id": 457114,
-        "data_version": "d0cb02d7066a787e"
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "published.floor_between_clamp_and_calibration": {
+      "value": 0,
+      "fmt": "d",
+      "text": "0",
+      "producer": "ablations.published_params_figures",
+      "tier": "methodology",
+      "note": "published problems with a floor in (0.78, 0.8] — clamped by the client despite a defined rating; the clamp catches only the sentinel problems exactly while this is zero",
+      "measured": {
+        "at": "2026-08-31T19:09:46Z",
+        "git": "45f9496126c+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
       }
     },
     "published.floor_max": {
@@ -92,10 +204,10 @@
       "tier": "methodology",
       "note": "largest guessing floor among the published problems",
       "measured": {
-        "at": "2026-08-31T13:53:54Z",
-        "git": "6c92e8b5d18+dirty",
+        "at": "2026-08-31T19:09:46Z",
+        "git": "45f9496126c+dirty",
         "db_max_id": 457114,
-        "data_version": "d0cb02d7066a787e"
+        "data_version": "f6fba7b749bc0ecb"
       }
     },
     "published.floor_near_calibration": {
@@ -106,10 +218,10 @@
       "tier": "methodology",
       "note": "published problems with a floor in [0.75, 0.8] — the approach band, below the threshold",
       "measured": {
-        "at": "2026-08-31T13:53:54Z",
-        "git": "6c92e8b5d18+dirty",
+        "at": "2026-08-31T19:09:46Z",
+        "git": "45f9496126c+dirty",
         "db_max_id": 457114,
-        "data_version": "d0cb02d7066a787e"
+        "data_version": "f6fba7b749bc0ecb"
       }
     },
     "published.floor_p999": {
@@ -120,10 +232,10 @@
       "tier": "methodology",
       "note": "guessing floor at the 99.9th percentile of the published set",
       "measured": {
-        "at": "2026-08-31T13:53:54Z",
-        "git": "6c92e8b5d18+dirty",
+        "at": "2026-08-31T19:09:46Z",
+        "git": "45f9496126c+dirty",
         "db_max_id": 457114,
-        "data_version": "d0cb02d7066a787e"
+        "data_version": "f6fba7b749bc0ecb"
       }
     },
     "published.slope_min": {
@@ -134,10 +246,10 @@
       "tier": "methodology",
       "note": "smallest published discrimination slope",
       "measured": {
-        "at": "2026-08-31T13:53:54Z",
-        "git": "6c92e8b5d18+dirty",
+        "at": "2026-08-31T19:09:46Z",
+        "git": "45f9496126c+dirty",
         "db_max_id": 457114,
-        "data_version": "d0cb02d7066a787e"
+        "data_version": "f6fba7b749bc0ecb"
       }
     },
     "rank.declarations_screened": {

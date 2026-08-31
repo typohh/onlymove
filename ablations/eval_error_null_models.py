@@ -2,18 +2,20 @@
 """Which wrong variation does a user pick, given that they erred?
 
 The client's motif TENDENCY reading (pwa/js/motif-stats.js) is a sign test of the
-picked variation's axis loading against the correct one's, against the UNIFORM
-AVAILABILITY NULL: uniform over the alternatives the board offered, per problem,
-parameter-free. That null assumes an erring user is equally likely to land on any
-alternative -- which ignores that a decision node's wrong moves are not equally
-tempting. This script measures the alternative: the same per-problem null WEIGHTED
-by how good (and how deeply searched) each wrong move is.
+picked variation's axis loading against the correct one's, against the
+AVAILABILITY NULL — per problem, parameter-free, and SHIPPED in its VISITS-LINEAR
+form: each alternative weighted by the search depth behind its own evaluation
+(CLAUDE.md, docs/methodology.md §2.9). This script is the measurement behind that
+choice. Column 0 everywhere below is the UNWEIGHTED variant — uniform over the
+alternatives the board offered — kept as the reference arm the weighted panel is
+scored against, because it is the obvious first construction and the deltas read
+naturally off it; `visits-lin` is the column that ships.
 
 Phase 1 asks the empirical question underneath it: given an error on a problem,
 how well does each candidate null predict WHICH wrong variation was picked?
 Phase 2 carries a fixed panel of them through to the directional statistic the
 client computes, and to the per-user flags it prints -- observed against the
-SHIPPED uniform-availability null and against the weighted ones, side by side.
+uniform reference arm and against the weighted ones, side by side.
 (The fixed-50% null the client used before the availability null shipped
 survives only as a footnote here.)
 
@@ -85,7 +87,8 @@ MOTIF_Z = 1.0
 MIN_ERRORS = 10
 
 # The nulls phase 2 carries, as (column tag, build_models name). The uniform
-# availability null -- what ships -- is column 0 always and is not listed here.
+# availability null -- the unweighted reference arm -- is column 0 always and is
+# not listed here; `visits-lin` in this panel is the null the client ships.
 # NAMED, not selected by phase 1: phase 2 asks which null predicts the DIRECTION
 # of an error, which is a different question from which move gets picked, and a
 # panel chosen by the first question could not disagree with it. The three
@@ -578,8 +581,8 @@ def parse_args(argv=None):
     return args
 
 
-def main():
-    args = parse_args()
+def main(argv=None):
+    args = parse_args(argv)
     print("=" * 78)
     print("Error-null model evaluation: which wrong variation gets picked?")
     print("=" * 78)
@@ -860,8 +863,8 @@ def main():
             raise SystemExit(f"phase 2 panel names {name!r}, which build_models "
                              f"does not define")
         arms.append((tag, name, np.exp(heldout_logp[name])))
-    phase2(prob_keys, problems, arms, offsets, sizes, counts, gtp_all, matched,
-           args)
+    return phase2(prob_keys, problems, arms, offsets, sizes, counts, gtp_all,
+                  matched, args)
 
 
 def _subgroup(mask, offsets, sizes):
@@ -968,8 +971,12 @@ def phase2(prob_keys, problems, arms, offsets, sizes, counts, gtp_all, matched,
     """Carry the candidate nulls through to the statistic the client prints.
 
     `arms` is [(tag, model name, per-row probability)] for the WEIGHTED nulls;
-    the uniform-availability null (what ships) is always the first column and
-    the reference every residual and every flag delta is taken against.
+    the uniform-availability null is always the first column and the reference
+    every residual and every flag delta is taken against — the reference arm,
+    not what ships: the client ships the visits-linear column.
+
+    Returns the per-axis statistics the figure producer reads
+    (ablations.motif_null_figures); everything else is the printed record.
     """
     print("\n" + "=" * 78)
     print("PHASE 2 -- directional (toward-the-motif) share per axis")
@@ -983,7 +990,7 @@ def phase2(prob_keys, problems, arms, offsets, sizes, counts, gtp_all, matched,
            else FittedCells(K, args.model, args.features))
     print(f"per-cell axis source: {src.source}")
 
-    # Null column 0 is ALWAYS the shipped uniform-availability null.
+    # Null column 0 is ALWAYS the uniform reference arm.
     tags = ["uniform"] + [t for t, _, _ in arms]
     names = ["uniform over the alternatives offered"] + [n for _, n, _ in arms]
     row_p = [None] + [p for _, _, p in arms]
@@ -1175,7 +1182,7 @@ def phase2(prob_keys, problems, arms, offsets, sizes, counts, gtp_all, matched,
         f = ok & (np.abs(z) > MOTIF_Z)
         tested += ok
         flag += f
-        # Everything is measured against null 0, the shipped uniform one.
+        # Everything is measured against null 0, the uniform reference arm.
         for j in range(1, n_null):
             both = f[0] & f[j]
             lost[j] += f[0] & ~f[j]
@@ -1203,13 +1210,21 @@ def phase2(prob_keys, problems, arms, offsets, sizes, counts, gtp_all, matched,
                   f"{int(flag[j, k]):>9,} ({100 * flag[j, k] / t:4.1f}%)"
                   f"{deltas}")
     print("\n'lost'/'gained'/'sign flip' are all against that axis' 'uniform' row --\n"
-          "the null the client ships. FOOTNOTE: the retired fixed-50% test would\n"
-          "flag "
+          "the unweighted reference arm; 'visits-lin' is the null the client\n"
+          "ships. FOOTNOTE: the retired fixed-50% test would flag "
           + ", ".join(f"{labels[k]}={int(flag_legacy[k]):,}" for k in range(K))
           + ".")
 
     phase2b(labels, tags, names, prob_p, row_pidx, row_toward, row_nontie,
             counts, nprob, K)
+
+    return {
+        "labels": labels, "tags": tags,
+        "obs": obs, "pnull": pnull,                 # (K,), (n_null, K)
+        "tested": tested, "flag": flag,             # (n_null, K) user counts
+        "flag_legacy": flag_legacy,                 # (K,) fixed-50% flags, on tested[0]
+        "n_users": n_users,
+    }
 
 
 def phase2b(labels, tags, names, prob_p, row_pidx, row_toward, row_nontie,
@@ -1318,7 +1333,8 @@ def phase2b(labels, tags, names, prob_p, row_pidx, row_toward, row_nontie,
     print("\nEach row scores one null on the binary outcome the tendency test "
           "actually\nconsumes: did this error land ABOVE the answer on this "
           "axis, against that\nnull's p for this problem. delta < 0 = better "
-          "than the uniform availability\nnull the client ships; the interval "
+          "than the uniform availability\nnull, the unweighted reference arm "
+          "('visits-lin' is what ships); the interval "
           "is a paired bootstrap over PROBLEMS,\nthe same resample for every "
           "null. 'clip%' is the share of scored errors whose\np hit the "
           f"{EPS_WR:g} floor or ceiling -- a one-sided menu -- and is a "

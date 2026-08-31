@@ -69,6 +69,17 @@ def figures():
     for size in sorted(m["by_size"]):
         figs.append(Figure(f"corpus.problems_{size}", m["by_size"][size], "~1000",
                            f"published {size}×{size} problems, to the nearest thousand"))
+    # The truncated-id arithmetic at the corpus's current size: ids are the leading
+    # 32 bits of the canonical hash, so distinct positions collide at the birthday
+    # rate. Pure functions of the count, emitted so the sentences quoting them
+    # move with it.
+    n = m["total"]
+    figs.append(Figure("corpus.expected_id_collisions", n * (n - 1) / 2**33, ".0f",
+                       "expected accidental id collisions among the published problems, "
+                       "n(n-1)/2^33 — each one a silently discarded candidate, "
+                       "never a corrupted record"))
+    figs.append(Figure("corpus.id_rejection_odds", 2**32 / n, "~1000",
+                       "one-in-N odds that a fresh candidate's id is already taken, 2^32/n"))
     return figs
 
 

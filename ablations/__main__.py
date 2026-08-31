@@ -23,8 +23,8 @@ import importlib
 import sys
 
 from ablations._figures import (
-    TIERS, check_documents, keys_in_documents, load_ledger, save_ledger,
-    snapshot, sync_documents, update_ledger)
+    AblationError, TIERS, check_documents, check_guards, keys_in_documents,
+    load_ledger, save_ledger, snapshot, sync_documents, update_ledger)
 
 # Module name (under ablations.) in run order. The module's own TIER decides
 # whether a `--tier` run includes it.
@@ -32,6 +32,7 @@ PRODUCERS = (
     "corpus_figures",
     "rank_calibration_figures",
     "published_params_figures",
+    "motif_null_figures",
 )
 
 
@@ -71,8 +72,14 @@ def main(argv=None):
         return 0
 
     if args.check:
-        n = check_documents(load_ledger())
-        print(f"{n} figure spans agree with the ledger")
+        ledger = load_ledger()
+        try:
+            n = check_documents(ledger)
+            g = check_guards(ledger)
+        except AblationError as e:
+            print(e, file=sys.stderr)
+            return 1
+        print(f"{n} figure spans agree with the ledger; {g} claim guards hold")
         return 0
 
     if not (args.tier or args.only):
@@ -121,6 +128,15 @@ def main(argv=None):
         print(f"  {doc:<22} {key:<34} {old:>12} -> {new}" + (f"   (×{n})" if n > 1 else ""))
     if edits:
         print("\nReview the sentences around each rewritten span before committing.")
+
+    # Guards last: the ledger and the spans are already written — the measurement
+    # is real either way — so a violated guard is a sentence that no longer
+    # matches what was measured, and the person re-running is told to fix it.
+    try:
+        check_guards(ledger)
+    except AblationError as e:
+        print(f"\n{e}", file=sys.stderr)
+        return 1
     return 0
 
 

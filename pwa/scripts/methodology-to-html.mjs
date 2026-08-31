@@ -366,6 +366,14 @@ export async function buildMethodologyPage(distDir) {
     lines = stripFrom(lines, DROP_FROM);
     for (const text of DROP_LINES) lines = stripLine(lines, text);
 
+    // Claim guards (`<!-- fig-guard: … -->`, see pwa/scripts/figures-check.mjs) are
+    // build-time assertions, not content: remove them, and drop outright a line
+    // that held nothing else, so no empty paragraph reaches the page.
+    lines = lines.flatMap((line) => {
+        const cleaned = line.replace(/<!--\s*fig-guard:.*?-->/g, '').trimEnd();
+        return cleaned === '' && line.trim() !== '' ? [] : [cleaned];
+    });
+
     checkScope(lines);
 
     // Trim the separator and blank lines the chapter-3 cut leaves dangling.
