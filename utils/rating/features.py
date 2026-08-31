@@ -1143,9 +1143,9 @@ def load_joint_continuation(sizes, tids_by_size):
 # docs/methodology.md, and they are what the MOTIF RULES are written over
 # (utils.rating.motif_rules, evaluated by pipeline.build_motif_proxies, which reads
 # load_game_phase below) rather than trunk inputs. Living here keeps the rule
-# builder, the experiment surface (auxiliary.rating_dev.*) and the axis analyses
-# (ablations.eval_score_gap_axis) on ONE set of definitions: same caches, same
-# transforms, in sync by construction.
+# builder and the experiment surface — auxiliary.rating_dev.*, the axis analyses
+# (auxiliary.rating_dev.eval_score_gap_axis) among them — on ONE set of
+# definitions: same caches, same transforms, in sync by construction.
 
 
 def _game_phase_cache_path(size):

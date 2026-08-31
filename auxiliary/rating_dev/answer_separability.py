@@ -14,10 +14,10 @@ in the same region as answers, the censored form has real work to do and is safe
 So this measures the ceiling of the cheap detector directly, with no fit of our
 own in the way: a plain logistic probe on the 128-dim joint-PCA activation block
 — the exact activation columns pipeline.write_mirt_per_cell feeds the trunk,
-loaded through _projection so it cannot drift from what ships. The per-problem
-TAIL blocks are deliberately excluded: they are constant across a problem's
-cells, so they carry no cell information at all and would only hand the probe
-problem identity.
+loaded through utils.rating.fitted_projection so it cannot drift from what
+ships. The per-problem TAIL blocks are deliberately excluded: they are constant
+across a problem's cells, so they carry no cell information at all and would
+only hand the probe problem identity.
 
 Three cell classes per problem, drawn only from problems with a recorded error:
 
@@ -63,13 +63,13 @@ import time
 
 import numpy as np
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 from utils.katago.coords import gtp_to_xy  # noqa: E402
 from utils.rating.model_constants import PCA_DIM, SEED, SIZES  # noqa: E402
-from ablations._projection import (  # noqa: E402
+from utils.rating.fitted_projection import (  # noqa: E402
     ShippedProjection, problem_arrays, variation_npz_rows)
 
 # Cell classes, one row of the collected matrix each.

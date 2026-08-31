@@ -11,7 +11,7 @@ between the two (a changed universe → changed set → changed hash).
 `--max-attempt-id` caps the attempt id every universe is read from, which is how
 a hash recorded against an earlier DB is reproduced from a later one: the table
 only grows upward, so an id prefix IS an earlier snapshot of it.
-`ablations.reconstruct_snapshot` searches for the cutoff reproducing a given hash.
+`auxiliary.rating_dev.reconstruct_snapshot` searches for the cutoff reproducing a given hash.
 
 CLI:
   ./.venv/bin/python3 -m auxiliary.rating_dev.holdout_set --seed 0 --frac 0.1   # print count + hash
@@ -146,7 +146,7 @@ def main():
     ap.add_argument("--max-attempt-id", type=int, default=None,
                     help="Cap the attempt id, i.e. read the universe as it stood "
                          "at that id. Reproduces a hash recorded against an "
-                         "earlier DB; ablations.reconstruct_snapshot finds the "
+                         "earlier DB; auxiliary.rating_dev.reconstruct_snapshot finds the "
                          "cutoff.")
     args = ap.parse_args()
     mid = args.max_attempt_id

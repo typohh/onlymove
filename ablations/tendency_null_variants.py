@@ -77,7 +77,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 from utils.rating.model_constants import K_AXES  # noqa: E402
-from ablations._projection import (  # noqa: E402
+from utils.rating.fitted_projection import (  # noqa: E402
     FEATURE_BLOCKS, FittedProjection, ShippedProjection, problem_arrays,
     quantize)
 from ablations.eval_error_null_models import EPS_WR, variation_cells  # noqa: E402

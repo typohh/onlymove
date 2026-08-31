@@ -979,7 +979,7 @@ def main():
                          "run reproduce a holdout hash recorded before a "
                          "fetch_database. Unlike --drop-recent-frac (a date cut "
                          "simulating a refit) this reproduces an ACTUAL earlier "
-                         "state. ablations.reconstruct_snapshot finds the cutoff.")
+                         "state. auxiliary.rating_dev.reconstruct_snapshot finds the cutoff.")
     ap.add_argument("--holdout-user-frac", type=float, default=0.0,
                     help="hold out this fraction of USERS entirely (shared "
                          "generator, hash-printed) so a walk-forward on them is "

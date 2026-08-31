@@ -45,8 +45,8 @@ import numpy as np
 
 from utils.paths import PROJECT_ROOT
 
-# Client-replica walk-forward protocol (same constants as the ablation axis
-# batteries — ablations/eval_score_gap_axis.py).
+# Client-replica walk-forward protocol (same constants as the axis batteries —
+# auxiliary/rating_dev/eval_score_gap_axis.py).
 WINDOW = 500
 EVAL_BLOCK = 50
 WARMUP = 120

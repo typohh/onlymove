@@ -40,13 +40,12 @@ Nothing here writes to the repo. Run:
 
     ./.venv/bin/python3 -m ablations.eval_error_null_models
 
-Phase 2 needs a per-cell axis projection. `--embeddings shipped` reads the
-production `axes/per_cell/` store; the DEFAULT `--embeddings actbot` projects the
-variation cells on the fly through a named dev checkpoint (`--model`,
-`--features`), which is the trunk input the reading-level measurements now stand
-on. That default names a `dev_runs/` checkpoint, which the directory's contract
-otherwise reserves for an explicitly-named comparison arm -- `--embeddings
-shipped` is the production-artifact path and stays exact.
+Phase 2 needs a per-cell axis projection. The DEFAULT reads the production
+`axes/per_cell/` store, so an unadorned run measures what ships. `--embeddings
+actbot --model CKPT --features BLOCKS` is the explicitly named comparison arm:
+it projects the variation cells on the fly through that dev checkpoint, and both
+flags are required because neither the checkpoint nor the block layout it was
+fitted on has a production default.
 """
 
 import argparse
@@ -74,8 +73,6 @@ DB_PATH = os.path.join(PROJECT_ROOT, "db", "d1.sqlite")
 TSUMEGO_DIR = os.path.join(PROJECT_ROOT, "tsumegos")
 PER_CELL_DIR = os.path.join(PROJECT_ROOT, "axes", "per_cell")
 LABELS_JSON = os.path.join(PROJECT_ROOT, "axes", "labels.json")
-DEFAULT_DEV_MODEL = os.path.join(PROJECT_ROOT, "dev_runs", "actbot_s3.pt")
-DEFAULT_DEV_FEATURES = "activations+bot"
 
 N_BOOTSTRAP = 2000
 RNG_SEED = 0
@@ -563,16 +560,22 @@ def fit_model(model, feats, offsets, sizes, counts):
 
 def parse_args(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--embeddings", choices=("actbot", "shipped"), default="actbot",
-                    help="per-cell axis projection phase 2 reads. 'shipped' uses "
-                         "the production axes/per_cell/ store; 'actbot' (default) "
-                         "projects the variation cells through --model on the fly")
-    ap.add_argument("--model", default=DEFAULT_DEV_MODEL, metavar="CKPT",
-                    help="checkpoint for --embeddings actbot")
-    ap.add_argument("--features", default=DEFAULT_DEV_FEATURES,
+    ap.add_argument("--embeddings", choices=("actbot", "shipped"), default="shipped",
+                    help="per-cell axis projection phase 2 reads. 'shipped' "
+                         "(default) uses the production axes/per_cell/ store; "
+                         "'actbot' projects the variation cells through --model "
+                         "on the fly, and requires --model and --features")
+    ap.add_argument("--model", default=None, metavar="CKPT",
+                    help="checkpoint for --embeddings actbot, e.g. "
+                         "dev_runs/actbot_s3.pt")
+    ap.add_argument("--features", default=None, metavar="BLOCKS",
                     help="the per-problem block layout --model was FITTED on; it "
-                         "is not recoverable from the file")
-    return ap.parse_args(argv)
+                         "is not recoverable from the file, e.g. activations+bot")
+    args = ap.parse_args(argv)
+    if args.embeddings == "actbot" and not (args.model and args.features):
+        ap.error("--embeddings actbot names a comparison arm: pass --model and "
+                 "--features. The production path is --embeddings shipped.")
+    return args
 
 
 def main():
@@ -924,7 +927,7 @@ class FittedCells:
 
     def __init__(self, K, model_path, features):
         import torch
-        from ablations._projection import FittedProjection
+        from utils.rating.fitted_projection import FittedProjection
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         if device.type == "cpu":
             # One problem's variation cells is a few dozen rows, and at that
@@ -937,7 +940,7 @@ class FittedCells:
                        f"(blocks={features}, fdim {self.P.fdim}, device {device})")
 
     def cells(self, size, tid, wanted):
-        from ablations._projection import problem_arrays
+        from utils.rating.fitted_projection import problem_arrays
         try:
             cand, xys, _ = problem_arrays(size, tid)
         except OSError:
@@ -956,7 +959,7 @@ class FittedCells:
 
 def _quantize(a):
     """Client resolution, single-sourced with the other ablations."""
-    from ablations._projection import quantize
+    from utils.rating.fitted_projection import quantize
     return quantize(np.asarray(a, dtype=np.float64))
 
 

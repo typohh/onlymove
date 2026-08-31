@@ -1,9 +1,9 @@
-"""Shared loading for the ablation scripts: a fitted trunk and its per-cell
-projection, bundled so every script here projects EXACTLY the computation the
-checkpoint was fitted with. The model and the feature assembly stay
-single-sourced in utils.rating.mirt_net / utils.rating.features — this module
-only gathers the loading idiom (the same one pipeline.write_mirt_per_cell uses)
-so sibling scripts cannot restate it differently.
+"""Shared loading for the ablation and auxiliary/rating_dev/ scripts: a fitted
+trunk and its per-cell projection, bundled so every caller projects EXACTLY the
+computation the checkpoint was fitted with. The model and the feature assembly
+stay single-sourced in utils.rating.mirt_net / utils.rating.features — this
+module only gathers the loading idiom (the same one pipeline.write_mirt_per_cell
+uses) so those scripts cannot restate it differently.
 
 `ShippedProjection` is the production fit at the shipped block layout and is
 what an ablation quoting a production figure uses. `FittedProjection` is the
@@ -15,10 +15,7 @@ own full input, never as a masked variant of something else.
 import os
 
 import numpy as np
-import sgfmill.sgf
 
-from utils.katago.coords import gtp_to_xy, sgf_to_gtp
-from utils.katago.sgf_parsing import parse_tsumego_sgf
 from utils.rating.mirt_net import build_trunk
 from utils.rating.model_constants import (
     K_AXES, PCA_DIM, PRODUCTION_BLOCKS, SEED, SIZES)
@@ -125,7 +122,17 @@ def problem_arrays(size, tid):
 def variation_npz_rows(size, tid, xys):
     """The SGF root variations' non-pass cells as activation-store row indices,
     in variation order — the exact cell set the shipped per-cell bin publishes.
-    Returns None on a parse failure or a variation cell missing from the store."""
+    Returns None on a parse failure or a variation cell missing from the store.
+
+    The SGF reader and the coordinate conversions are imported INSIDE the
+    function, following utils.rating.motif_rules: this module is read by the
+    whole rating side and importing it must not drag in the KataGo half of
+    utils/."""
+    import sgfmill.sgf
+
+    from utils.katago.coords import gtp_to_xy, sgf_to_gtp
+    from utils.katago.sgf_parsing import parse_tsumego_sgf
+
     sgf_path = os.path.join(PROJECT_ROOT, "tsumegos", str(size), tid + ".sgf")
     try:
         with open(sgf_path, "rb") as f:

@@ -58,7 +58,7 @@ if PROJECT_ROOT not in sys.path:
 
 from utils.katago.coords import gtp_to_xy  # noqa: E402
 from utils.rating.model_constants import INPUT_DROPOUT, K_AXES, SIZES  # noqa: E402
-from ablations._projection import (  # noqa: E402
+from utils.rating.fitted_projection import (  # noqa: E402
     FEATURE_BLOCKS, FittedProjection, ShippedProjection, problem_arrays,
     quantize, variation_npz_rows)
 

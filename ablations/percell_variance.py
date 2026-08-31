@@ -18,10 +18,11 @@ well-formed, rating-relevant, and carrying almost nothing the client can read.
 This measures which of those two things each fit actually emitted, per axis.
 
 Method: draw the same seeded problem sample for every arm (--n-per-size per
-board, --seed), take each problem's SGF root-variation cells (the exact cell set
-the shipped per-cell bin publishes, via _projection.variation_npz_rows; the pass
-is never embedded and so never enters), and decompose each axis over those cells
-with the PROBLEM as the unit:
+board, --seed), take each problem's SGF root-variation cells (the exact cell
+set the shipped per-cell bin publishes, via
+fitted_projection.variation_npz_rows; the pass is never embedded and so never
+enters), and decompose each axis over those cells with the PROBLEM as the
+unit:
 
     within  W = mean over problems of the problem's own cell variance (ddof=1)
     between B = variance over problems of the problem's cell mean (ddof=1)
@@ -108,7 +109,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 from utils.rating.model_constants import K_AXES, SIZES  # noqa: E402
-from ablations._projection import (  # noqa: E402
+from utils.rating.fitted_projection import (  # noqa: E402
     FEATURE_BLOCKS, FittedProjection, problem_arrays, variation_npz_rows)
 
 

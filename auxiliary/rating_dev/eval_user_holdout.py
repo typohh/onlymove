@@ -338,7 +338,7 @@ def main():
                          "rows walked, i.e. score against the DB as it stood at "
                          "that id. This is how a dump trained before a "
                          "fetch_database run is re-scored against its ORIGINAL "
-                         "holdout; ablations.reconstruct_snapshot finds the "
+                         "holdout; auxiliary.rating_dev.reconstruct_snapshot finds the "
                          "cutoff from a recorded hash. It reaches the split-half "
                          "histories too. Survey rho is NOT capped — the "
                          "declarations and their attempts come in by a separate "

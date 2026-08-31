@@ -39,9 +39,9 @@ of the SCORE term over a personalized wr-gap baseline — i.e. whether a
 score-specific counting skill exists beyond general tightness.
 
 Usage:
-  ./.venv/bin/python3 -m ablations.eval_score_gap_axis
-  ./.venv/bin/python3 -m ablations.eval_score_gap_axis --feature wr_gap
-  ./.venv/bin/python3 -m ablations.eval_score_gap_axis --feature joint
+  ./.venv/bin/python3 -m auxiliary.rating_dev.eval_score_gap_axis
+  ./.venv/bin/python3 -m auxiliary.rating_dev.eval_score_gap_axis --feature wr_gap
+  ./.venv/bin/python3 -m auxiliary.rating_dev.eval_score_gap_axis --feature joint
 """
 
 import argparse
@@ -53,7 +53,7 @@ from collections import defaultdict
 
 import numpy as np
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 

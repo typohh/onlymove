@@ -52,9 +52,9 @@ universe and therefore the same hash, so a match is reported as the PLATEAU
 and the honest one: nothing in the hash distinguishes them. Pick `hi` unless a
 second recorded quantity (a row count, say) narrows it.
 
-  ./.venv/bin/python3 -m ablations.reconstruct_snapshot \\
+  ./.venv/bin/python3 -m auxiliary.rating_dev.reconstruct_snapshot \\
       --target-hash 6619fdc487345fc0 --hash-kind problems:0:0.15 --verify
-  ./.venv/bin/python3 -m ablations.reconstruct_snapshot \\
+  ./.venv/bin/python3 -m auxiliary.rating_dev.reconstruct_snapshot \\
       --target-hash 27ada6e897734b01 --hash-kind users:0:0.15 --verify
 """
 
@@ -65,7 +65,7 @@ import sqlite3
 import sys
 import time
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
