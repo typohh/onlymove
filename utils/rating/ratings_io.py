@@ -229,3 +229,19 @@ def read_problem_params(path):
     ids = [raw[i:i + 4].hex() for i in range(0, len(raw), 4)]
     return {"id": ids, "rating": arr["rating"].astype(np.float64),
             "slope": arr["slope"].astype(np.float64), "floor": arr["floor"].astype(np.float64)}
+
+
+def load_declaration_exclusions(ratings_dir):
+    """{(user_prefix8, server, declared_band)} — the declarations `map_rating_to_rank`
+    screened out before fitting, from ratings/declaration_exclusions.csv.
+
+    Anything scoring the mapping against the same survey has to drop them too: a
+    declaration the curve was not fitted to, scored against that curve, measures
+    how far an excluded row sits from a fit that excluded it. Returns an empty set
+    when the file is absent, so a directory written before screening still reads."""
+    path = os.path.join(ratings_dir, "declaration_exclusions.csv")
+    if not os.path.exists(path):
+        return set()
+    with open(path, newline="") as f:
+        return {(r["user_prefix"], r["server"], int(r["declared_band"]))
+                for r in csv.DictReader(f)}

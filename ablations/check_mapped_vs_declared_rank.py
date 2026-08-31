@@ -84,7 +84,7 @@ if PROJECT_ROOT not in sys.path:
 from utils.paths import DB_SQLITE  # noqa: E402
 from utils.rating.rank_surveys import (  # noqa: E402
     SERVERS, SQL_PATH_DEFAULT, VERIFIED_SERVERS, is_verified_active,
-    latest_per_user_server, load_attempts_for_users, load_rank_surveys,
+    latest_per_user_server, load_attempts_for_users, load_rank_surveys, rank_band,
     value_to_rank, verified_rank_value, verified_tier_rank,
     TIME_ADJUST_AFK_CAP_MS, TIME_ADJUST_MIN_TIMED, WORKING_SET,
     load_user_median_solve_minutes,
@@ -96,6 +96,7 @@ from utils.rating.fit_rank_curves import (  # noqa: E402
     CALIBRATION_P, fit_user_rating, interp_extrap_vec,
 )
 from utils.rating.ratings_io import (  # noqa: E402
+    load_declaration_exclusions,
     apply_M, declared_to_internal, load_M, load_lapse, load_rank_map,
     load_time_adjust,
 )
@@ -454,9 +455,18 @@ def main(argv=None):
     # only scaled, so `system` — not `server` — is what indexes rank_map.
     rows = []
     inactive = 0
+    screened = 0
+    # Declarations map_rating_to_rank screened out before fitting. Scoring one
+    # against a curve that excluded it measures the exclusion, not the mapping.
+    excluded = load_declaration_exclusions(args.dir)
     for _, r in surveys.iterrows():
         pref = str(r["user_id"])[:8]
         if pref not in user_internal:
+            continue
+        rv = r.get("rank_value")
+        if rv is not None and pd.notna(rv) and \
+                (pref, r["server"], rank_band(float(rv))) in excluded:
+            screened += 1
             continue
         verified = r["server"] in VERIFIED_SERVERS
         # A verified rating only describes the player while it's current, so an
@@ -517,6 +527,9 @@ def main(argv=None):
     print(f"\n{len(df)} ranks, {df['prefix'].nunique()} users, "
           f"{df['server'].nunique()} categories  "
           f"[{len(deltas)} time-adjusted, {len(user_R) - len(deltas)} raw]" + note)
+    if screened:
+        print(f"  {screened} declarations screened out by the mapping "
+              f"(ratings/declaration_exclusions.csv) and not scored here")
     print(f"  of which {n_ver} verified machine ratings, the rest self-reported"
           + (f"; {inactive} more dropped as inactive (last tournament outside the "
              f"EGF window for their tier)" if inactive else ""))

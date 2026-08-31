@@ -54,6 +54,7 @@ from ablations import eval_equivalent_tournament_games as tournament  # noqa: E4
 from ablations._figures import Figure, require  # noqa: E402
 from utils.rating.rank_surveys import (  # noqa: E402
     SURVEY_RHO_MIN_SERVER, server_weighted_spearman)
+from utils.rating.ratings_io import load_declaration_exclusions  # noqa: E402
 
 TIER = "about"
 
@@ -131,6 +132,7 @@ def measure():
     require(games["n"] == len(scoped), "tournament matched a different row set")
 
     return {
+        "n_screened": len(load_declaration_exclusions(os.path.join(PROJECT_ROOT, "ratings"))),
         "n_declarations": int(len(surv)),
         "n_players": int(len(users)),
         "servers": {s: n for s, (n, _) in per_server.items()},
@@ -150,6 +152,9 @@ def figures():
         Figure("rank.rho_se", m["rho_se"], ".2f", "bootstrap SE of rank.rho over players"),
         Figure("rank.n_declarations", m["n_declarations"], "~10", "self-declared (player, server) ranks"),
         Figure("rank.n_players", m["n_players"], "~10", "players behind rank.n_declarations"),
+        Figure("rank.declarations_screened", m["n_screened"], "d",
+               "declarations the mapping screened out as junk before its final fit, "
+               "and which nothing here scores"),
         Figure("rank.within1_pct", m["within1"], "%.0f",
                "self-declarations with the shown server rank within one rank of the declared"),
         Figure("rank.within2_pct", m["within2"], "%.0f", "…within two ranks"),
@@ -167,6 +172,7 @@ def figures():
 def main():
     m = measure()
     print("\n" + "=" * 78)
+    print(f"{m['n_screened']} declarations screened out by the mapping")
     print(f"self-declarations: {m['n_declarations']} from {m['n_players']} players; "
           f"per-server rho over {', '.join(f'{s} ({n})' for s, n in sorted(m['servers'].items()))}")
     print(f"{'rho':>14}{m['rho']:>8.3f}  ± {m['rho_se']:.3f}  (bootstrap over players)")

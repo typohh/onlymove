@@ -8,10 +8,10 @@
       "tier": "about",
       "note": "published 13×13 problems, to the nearest thousand",
       "measured": {
-        "at": "2026-08-31T14:01:13Z",
-        "git": "6c92e8b5d18+dirty",
+        "at": "2026-08-31T14:31:39Z",
+        "git": "364dc15c126+dirty",
         "db_max_id": 457114,
-        "data_version": "d0cb02d7066a787e"
+        "data_version": "f6fba7b749bc0ecb"
       }
     },
     "corpus.problems_9": {
@@ -22,10 +22,10 @@
       "tier": "about",
       "note": "published 9×9 problems, to the nearest thousand",
       "measured": {
-        "at": "2026-08-31T14:01:13Z",
-        "git": "6c92e8b5d18+dirty",
+        "at": "2026-08-31T14:31:39Z",
+        "git": "364dc15c126+dirty",
         "db_max_id": 457114,
-        "data_version": "d0cb02d7066a787e"
+        "data_version": "f6fba7b749bc0ecb"
       }
     },
     "corpus.problems_total": {
@@ -36,10 +36,10 @@
       "tier": "about",
       "note": "problems in the published index, to the nearest thousand",
       "measured": {
-        "at": "2026-08-31T14:01:13Z",
-        "git": "6c92e8b5d18+dirty",
+        "at": "2026-08-31T14:31:39Z",
+        "git": "364dc15c126+dirty",
         "db_max_id": 457114,
-        "data_version": "d0cb02d7066a787e"
+        "data_version": "f6fba7b749bc0ecb"
       }
     },
     "published.floor_above_calibration": {
@@ -140,144 +140,158 @@
         "data_version": "d0cb02d7066a787e"
       }
     },
+    "rank.declarations_screened": {
+      "value": 9,
+      "fmt": "d",
+      "text": "9",
+      "producer": "ablations.rank_calibration_figures",
+      "tier": "about",
+      "note": "declarations the mapping screened out as junk before its final fit, and which nothing here scores",
+      "measured": {
+        "at": "2026-08-31T14:31:39Z",
+        "git": "364dc15c126+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
     "rank.games_equivalent": {
-      "value": 14.690984615836355,
+      "value": 14.980985776018088,
       "fmt": ".0f",
       "text": "15",
       "producer": "ablations.rank_calibration_figures",
       "tier": "about",
       "note": "tournament games per player at which two independent ratings agree as well as the shown rank agrees with a declared EGF rank",
       "measured": {
-        "at": "2026-08-31T14:01:13Z",
-        "git": "6c92e8b5d18+dirty",
+        "at": "2026-08-31T14:31:39Z",
+        "git": "364dc15c126+dirty",
         "db_max_id": 457114,
-        "data_version": "d0cb02d7066a787e"
+        "data_version": "f6fba7b749bc0ecb"
       }
     },
     "rank.games_equivalent_sd": {
-      "value": 2.6065726945768977,
+      "value": 2.675051521745823,
       "fmt": ".0f",
       "text": "3",
       "producer": "ablations.rank_calibration_figures",
       "tier": "about",
       "note": "its bootstrap SD over the declarations behind the target",
       "measured": {
-        "at": "2026-08-31T14:01:13Z",
-        "git": "6c92e8b5d18+dirty",
+        "at": "2026-08-31T14:31:39Z",
+        "git": "364dc15c126+dirty",
         "db_max_id": 457114,
-        "data_version": "d0cb02d7066a787e"
+        "data_version": "f6fba7b749bc0ecb"
       }
     },
     "rank.games_n": {
-      "value": 102,
+      "value": 101,
       "fmt": "d",
-      "text": "102",
+      "text": "101",
       "producer": "ablations.rank_calibration_figures",
       "tier": "about",
       "note": "EGF declarations the match rests on",
       "measured": {
-        "at": "2026-08-31T14:01:13Z",
-        "git": "6c92e8b5d18+dirty",
+        "at": "2026-08-31T14:31:39Z",
+        "git": "364dc15c126+dirty",
         "db_max_id": 457114,
-        "data_version": "d0cb02d7066a787e"
+        "data_version": "f6fba7b749bc0ecb"
       }
     },
     "rank.n_declarations": {
-      "value": 416,
+      "value": 407,
       "fmt": "~10",
-      "text": "420",
+      "text": "410",
       "producer": "ablations.rank_calibration_figures",
       "tier": "about",
       "note": "self-declared (player, server) ranks",
       "measured": {
-        "at": "2026-08-31T14:01:13Z",
-        "git": "6c92e8b5d18+dirty",
+        "at": "2026-08-31T14:31:39Z",
+        "git": "364dc15c126+dirty",
         "db_max_id": 457114,
-        "data_version": "d0cb02d7066a787e"
+        "data_version": "f6fba7b749bc0ecb"
       }
     },
     "rank.n_players": {
-      "value": 212,
+      "value": 207,
       "fmt": "~10",
       "text": "210",
       "producer": "ablations.rank_calibration_figures",
       "tier": "about",
       "note": "players behind rank.n_declarations",
       "measured": {
-        "at": "2026-08-31T14:01:13Z",
-        "git": "6c92e8b5d18+dirty",
+        "at": "2026-08-31T14:31:39Z",
+        "git": "364dc15c126+dirty",
         "db_max_id": 457114,
-        "data_version": "d0cb02d7066a787e"
+        "data_version": "f6fba7b749bc0ecb"
       }
     },
     "rank.rho": {
-      "value": 0.8444873475097161,
+      "value": 0.8547074099724133,
       "fmt": ".2f",
-      "text": "0.84",
+      "text": "0.85",
       "producer": "ablations.rank_calibration_figures",
       "tier": "about",
       "note": "per-server Spearman(mapped rating, declared rank), n-weighted, self-declarations",
       "measured": {
-        "at": "2026-08-31T14:01:13Z",
-        "git": "6c92e8b5d18+dirty",
+        "at": "2026-08-31T14:31:39Z",
+        "git": "364dc15c126+dirty",
         "db_max_id": 457114,
-        "data_version": "d0cb02d7066a787e"
+        "data_version": "f6fba7b749bc0ecb"
       }
     },
     "rank.rho_se": {
-      "value": 0.024484564355916432,
+      "value": 0.023871561489905484,
       "fmt": ".2f",
       "text": "0.02",
       "producer": "ablations.rank_calibration_figures",
       "tier": "about",
       "note": "bootstrap SE of rank.rho over players",
       "measured": {
-        "at": "2026-08-31T14:01:13Z",
-        "git": "6c92e8b5d18+dirty",
+        "at": "2026-08-31T14:31:39Z",
+        "git": "364dc15c126+dirty",
         "db_max_id": 457114,
-        "data_version": "d0cb02d7066a787e"
+        "data_version": "f6fba7b749bc0ecb"
       }
     },
     "rank.within1_pct": {
-      "value": 0.3076923076923077,
+      "value": 0.32186732186732187,
       "fmt": "%.0f",
-      "text": "31",
+      "text": "32",
       "producer": "ablations.rank_calibration_figures",
       "tier": "about",
       "note": "self-declarations with the shown server rank within one rank of the declared",
       "measured": {
-        "at": "2026-08-31T14:01:13Z",
-        "git": "6c92e8b5d18+dirty",
+        "at": "2026-08-31T14:31:39Z",
+        "git": "364dc15c126+dirty",
         "db_max_id": 457114,
-        "data_version": "d0cb02d7066a787e"
+        "data_version": "f6fba7b749bc0ecb"
       }
     },
     "rank.within2_pct": {
-      "value": 0.5841346153846154,
+      "value": 0.597051597051597,
       "fmt": "%.0f",
-      "text": "58",
+      "text": "60",
       "producer": "ablations.rank_calibration_figures",
       "tier": "about",
       "note": "…within two ranks",
       "measured": {
-        "at": "2026-08-31T14:01:13Z",
-        "git": "6c92e8b5d18+dirty",
+        "at": "2026-08-31T14:31:39Z",
+        "git": "364dc15c126+dirty",
         "db_max_id": 457114,
-        "data_version": "d0cb02d7066a787e"
+        "data_version": "f6fba7b749bc0ecb"
       }
     },
     "rank.within_se_pts": {
-      "value": 0.0294568258673581,
+      "value": 0.02951441228955034,
       "fmt": "%.0f",
       "text": "3",
       "producer": "ablations.rank_calibration_figures",
       "tier": "about",
       "note": "larger bootstrap SE of the two within-shares, percentage points",
       "measured": {
-        "at": "2026-08-31T14:01:13Z",
-        "git": "6c92e8b5d18+dirty",
+        "at": "2026-08-31T14:31:39Z",
+        "git": "364dc15c126+dirty",
         "db_max_id": 457114,
-        "data_version": "d0cb02d7066a787e"
+        "data_version": "f6fba7b749bc0ecb"
       }
     }
   },

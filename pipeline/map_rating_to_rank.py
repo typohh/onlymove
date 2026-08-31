@@ -104,6 +104,7 @@ with pipeline.package_for_pwa.
 
 import argparse
 import json
+import csv
 import os
 import sqlite3
 import sys
@@ -123,8 +124,8 @@ from utils.rating.rank_surveys import (  # noqa: E402
 )
 from utils.rating.rank_curve_shape import fit_shape, rank_to_axis  # noqa: E402
 from utils.rating.fit_rank_curves import (  # noqa: E402
-    CALIBRATION_P, fit_user_rating, interp_extrap_vec, ordinal_nll_vec,
-    _unpack_thresholds,
+    CALIBRATION_P, fit_user_rating, interp_extrap_vec, junk_posterior_vec,
+    ordinal_nll_vec, separated_head, _unpack_thresholds,
 )
 from utils.constants import ALL_BOARD_SIZES  # noqa: E402
 from utils.rating.ratings_io import (  # noqa: E402
@@ -148,6 +149,7 @@ EGF_LO, EGF_HI = -21, 9     # consensus-rank band range the curve spans
 RANK_PADDING = 2            # extend a server's thresholds past its declared min/max
 EXTEND_TO = 8               # force each server range to cover at least up to 9d
 MIN_SERVER_SAMPLES = 3      # skip a server with less pooled declaration-weight
+JUNK_FLOOR = 0.5            # exclude above this junk posterior — see the screening note
 MIN_ATTEMPTS = 20           # drop survey users (and career blocks) with fewer attempts
 BLOCK_DAYS = 60             # career-segment anchor blocks: window length ...
 BLOCK_STEP = 30             # ... and step (overlapping; see the docstring)
@@ -383,6 +385,113 @@ def fit_consensus(decls):
     return a, float(alpha), ys, egf_thr_ranks, server_fits
 
 
+EXCLUSIONS_CSV = "declaration_exclusions.csv"
+
+
+def detect_junk_declarations(decls, keys, a, ys, alpha, server_fits):
+    """Declarations the fit itself calls junk, separated from the rest by a gap.
+
+    A declaration whose author is describing a different player than the attempt
+    log does — a claim typed for effect, a rank carried over from an account that
+    is not this one, a registration grade never revisited — is not noise the
+    likelihood should average over. The contamination mixture already caps what
+    one can pull, and a capped pull is still a pull, applied by rows that are not
+    measurements of anything.
+
+    What separates them is not the size of the miss. Servers differ in how far
+    apart their categories sit and in how far their populations spread, so a
+    six-rank residual is unremarkable in one place and impossible in another;
+    the fitted thresholds carry exactly that, which is why the statistic here is
+    the mixture's own posterior rather than the residual (`junk_posterior_vec`).
+    Each declaration is scored at the attempt-mass-weighted mean of its block
+    rows' time-adjusted positions, the position the fit saw.
+
+    The cut is the posterior's own decision boundary: above one half the mixture
+    calls a declaration likelier junk than measurement. That bar is severe rather
+    than nominal, because the junk prior is small — clearing it takes a declared
+    category the fitted thresholds give a likelihood on the order of one in
+    thousands, which is a claim no ordinary miss reaches.
+
+    A knee is the tempting alternative and is not used as the cut. The largest
+    gap in a sample is the largest gap somewhere even when the sample is one
+    smooth population, so cutting there excludes down to wherever the decay
+    flattens and reports the result as a discovered boundary; the gap is printed
+    (`separated_head`) as a diagnostic of whether a genuinely detached group
+    exists, which is a different question from where to stop.
+
+    This runs ONCE against the first fit rather than iterating to convergence:
+    each pass would tighten the curve onto the survivors and re-flag whatever now
+    sits furthest out, converging on an arbitrarily clean set rather than on the
+    truth.
+
+    Returns (dropped, cut) — dropped is a list of dicts, one per excluded
+    declaration, ordered by descending posterior; cut is (n, lowest excluded
+    posterior, the separated head's gap)."""
+    x_by_key, w_by_key, cat_by_key = defaultdict(float), defaultdict(float), {}
+    for (server, R, g, T, w), key in zip(decls, keys):
+        x_by_key[key] += w * float(interp_extrap_vec(np.array([R + alpha * T]), a, ys)[0])
+        w_by_key[key] += w
+        cat_by_key[key] = (server, g)
+
+    rows = []
+    for key, xw in x_by_key.items():
+        server, g = cat_by_key[key]
+        thr = server_fits.get(server)
+        if not thr or len(thr) < 2:
+            continue                      # no coupling: nothing to be junk against
+        gs = sorted(thr)
+        tau = np.array([thr[k] for k in gs], float)
+        x = xw / max(w_by_key[key], 1e-12)
+        k = int(np.searchsorted(np.array([float(v) for v in gs]), g))
+        p = float(junk_posterior_vec(tau, np.array([x]), np.array([k]),
+                                     EPS_CONTAMINATION)[0])
+        rows.append({"key": key, "server": server, "declared_band": g,
+                     "internal": x, "p_junk": p})
+    if not rows:
+        return [], (0, float("nan"), 0.0)
+
+    rows.sort(key=lambda r: -r["p_junk"])
+    n_cut = sum(1 for r in rows if r["p_junk"] > JUNK_FLOOR)
+    n_knee, knee_at, gap = separated_head([r["p_junk"] for r in rows], floor=JUNK_FLOOR)
+    print(f"\nDeclaration screening over {len(rows)} declarations: "
+          f"{n_cut} above the {JUNK_FLOOR} junk posterior")
+    if not n_cut:
+        print("  none — nothing excluded")
+        return [], (0, float("nan"), 0.0)
+    print(f"  separated head ends after {n_knee} (largest gap {gap:.3f} below "
+          f"{knee_at:.3f}); the cut is the {JUNK_FLOOR} boundary, at {n_cut}")
+    for i, r in enumerate(rows[:n_cut + 2]):
+        uid, server, g = r["key"]
+        mark = "  cut" if i < n_cut else "  keep"
+        head = " <- head" if i < n_knee else ""
+        print(f"   {mark:<6}{uid[:8]:<10}{server:<9}declared {value_to_rank(g + 0.5):>4}  "
+              f"we say {value_to_rank(r['internal']):>4}  P(junk)={r['p_junk']:.3f}{head}")
+    return rows[:n_cut], (n_cut, float(rows[n_cut - 1]["p_junk"]), gap)
+
+
+def write_exclusions(ratings_dir, dropped, cut, n_declarations):
+    """The excluded declarations, for anything that scores the mapping against the
+    same survey — an evaluation keeping rows the fit did not see is measuring a
+    different comparison. Written every run, empty header included, so a reader
+    never has to branch on the file's absence. The `p_junk` column is the value at
+    the FIRST fit, the one the cut was taken on."""
+    path = os.path.join(ratings_dir, EXCLUSIONS_CSV)
+    n_cut, threshold, gap = cut
+    with open(path, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["user_prefix", "server", "declared_band", "declared_rank",
+                    "our_internal", "our_rank", "p_junk"])
+        for r in dropped:
+            uid, server, g = r["key"]
+            w.writerow([uid[:8], server, g, value_to_rank(g + 0.5),
+                        f"{r['internal']:.4f}", value_to_rank(r["internal"]),
+                        f"{r['p_junk']:.6f}"])
+    print(f"  wrote {path} ({len(dropped)} of {n_declarations} declarations"
+          + (f", lowest excluded {threshold:.3f}; separated head ends "
+             f"{gap:.3f} above it)" if dropped else ")"))
+    return path
+
+
 def emit_server_curves(server_fits):
     """Per-server interpolation knots {server: {our, server}} in scalar units — `our` =
     the consensus-rank scalar at each server-rank boundary, `server` the server scalar
@@ -466,7 +575,7 @@ def main():
     # weight). Each block attaches to the user's nearest-in-time declaration on that
     # server, and a declaration's rows are attempt-mass-normalized to total weight 1.
     # Users without a usable time feature get T=0 (no time term).
-    decls = []
+    decls, keys = [], []
     for (uid, server), srows in (surveys[surveys["user_id"].isin(user_blocks)]
                                  .groupby(["user_id", "server"])):
         T = (user_logT[uid] - center) if uid in user_logT else 0.0
@@ -480,6 +589,9 @@ def main():
             for R, m in brs:
                 decls.append((server, R, int(dg[j]), T,
                               m / mass if mass > 0 else 1.0 / len(brs)))
+                # A declaration is (user, server, declared band); its block rows
+                # share one key, so an exclusion drops the declaration whole.
+                keys.append((uid, server, int(dg[j])))
     w_egf = sum(d[4] for d in decls if d[0] == "EGF")
     print(f"\nConsensus fit over {len(decls)} anchor rows, "
           f"{sum(d[4] for d in decls):.0f} declaration-weight [{w_egf:.0f} EGF, a "
@@ -488,6 +600,16 @@ def main():
 
     a, alpha, ys, egf_thr_ranks, server_fits = fit_consensus(decls)
     print(f"  learned time slope α = {alpha:+.4f} rating per de-meaned log10-min")
+
+    dropped, cut = detect_junk_declarations(decls, keys, a, ys, alpha, server_fits)
+    write_exclusions(args.dir, dropped, cut, len(keys))
+    if dropped:
+        drop_keys = {d["key"] for d in dropped}
+        decls = [d for d, k in zip(decls, keys) if k not in drop_keys]
+        keys = [k for k in keys if k not in drop_keys]
+        print(f"  refitting without them ({len(decls)} anchor rows remain)")
+        a, alpha, ys, egf_thr_ranks, server_fits = fit_consensus(decls)
+        print(f"  learned time slope α = {alpha:+.4f} rating per de-meaned log10-min")
 
     # In-sample EGF calibration check (EGF is now forward-mapped through its
     # coupling); weighted so it reads in declaration units, not block-row counts.

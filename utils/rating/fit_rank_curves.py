@@ -132,6 +132,55 @@ def ordinal_nll_vec(tau, x, k, w=None, eps=0.0):
     return -float(np.sum(logs if w is None else w * logs))
 
 
+def junk_posterior_vec(tau, x, k, eps):
+    """P(this declaration is junk | data) under ordinal_nll_vec's contamination
+    mixture — the same P_ordinal, read as a posterior instead of a likelihood:
+
+        junk = eps/(K+1),  P(junk | data) = junk / ((1−eps)·P_ordinal + junk)
+
+    It is the fit's own opinion of a declaration rather than a residual, which is
+    what makes it comparable across servers: a two-rank miss on a server whose
+    categories are two ranks apart is ordinary, and the same miss where they are
+    half a rank apart is not, and the thresholds already carry that. Arguments are
+    ordinal_nll_vec's. eps=0 gives zero everywhere (no junk component to assign
+    mass to)."""
+    K = tau.shape[0]
+    upper = np.where(k < K, expit(tau[np.minimum(k, K - 1)] - x), 1.0)
+    lower = np.where(k > 0, expit(tau[np.maximum(k - 1, 0)] - x), 0.0)
+    p = np.clip(upper - lower, 1e-12, 1.0)
+    junk = eps / (K + 1)
+    return junk / ((1.0 - eps) * p + junk)
+
+
+def separated_head(scores, floor=0.5):
+    """The head of a sorted-descending score that stands apart from the rest.
+
+    Searched over the entries above `floor` plus the first one below them, so the
+    whole candidate set is reachable when the drop lands there. The head ends at
+    the LARGEST GAP between consecutive scores.
+
+    This DIAGNOSES separation; it does not decide an exclusion. A gap is the
+    largest one somewhere in any sample, including a sample drawn from one smooth
+    population, so a caller reading it as a cut excludes down to wherever the
+    decay happens to flatten and calls the result a discovered boundary. Read the
+    gap SIZE to judge whether a head is real, and cut on a rule that means
+    something on its own.
+
+    Returns (n, score, gap): how many entries the head holds, the score of its
+    last, and the gap below it. (0, nan, 0.0) when nothing clears the floor."""
+    s = np.sort(np.asarray(scores, float))[::-1]
+    n_cand = int((s > floor).sum())
+    if n_cand == 0:
+        return 0, float("nan"), 0.0
+    # One past the candidates, so the whole candidate set is a possible cut.
+    window = s[:min(n_cand + 1, len(s))]
+    if len(window) == 1:
+        return 1, float(window[0]), float("inf")
+    gaps = window[:-1] - window[1:]
+    i = int(np.argmax(gaps))
+    return i + 1, float(window[i]), float(gaps[i])
+
+
 def _unpack_thresholds(block, baseline):
     """[α, log_e...] + baseline spacings → ascending thresholds (length
     len(baseline)+1).  τ_0 = α; τ_j = α + Σ_{≤j} baseline·exp(log_e)."""
