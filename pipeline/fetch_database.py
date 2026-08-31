@@ -282,7 +282,7 @@ def emit_dump(con, sql_file):
                 f.write(line + "\n")
 
 
-def incremental_fetch(do_local_d1=True, emit_sql_dump=True):
+def incremental_fetch(do_local_d1=True, emit_sql_dump=True, require_baseline=False):
     """Default path: append only new `tsumego_reports` rows (by AUTOINCREMENT
     id) and re-fetch every other table whole, merging into the canonical
     db/d1.sqlite, then regenerate db/d1.sql and sync the
@@ -292,10 +292,23 @@ def incremental_fetch(do_local_d1=True, emit_sql_dump=True):
 
     `emit_sql_dump=False` skips the text dump: a --db-dir snapshot has no
     text consumers, and regenerating one writes every row.
+
+    `require_baseline=True` turns the missing-baseline fallback into an abort.
+    A --db-dir caller wants the rows that landed since the canonical mirror,
+    which is a question only that mirror can pose; with no baseline the fetch
+    is still well-formed but silently becomes a full export of every row.
     """
     _, pwa_dir, _, sql_file, sqlite_file = _paths()
 
     if not os.path.exists(sqlite_file):
+        if require_baseline:
+            raise SystemExit(
+                f"No baseline at {sqlite_file}.\n"
+                f"  --db-dir is incremental against the copy you put there — seed it first:\n"
+                f"    cp {DB_SQLITE} {sqlite_file}\n"
+                "  (falling back to a full fetch here would read every row, which is the\n"
+                "  cost --db-dir exists to avoid.)"
+            )
         print("No local database.sqlite baseline found; doing a full fetch to seed it.")
         return _full_fetch(do_local_d1)
 
@@ -570,8 +583,8 @@ def main():
         metavar="DIR",
         help="Fetch into DIR/d1.sqlite instead of the canonical db/, leaving db/ "
              "and the dev D1 untouched. DIR/d1.sqlite is the incremental fetch's "
-             "id baseline, so copy the canonical one there first for a cheap pull "
-             "(without it this seeds DIR with a --full export). A private snapshot "
+             "id baseline, so copy the canonical one there first; without it the "
+             "run ABORTS rather than falling back to a full export. A private snapshot "
              "has no text consumers and no dev-D1 role, so it also skips the "
              "db/d1.sql regeneration and the local-D1 sync.",
     )
@@ -588,7 +601,8 @@ def main():
         _full_fetch(do_local_d1=not args.no_local_d1 and not private)
     else:
         incremental_fetch(do_local_d1=not args.no_local_d1 and not private,
-                          emit_sql_dump=not private)
+                          emit_sql_dump=not private,
+                          require_baseline=private)
 
 
 if __name__ == "__main__":
