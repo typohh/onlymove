@@ -316,7 +316,8 @@ class JointMIRT:
                  seed, g_init=None, global_slope=False, act="swiglu",
                  hidden=DIFF_HIDDEN, axis_dropout=AXIS_INPUT_DROPOUT,
                  axis_reads_rating=True, axis_from_trunk=True,
-                 axis_trunk_coupled=True, center_v=False, g_gauge=False):
+                 axis_trunk_coupled=True, center_v=False, g_gauge=False,
+                 bsel=False):
         import torch
         import torch.nn as nn
         torch.manual_seed(seed)
@@ -387,12 +388,26 @@ class JointMIRT:
         # sit on the intercept.
         self.b_mu = torch.zeros((), device=device)
         self.b_sd = torch.ones((), device=device)
+        # THE PRIVATE COST HEAD, and it is built LAST for a reason: constructing
+        # a Linear draws from the global torch generator, so creating it anywhere
+        # earlier would shift every subsequent init AND the training-time dropout
+        # stream. Built here, and only when the arm asks for it, every other mode
+        # keeps the exact RNG stream it had before this head existed.
+        #
+        # IT SHIPS NOWHERE. pipeline.write_mirt_per_cell fans the trunk out per
+        # cell and reads b, a, c and g; package_for_pwa writes rating, slope,
+        # floor and the axis vectors. Neither knows this head and neither should:
+        # it exists so the CHOICE objective has a difficulty-like quantity of its
+        # own to shape, instead of shaping the one the client reads.
+        self.b_sel = nn.Linear(d, 1).to(device) if bsel else None
         self.training = True
 
     def params(self):
         return (list(self.trunk.parameters()) + list(self.head.parameters())
                 + list(self.g_lin.parameters()) + list(self.theta.parameters())
-                + [self.v, self.lapse_raw, self.a_raw])
+                + [self.v, self.lapse_raw, self.a_raw]
+                + (list(self.b_sel.parameters()) if self.b_sel is not None
+                   else []))
 
     def state_tensors(self):
         """params() plus the GAUGE BUFFERS — what a checkpoint has to carry to
@@ -445,7 +460,9 @@ class JointMIRT:
         embedding; this model has that plus a K-dimensional axis position per
         user, so it does not inherit the constant."""
         net = (list(self.trunk.parameters()) + list(self.head.parameters())
-               + list(self.g_lin.parameters()))
+               + list(self.g_lin.parameters())
+               + (list(self.b_sel.parameters()) if self.b_sel is not None
+                  else []))
         # theta, v and the two global scalars are all free point estimates fitted
         # directly against the data rather than through the net, so they take the
         # field rate together.
@@ -656,7 +673,9 @@ class JointMIRT:
         # either way.
         g = (g / self.g_rms if self.g_gauge
              else g / (g.pow(2).mean(dim=0, keepdim=True).sqrt() + 1e-6))
-        return b, a, c, g
+        # h rides along so the private cost head can read the SAME trunk output
+        # rather than paying a second forward for it.
+        return b, a, c, g, h
 
     def second_pass_loss(self, mode, pfeat, cfeat, prof, uid, kappa, y=None):
         """The attempt seen from a CANDIDATE cell's side.
@@ -704,7 +723,7 @@ class JointMIRT:
         v = (self.v - self.v.mean(dim=0, keepdim=True)) if self.center_v else self.v
         vu = v[uid].detach()
         if mode == "censored":
-            b, a, c, g = self.cell_params(pfeat)
+            b, a, c, g, _h = self.cell_params(pfeat)
             lam = self.lapse().detach()
             z = (a * (th - b) + (g * vu).sum(-1)).clamp(-35, 35)
             p = (c + (1.0 - c - lam) * torch.sigmoid(z)).clamp(EPS, 1 - EPS)
@@ -712,17 +731,37 @@ class JointMIRT:
                 p, torch.zeros_like(p))
         if mode == "selection":
             n = pfeat.shape[0]
-            b_, _a, _c, g_ = self.cell_params(torch.cat([pfeat, cfeat], dim=0))
+            b_, _a, _c, g_, _h = self.cell_params(
+                torch.cat([pfeat, cfeat], dim=0))
             s = (((g_[:n] - g_[n:]) * vu).sum(-1)
                  + kappa * (b_[n:] - b_[:n])).clamp(-35, 35)
             return torch.nn.functional.softplus(-s).mean()
-        if mode == "two-sided":
+        if mode in ("two-sided", "two-sided-bsel"):
             if y is None:
-                raise ValueError("two-sided needs per-row outcomes")
+                raise ValueError(f"{mode} needs per-row outcomes")
             n = pfeat.shape[0]
-            b_, _a, _c, g_ = self.cell_params(torch.cat([pfeat, cfeat], dim=0))
-            s_cand = (g_[:n] * vu).sum(-1) - th * b_[:n]
-            s_corr = (g_[n:] * vu).sum(-1) - th * b_[n:]
+            b_, _a, _c, g_, h_ = self.cell_params(
+                torch.cat([pfeat, cfeat], dim=0))
+            if mode == "two-sided-bsel":
+                # THE COST TERM READS A PRIVATE HEAD, and that is the whole
+                # difference. Under plain `two-sided` this was the shipped
+                # DIFFICULTY b, and b_correct appears in EVERY pair belonging to
+                # a problem — so the choice objective piled onto the difficulty
+                # of every error-bearing problem at a multiple of its attempt
+                # count, and the rating went with it. Measured at both weights
+                # 1.0 and 0.25: stop-split leaves the 0.5x band while pass 2
+                # descends regardless, which is what says the fault is the FORM
+                # and not the multiplier.
+                #
+                # g stays SHARED on purpose. The axis coupling is the design's
+                # point — pass 2 is meant to shape what the axes mean — and the
+                # two-sided runs kept healthy teach retention through it, so
+                # there is nothing to fix on that side.
+                cost = self.b_sel(h_).squeeze(-1)
+            else:
+                cost = b_
+            s_cand = (g_[:n] * vu).sum(-1) - th * cost[:n]
+            s_corr = (g_[n:] * vu).sum(-1) - th * cost[n:]
             p = torch.sigmoid((s_cand - s_corr).clamp(-35, 35)).clamp(
                 EPS, 1 - EPS)
             return torch.nn.functional.binary_cross_entropy(p, y)
@@ -1194,7 +1233,8 @@ def main():
                          "outside the dropout region, so INPUT_DROPOUT masks the "
                          "same fraction of what each is given.")
     ap.add_argument("--second-pass",
-                    choices=("none", "censored", "selection", "two-sided"),
+                    choices=("none", "censored", "selection", "two-sided",
+                             "two-sided-bsel"),
                     default="none",
                     help="TWO-SIDED IS THE LIVE ARM; `censored` and `selection` "
                          "are RETIRED and kept only so their recorded runs stay "
@@ -1226,7 +1266,15 @@ def main():
                          "attempt on a problem with recorded wrong picks enters "
                          "as an outcome-0 row against ONE wrong cell drawn by "
                          "population pick-count (seeded on the MODEL SEED, so "
-                         "seeds differ in their counterfactuals too).")
+                         "seeds differ in their counterfactuals too). "
+                         "`two-sided-bsel` is that arm with the cost term moved "
+                         "onto a PRIVATE head instead of the shipped difficulty "
+                         "— plain `two-sided` routed choice gradient through b, "
+                         "whose correct-cell value sits in every pair a problem "
+                         "owns, and it degraded the fit at BOTH weights tried, "
+                         "which is what identifies the score form rather than "
+                         "the multiplier as the fault. The private head ships "
+                         "nowhere.")
     ap.add_argument("--second-pass-weight", type=float, default=1.0,
                     help="multiplier on the second-pass term. It is a separate "
                          "additive loss and enters NOTHING else — not the stop "
@@ -1629,7 +1677,7 @@ def main():
               f"{n_answer} that played the answer (no contrast), {n_noembed} "
               f"whose cell is not embedded, {n_nonpz} with no activation file",
               flush=True)
-        if args.second_pass == "two-sided":
+        if args.second_pass in ("two-sided", "two-sided-bsel"):
             # THE NEGATIVE ROWS' SAMPLING POOL, per problem: which wrong cells
             # this problem drew and how often. Counted over TRAINING rows only —
             # the loop above never visits any other row — because a held-out
@@ -1746,7 +1794,8 @@ def main():
                       axis_reads_rating=not args.axis_blind,
                       axis_from_trunk=not args.axis_from_features,
                       axis_trunk_coupled=not args.axis_trunk_detached,
-                      center_v=args.center_v, g_gauge=args.axis_gauge)
+                      center_v=args.center_v, g_gauge=args.axis_gauge,
+                      bsel=args.second_pass == "two-sided-bsel")
         if args.init_from:
             # CONTINUE the previous fit rather than rediscovering a basis. The
             # axis objective is invariant to rotating the K-dim latent space, so
@@ -1762,6 +1811,11 @@ def main():
             m.trunk.load_state_dict(st["trunk"])
             m.head.load_state_dict(st["head"])
             m.g_lin.load_state_dict(st["g_lin"])
+            # The private cost head is carried only when BOTH runs have one; it
+            # is an arm's own parameter, not part of the model every fit shares,
+            # so a checkpoint without it must still continue cleanly.
+            if m.b_sel is not None and st.get("b_sel") is not None:
+                m.b_sel.load_state_dict(st["b_sel"])
             with torch.no_grad():
                 m.lapse_raw.copy_(st["lapse_raw"].to(device))
                 m.a_raw.copy_(st["a_raw"].to(device))
@@ -1908,7 +1962,7 @@ def main():
             keep[tr_eff.cpu().numpy()] = True
             pp = np.where(keep, pick_pair, -1)
             py = np.ones(len(prof_df), np.float32)
-            if args.second_pass == "two-sided":
+            if args.second_pass in ("two-sided", "two-sided-bsel"):
                 # THE NEGATIVE ROWS, drawn HERE rather than beside the pair
                 # table because the draw is keyed on the MODEL SEED: two seeds
                 # are meant to differ in their counterfactuals as well as in
@@ -2383,6 +2437,8 @@ def main():
                         "a_raw": m.a_raw.detach().cpu(),
                         "b_mu": m.b_mu.cpu(), "b_sd": m.b_sd.cpu(),
                         "g_rms": m.g_rms.cpu(),
+                        "b_sel": (m.b_sel.state_dict() if m.b_sel is not None
+                                  else None),
                         "k": args.k}, args.save_model)
             print(f"  wrote model -> {args.save_model}", flush=True)
 
