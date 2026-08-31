@@ -98,7 +98,7 @@ if PROJECT_ROOT not in sys.path:
 MODEL_INPUT_HISTORY_LENGTH = 500    # pwa/js/constants.js — the client's fit window
 
 from pipeline.fit_population_constants import (  # noqa: E402
-    FLOOR_MAX, REPEAT_LOG_CUTOFF, Z0,
+    FLOOR_MAX, MIN_STEP_EVENTS_PER_CELL, REPEAT_LOG_CUTOFF, STEP_X_BANDS, Z0,
     cold_solve_logit, fit_ability, load_problem_params, load_rows,
 )
 
@@ -120,11 +120,12 @@ LN_S_TRAIN_MIN, LN_S_TRAIN_MAX = -5.0, 8.0
 STEP_LIVE_DATE = "2026-07-28"
 STEP_SETTLED_DATE = "2026-08-01"
 
-# Relative-interval bands for the matched-ratio contrast: gap over the STEP-LESS
-# predicted stability. Bands span the range both schedules actually serve into;
-# outside them the data thins to nothing.
-X_BANDS = (0.05, 0.15, 0.30, 0.60, 1.20)
-MIN_MATCHED_PER_CELL = 2
+# The matched-ratio bands and per-cell bar are imported from the production step
+# fit (pipeline.fit_population_constants: STEP_X_BANDS, MIN_STEP_EVENTS_PER_CELL),
+# so the contrast this file reports and the moment condition the fit ships are
+# the same statistic by construction.
+X_BANDS = STEP_X_BANDS
+MIN_MATCHED_PER_CELL = MIN_STEP_EVENTS_PER_CELL
 
 
 # ---------------------------------------------------------------------------

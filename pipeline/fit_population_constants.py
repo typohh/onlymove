@@ -525,7 +525,7 @@ def fit_retention(events):
 
     def nll(p):
         kappa, growth, ln_c = p
-        lnS = np.clip(ln_c + kappa * (z - Z0) + growth * r, -5, 8)
+        lnS = np.clip(ln_c + kappa * (z - Z0) + growth * r, *LN_S_CLIP)
         S = np.exp(lnS)
         R = np.clip(np.exp(-gap / S), 1e-9, 1 - 1e-9)
         return -np.sum(y * np.log(R) + (1 - y) * np.log(1 - R))
@@ -543,12 +543,19 @@ def fit_retention(events):
             "growth": float(growth), "ln_c_prior": float(ln_c)}
 
 
-MIN_STEP_EVENTS_PER_CELL = 5           # per user, each of the two streak cells
-MIN_STEP_USERS = 20                    # below this the step keeps its default
+# Relative-interval bands for the step's matched strata: a serve's elapsed gap
+# over the STEP-LESS stability the fitted constants predict for it — the
+# coordinate in which the shipped step is nothing but a horizontal shift of
+# where serves land. eval_recall_model imports these, so the ablation's contrast
+# and this fit are the same statistic by construction.
+STEP_X_BANDS = (0.05, 0.15, 0.30, 0.60, 1.20)
+MIN_STEP_EVENTS_PER_CELL = 2           # per (user, band) stratum, each streak cell
+MIN_STEP_USERS = 20                    # distinct users among qualifying strata
 STEP_MAX = 2.0                         # sanity rail on the fitted step
+LN_S_CLIP = (-5.0, 8.0)                # the retention fit's own lnS clip
 
 
-def fit_first_success_step(events):
+def fit_first_success_step(events, retention):
     """The extra log-stability a problem earns from its FIRST success after a
     lapse, over and above the per-success growth already in the ladder.
 
@@ -556,37 +563,58 @@ def fit_first_success_step(events):
     when it was the first success after a failure — so rung 0 and rung 1 are the
     post-lapse and post-success states, not two steps of one ladder. Established
     schedulers give a lapse its own formula; this model does not, and the
-    shortfall shows up as reviews at rung 1 and above clearing well above the
-    0.80 the window opens at, i.e. served before the intended forgetting.
+    shortfall shows up as post-success reviews clearing well above their
+    post-lapse peers at the same relative interval — more durable than the
+    model has them, so served before the intended forgetting.
 
     Fit by MOMENT MATCHING, deliberately not by retention likelihood. The
     likelihood is evaluated on intervals the scheduler itself chose, so it is
     close to uninformative about what a different schedule would do — measured,
     it sizes this step at about a fifth of what the realized rates require.
     The moment condition needs no fitting at all: under R = exp(-t/S), scaling
-    an interval by f scales log-retention by f, so the multiplier taking a cell
-    from its realized rate p to a target q is ln(q)/ln(p), and the step is its
-    logarithm. The target is rung 0's own realized rate — making the ladder
-    self-consistent, which is what the client can actually be held to, rather
-    than any particular point inside the window.
+    an interval by f scales log-retention by f, so the multiplier taking the
+    post-success cells from their rate p to a target q is ln(q)/ln(p), and the
+    step is its logarithm. The target is the post-lapse cells' own realized
+    rate — making the ladder self-consistent, which is what the client can
+    actually be held to, rather than any particular point inside the window.
 
-    The rung contrast is taken WITHIN USER (Mantel-Haenszel, one stratum per
-    user). How promptly a user returns once a window opens is a habit that sets
-    where in the window their serves land; it is unobservable and stable per
-    user, so comparing each user only against themselves removes it.
+    The contrast is taken WITHIN (user, matched relative interval) — a
+    Mantel-Haenszel odds ratio over strata of user × gap-over-step-less-stability
+    band — and both halves of that stratum are load-bearing. Within USER because
+    how promptly someone returns once a window opens is a habit, unobservable
+    and stable per person, that sets where in the window their serves land.
+    Within a MATCHED BAND because this fit reads realized rates off whatever
+    schedule is live, and the step it ships stretches exactly the intervals
+    those rates are realized on — a contrast pooled over serves its own
+    correction produced walks the step down, converging on no correction at
+    all. At a matched relative interval the schedule cancels inside the
+    stratum, so serves from before and after any schedule change pool into one
+    statistic. Matching on the band alone is not enough: who gets served at a
+    given ratio moves with the schedule too, and the user half of the stratum
+    is what absorbs that.
     """
-    by_user = defaultdict(lambda: {0: [0, 0], 1: [0, 0]})
-    for y, gap_days, r, _z, user in events:
+    kappa, growth, ln_c = (retention["kappa"], retention["growth"],
+                           retention["ln_c_prior"])
+    strata = defaultdict(lambda: [[0, 0], [0, 0]])
+    for y, gap_days, r, z, user in events:
         if gap_days * 24 < MIN_RECALL_HOURS:
             continue        # under the stability floor: not a schedulable serve
-        cell = by_user[user][0 if r == 0 else 1]
+        lnS = min(max(ln_c + kappa * (z - Z0) + growth * r, LN_S_CLIP[0]), LN_S_CLIP[1])
+        x = gap_days / math.exp(lnS)
+        band = next((i for i, (lo, hi) in
+                     enumerate(zip(STEP_X_BANDS, STEP_X_BANDS[1:]))
+                     if lo <= x < hi), None)
+        if band is None:
+            continue
+        cell = strata[(user, band)][0 if r == 0 else 1]
         cell[0] += y
         cell[1] += 1
 
     num = den = 0.0
     k0 = n0 = 0
-    strata = 0
-    for _user, c in by_user.items():
+    used = 0
+    users = set()
+    for (user, _band), c in strata.items():
         if c[0][1] < MIN_STEP_EVENTS_PER_CELL or c[1][1] < MIN_STEP_EVENTS_PER_CELL:
             continue
         A, B = float(c[1][0]), float(c[1][1] - c[1][0])      # rung >= 1
@@ -596,23 +624,26 @@ def fit_first_success_step(events):
         den += B * C / n
         k0 += c[0][0]
         n0 += c[0][1]
-        strata += 1
-    if strata < MIN_STEP_USERS or den <= 0 or num <= 0 or n0 == 0:
-        return None, f"{strata} users with >= {MIN_STEP_EVENTS_PER_CELL} events per cell"
+        used += 1
+        users.add(user)
+    if len(users) < MIN_STEP_USERS or den <= 0 or num <= 0 or n0 == 0:
+        return None, (f"{used} matched strata over {len(users)} users with >= "
+                      f"{MIN_STEP_EVENTS_PER_CELL} events per cell")
 
     odds_ratio = num / den
-    p0 = k0 / n0                                   # post-lapse realized rate
+    p0 = k0 / n0                                   # post-lapse rate, matched strata
     if not (0 < p0 < 1):
         return None, "degenerate rung-0 rate"
     odds1 = (p0 / (1 - p0)) * odds_ratio
-    p1 = odds1 / (1 + odds1)                       # post-success rate, within user
+    p1 = odds1 / (1 + odds1)                       # post-success rate, OR-shifted
     if not (0 < p1 < 1) or p1 <= p0:
         return None, f"post-success rate {p1:.3f} not above post-lapse {p0:.3f}"
     step = math.log(math.log(p0) / math.log(p1))   # ln of the interval multiplier
     if not (0 <= step < STEP_MAX):
         return None, f"step {step:.3f} outside [0, {STEP_MAX})"
-    return step, (f"OR {odds_ratio:.2f} over {strata} users; post-lapse {p0:.3f} "
-                  f"-> post-success {p1:.3f}; interval x{math.exp(step):.2f}")
+    return step, (f"matched OR {odds_ratio:.2f} over {used} strata "
+                  f"({len(users)} users); post-lapse {p0:.3f} -> post-success "
+                  f"{p1:.3f}; interval x{math.exp(step):.2f}")
 
 
 # ---------------------------------------------------------------------------
@@ -756,7 +787,7 @@ def main():
             out["retention"] = {k: round(v, 4) for k, v in fit.items()}
             print(f"  KAPPA={fit['kappa']:.3f}  GROWTH={fit['growth']:.3f}  "
                   f"LN_C_PRIOR={fit['ln_c_prior']:.3f}  (Z0={fit['z0']:.3f} fixed)")
-            step, step_info = fit_first_success_step(events)
+            step, step_info = fit_first_success_step(events, fit)
             if step is None:
                 _resort_to_default("retention.first_success_step", step_info,
                                    args.allow_defaults)
