@@ -162,6 +162,8 @@ const isVisible = (node) => {
 const BUBBLES = {
     // The one bubble that describes the input itself, so it has to match the
     // branch board.js takes: two taps to play on touch, one click on desktop.
+    // Offered on a shared problem too — for a newcomer arriving through a link
+    // that IS the first board.
     intro: {
         kind: 'trigger', anchor: 'board', placement: 'above',
         text: () => (usesTapToConfirm() ? 'onbIntroTouch' : 'onbIntro'),
@@ -470,21 +472,21 @@ export function initOnboarding() {
     markActive();
     _sessionCount = lsNum(K_SESSION_COUNT) || 1;
     _suppressed = !!lsGet(K_SUPPRESSED);
-    // Feature-announcement bubbles (bypassSuppression) run for everyone.
+    // Feature-announcement bubbles (bypassSuppression) run for everyone; the
+    // first-run ones only for a genuinely new user.
     _featureReady = true;
+    if (!_suppressed) {
+        _ready = true;
+        // Keep the push-subscription snapshot fresh for the notify gate.
+        refreshSubscribed();
+    }
 
-    // A shared problem opened from its link paints BEFORE this init runs, so
-    // its paint hook was a no-op — evaluate it here.
-    if (state.appMode === APP_MODES.LINKED) onLinkedProblemShown();
-
-    if (_suppressed) return;   // existing user — no first-run bubbles, ever
-    _ready = true;
-
-    // Keep the push-subscription snapshot fresh for the notify gate.
-    refreshSubscribed();
-
-    // Evaluate whatever's already on screen (the first problem at boot).
+    // Evaluate whatever is already on screen — the first problem at boot. A
+    // shared problem painted BEFORE this init ran, so its paint hook was a
+    // no-op. Both hooks are silent for whoever they don't apply to, and this
+    // has to come AFTER readiness is decided or the regular path refuses.
     if (state.appMode === APP_MODES.SOLVING) onSolvingProblemShown(state.currentProblem);
+    else if (state.appMode === APP_MODES.LINKED) onLinkedProblemShown();
 }
 
 // --- public trigger hooks ----------------------------------------------------
@@ -544,8 +546,13 @@ export function onTrainingFocusShown() {
 }
 
 // A shared (linked) problem just painted (js/problem-loader.js, and init for
-// the boot-time case). Feature path: shared links reach existing users too.
+// the boot-time case). A newcomer gets the intro (regular path, so it is
+// silent for existing users); anyone with a rank gets the try-out notice
+// (feature path — shared links reach existing users too). The two gates
+// (≤1 and ≥5 attempts) never both hold, and a scheduled intro makes the
+// second call a no-op anyway.
 export function onLinkedProblemShown() {
+    tryShow(['intro']);
     tryShowFeature('linked');
 }
 
@@ -554,4 +561,5 @@ export function onResume() {
     markActive();
     refreshSubscribed();
     if (state.appMode === APP_MODES.SOLVING) onSolvingProblemShown(state.currentProblem);
+    else if (state.appMode === APP_MODES.LINKED) onLinkedProblemShown();
 }

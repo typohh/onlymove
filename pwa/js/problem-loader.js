@@ -679,8 +679,9 @@ function displayProblem(problem, appMode) {
     updateAllUI();
     // First-run onboarding: a bubble may be offered on the freshly-painted
     // solving board (intro, recall, rank, komi, install, notify) — no-op for
-    // anyone but a genuinely new user — or the try-out notice on a shared
-    // problem, which reaches everyone. Review paints get nothing here.
+    // anyone but a genuinely new user — or, on a shared problem, the intro for
+    // a newcomer / the try-out notice for anyone ranked. Review paints get
+    // nothing here.
     if (appMode === APP_MODES.SOLVING) onboardingSolvingProblemShown(problem);
     else if (appMode === APP_MODES.LINKED) onboardingLinkedProblemShown();
 }
