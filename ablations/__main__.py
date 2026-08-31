@@ -34,9 +34,13 @@ PRODUCERS = (
     "serve_log_figures",
     "curve_shape_figures",
     "recall_figures",
+    "client_estimator_figures",
+    "rank_map_arm_figures",
     "rank_calibration_figures",
     "published_params_figures",
     "motif_null_figures",
+    "axes_fit_figures",
+    "cast_error_figures",
 )
 
 

@@ -1314,11 +1314,11 @@ def emit_alt_stats(output_dir):
     same per-cell projection the alternatives are drawn from. The nominally
     equivalent vectors in per_problem.csv (hence lookup.embeddings.bin and each
     shard's metadata.json) are not bit-identical to it, and referencing one of
-    those compares cells across two projections: measured over a corpus sample,
-    it moves a count for ~1.8% of problems against the CSV-derived sidecar and
-    ~4.6% against metadata.json. Row 0 also matches what the client computes on
-    a live wrong attempt, which reads the answer's own row out of the same
-    block, so the two producers agree exactly rather than nearly.
+    those compares cells across two projections, moving counts on a few percent
+    of problems (`ablations.motif_null_figures` measures both rates against the
+    shipped artifacts). Row 0 also matches what the client computes on a live
+    wrong attempt, which reads the answer's own row out of the same block, so
+    the two producers agree exactly rather than nearly.
 
     Row 0 IS the answer: generation enforces the answer as the first root
     variation and every backend stage reads it positionally. The pass-row

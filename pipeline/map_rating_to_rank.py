@@ -311,13 +311,22 @@ def _bucket(decls):
     return blocks
 
 
-def fit_consensus(decls):
+def fit_consensus(decls, identity_servers=()):
     """Jointly fit the rating→consensus curve M, the global time slope α, and the
     per-server couplings (EGF included). decls rows are (server, rating, declared
     scalar, T[, weight]) — weight defaults to 1 for a plain one-row-per-declaration
     anchor. Returns (a, alpha, ys, egf_thr_ranks, server_fits) where `a` are the
-    rating values at each consensus boundary `ys`."""
+    rating values at each consensus boundary `ys`.
+
+    `identity_servers` holds a server's coupling AT IDENTITY instead of fitting it,
+    which makes that server the privileged hub the latent is defined by rather than
+    one coupling among many — the design whose cost docs/methodology.md §1.12
+    states, measured by ablations.rank_map_arm_figures. A pinned coupling fixes the
+    gauge on its own, so GAUGE_WEIGHT's translation pin (which exists only to pin it
+    when nothing else does) is not applied. PRODUCTION PASSES NOTHING HERE and the
+    default is the consensus fit, unchanged."""
     decls = [d if len(d) == 5 else (*d, 1.0) for d in decls]
+    identity_servers = set(identity_servers)
     egf_thr_ranks, ys, S, dS = _curve_arrays()
     nseg = len(dS)
     blocks = _bucket(decls)
@@ -337,6 +346,9 @@ def fit_consensus(decls):
 
     srv_layout, x0, idx = [], [a0, float(np.log(max(b0, 1e-3)))] + [0.0] * nseg + [0.0], 3 + nseg
     for server, blk in blocks.items():
+        if server in identity_servers:
+            srv_layout.append((server, None, 0))   # held at identity: no free thresholds
+            continue
         n = len(blk["baseline"]) + 1
         srv_layout.append((server, idx, n))
         x0.append(float(blk["g_min"]))
@@ -357,18 +369,21 @@ def fit_consensus(decls):
         nll, pen, w_off, w_tot = 0.0, 0.0, 0.0, 0.0
         for server, st, n in srv_layout:
             blk = blocks[server]
-            thr = _unpack_thresholds(params[st:st + n], blk["baseline"])
+            thr = (blk["identity"] if st is None
+                   else _unpack_thresholds(params[st:st + n], blk["baseline"]))
             x_int = interp_extrap_vec(blk["rating"] + alpha * blk["T"], a, ys)
             nll += ordinal_nll_vec(thr, x_int, blk["k"], blk["w"],
                                    eps=EPS_CONTAMINATION)
-            pen += SERVER_LAMBDA * float(np.sum(params[st + 1:st + n] ** 2))
+            if st is not None:
+                pen += SERVER_LAMBDA * float(np.sum(params[st + 1:st + n] ** 2))
             w = float(np.sum(blk["w"]))     # reliability weight = declaration weight
             w_off += w * float(np.mean(thr - blk["identity"]))
             w_tot += w
         if nseg:
             pen += LAMBDA_SHAPE * float(np.sum(params[2:2 + nseg] ** 2))
         pen += LAMBDA_TIME * float(alpha ** 2)
-        pen += GAUGE_WEIGHT * (w_off / w_tot) ** 2         # gauge: n-weighted mean offset → 0
+        if not identity_servers:
+            pen += GAUGE_WEIGHT * (w_off / w_tot) ** 2     # gauge: n-weighted mean offset → 0
         return nll + pen
 
     # Intermediate optimizer steps can momentarily collapse the curve (β→0), which
@@ -379,7 +394,8 @@ def fit_consensus(decls):
     server_fits = {}
     for server, st, n in srv_layout:
         blk = blocks[server]
-        thr = _unpack_thresholds(res.x[st:st + n], blk["baseline"])
+        thr = (blk["identity"] if st is None
+               else _unpack_thresholds(res.x[st:st + n], blk["baseline"]))
         gs = list(range(blk["g_min"] + 1, blk["g_max"] + 1))
         server_fits[server] = {gs[i]: float(thr[i]) for i in range(len(gs))}
     return a, float(alpha), ys, egf_thr_ranks, server_fits

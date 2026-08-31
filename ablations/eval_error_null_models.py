@@ -975,8 +975,14 @@ def phase2(prob_keys, problems, arms, offsets, sizes, counts, gtp_all, matched,
     every residual and every flag delta is taken against — the reference arm,
     not what ships: the client ships the visits-linear column.
 
-    Returns the per-axis statistics the figure producer reads
-    (ablations.motif_null_figures); everything else is the printed record.
+    Returns the statistics the figure producer reads
+    (ablations.motif_null_figures); everything else is the printed record. The
+    panels (`pnull`, `tested`, `flag`) are indexed by that same null order, so a
+    consumer picks the shipped column by TAG; `adjudication` is phase 2b's own
+    panel; and `users` is the raw per-user accumulators this function builds for
+    the flag table — kept rather than reduced, because a consumer asking what a
+    user's reading correlates with needs the per-user numbers and not the
+    population shares.
     """
     print("\n" + "=" * 78)
     print("PHASE 2 -- directional (toward-the-motif) share per axis")
@@ -1215,8 +1221,8 @@ def phase2(prob_keys, problems, arms, offsets, sizes, counts, gtp_all, matched,
           + ", ".join(f"{labels[k]}={int(flag_legacy[k]):,}" for k in range(K))
           + ".")
 
-    phase2b(labels, tags, names, prob_p, row_pidx, row_toward, row_nontie,
-            counts, nprob, K)
+    adjudication = phase2b(labels, tags, names, prob_p, row_pidx, row_toward,
+                           row_nontie, counts, nprob, K)
 
     return {
         "labels": labels, "tags": tags,
@@ -1224,6 +1230,13 @@ def phase2(prob_keys, problems, arms, offsets, sizes, counts, gtp_all, matched,
         "tested": tested, "flag": flag,             # (n_null, K) user counts
         "flag_legacy": flag_legacy,                 # (K,) fixed-50% flags, on tested[0]
         "n_users": n_users,
+        "min_errors": MIN_ERRORS,
+        "adjudication": adjudication,               # phase 2b, see phase2b()
+        # user_id -> {"n", "tw", "p", "v"}, each (n_null, K): the user's scored
+        # errors on that axis under that null, how many leaned toward the motif,
+        # and the null's summed mean and variance for them. UNFILTERED -- the
+        # >= MIN_ERRORS gate is applied where a reading is formed, not here.
+        "users": users,
     }
 
 
@@ -1245,6 +1258,19 @@ def phase2b(labels, tags, names, prob_p, row_pidx, row_toward, row_nontie,
     function of the problem. The fitted arm carries its phase-1 cross-fitting
     with it, which is what keeps it an honest reference rather than a bound it
     reaches by having seen these errors.
+
+    Returns the panel this table is printed from, so a figure producer quotes
+    the adjudicating numbers rather than a re-derivation of them:
+
+      ll      (n_null, K)  mean directional log-loss per scored error, per axis
+      ll_all  (n_null,)    the same pooled over axes
+      b_d     (B, n_null, K)  bootstrap of ll[j] - ll[0], paired over problems
+      b_d_all (B, n_null)     the same for the pooled column
+      n       (K,)         scored errors behind each axis' column
+
+    Column 0 is the uniform reference arm in every one of them, so a delta is
+    read against uniform and a difference between two nulls is the difference of
+    their deltas -- on the same resample, which is what keeps it paired.
     """
     print("\n" + "=" * 78)
     print("PHASE 2b -- per-error DIRECTIONAL log-loss: does the null predict "
@@ -1346,6 +1372,9 @@ def phase2b(labels, tags, names, prob_p, row_pidx, row_toward, row_nontie,
           "(tendency_null_variants) rises\nwith RETAINED problem structure and "
           "so cannot referee between nulls either.\nA null belongs on the "
           "client when it predicts the SIDE better than uniform.")
+
+    return {"ll": ll, "ll_all": ll_all, "b_d": b_d, "b_d_all": b_d_all,
+            "n": total_n}
 
 
 if __name__ == "__main__":
