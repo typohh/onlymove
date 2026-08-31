@@ -53,6 +53,7 @@ from utils.rating.features import load_first_time_attempts  # noqa: E402
 from auxiliary.rating_dev.model_comparison import build_profiles  # noqa: E402
 from utils.rating.fit_rank_curves import CALIBRATION_P  # noqa: E402
 from utils.rating.ratings_io import load_size_value_maps  # noqa: E402
+from utils.rating.rank_surveys import SURVEY_RHO_MIN_SERVER, server_weighted_spearman  # noqa: E402
 
 EPS = 1e-6
 SIZES = [9, 13]
@@ -74,7 +75,7 @@ def clear_logit_vec(c, lapse=0.0):
 # still scores a fresh run's own cross-fitted time-adjusted rho, independent of the shipped dock.
 TA_MIN_TIMED = 20          # timed novel attempts needed for a user's time feature
 TA_MIN_PAIRS = 50          # (user, server) survey pairs needed to fit alpha
-TA_MIN_SERVER_USERS = 5    # per-server minimum for a Spearman term
+TA_MIN_SERVER_USERS = SURVEY_RHO_MIN_SERVER    # per-server minimum for a Spearman term
 TA_ALPHA_GRID = np.linspace(-1.5, 0.5, 81)   # rating units per log10-minute
 TA_CV_FOLDS = 5
 TA_CV_SEEDS = 10
@@ -85,23 +86,10 @@ def _weighted_spearman(pairs, alpha):
     """pairs: [(user, server, rating, rank_value, centered_feature)]. Per-server
     Spearman(rating + alpha·feature, declared rank), user-count-weighted mean."""
     from collections import defaultdict
-    from scipy.stats import spearmanr
     by_server = defaultdict(list)
     for _, server, rating, sc, f in pairs:
         by_server[server].append((rating + alpha * f, sc))
-    acc, w = 0.0, 0.0
-    for rows_ in by_server.values():
-        if len(rows_) < TA_MIN_SERVER_USERS:
-            continue
-        r = np.array([x for x, _ in rows_])
-        s = np.array([y for _, y in rows_])
-        if np.ptp(r) == 0 or np.ptp(s) == 0:
-            continue
-        rho = spearmanr(r, s).statistic
-        if np.isfinite(rho):
-            acc += rho * len(rows_)
-            w += len(rows_)
-    return acc / w if w else np.nan
+    return server_weighted_spearman(by_server, TA_MIN_SERVER_USERS)[0]
 
 
 def _user_log10_median_solve_min(sql_path, prefixes, afk_cap_ms, min_timed):
@@ -217,14 +205,9 @@ def survey_weighted_rho(ratemap, slopemap, min_attempts=20, min_server=4, time_a
             continue
         serv[row["server"]].append((user_rating[pref], float(g)))
 
-    def spear(pairs):
-        x = np.array([p[0] for p in pairs]); y = np.array([p[1] for p in pairs])
-        return float(np.corrcoef(np.argsort(np.argsort(x)), np.argsort(np.argsort(y)))[0, 1])
-    per = {s: (len(p), spear(p)) for s, p in serv.items() if len(p) >= min_server}
+    wrho, per = server_weighted_spearman(serv, min_server)
     if not per:
         return float("nan"), {}, None
-    wn = sum(n for n, _ in per.values())
-    wrho = sum(n * r for n, r in per.values()) / wn
     ta = _time_adjusted_rho(surveys, user_rating, SQL_PATH_DEFAULT) if time_adjust else None
     return wrho, per, ta
 

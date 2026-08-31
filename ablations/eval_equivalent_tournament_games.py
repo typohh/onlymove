@@ -541,21 +541,26 @@ def run_window(x, scale, true_ranks, sampler, args, rng):
 # Targets
 # ---------------------------------------------------------------------------
 
-def load_declarations(csv_path, scope):
+def load_declarations(csv_path, scope, kind="all"):
     """The declarations we are matching, straight from the check script's CSV.
 
     Read rather than hardcoded so a refit moves the target with it. `scope` picks the
     declarations; EGF keeps everything on one ladder (self-reported EGF plus the
     verified EGD heartbeats, which is the same coupling), ALL pools every server's own
     units — and note that pooling raises rho by adding the between-server spread to
-    it, so a pooled rho is not the same statistic as a per-server one."""
+    it, so a pooled rho is not the same statistic as a per-server one. `kind` then
+    keeps only the self-reported rows (`survey`) or the machine-verified ones
+    (`verified`); the verified subset is the like-for-like target, since its other
+    side carries no declaration error."""
     import pandas as pd
 
     df = pd.read_csv(csv_path)
     if scope != "all":
         df = df[df["system"] == scope]
+    if kind != "all":
+        df = df[df["kind"] == kind]
     if df.empty:
-        sys.exit(f"No declarations in scope {scope!r} in {csv_path}")
+        sys.exit(f"No declarations in scope {scope!r} / kind {kind!r} in {csv_path}")
     return df[["our_internal_adj", "declared_internal", "err_server"]].to_numpy(float)
 
 
@@ -602,7 +607,7 @@ def match_x(xs, values, target, increasing):
 
 # ---------------------------------------------------------------------------
 
-def main():
+def main(argv=None):
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--targets", default=None,
@@ -611,6 +616,9 @@ def main():
     ap.add_argument("--scope", default="EGF",
                     help="Which declarations to match: a system name (EGF, OGS, ...) "
                          "or 'all' to pool every server in its own units.")
+    ap.add_argument("--kind", choices=["all", "survey", "verified"], default="all",
+                    help="Within the scope: every declaration, only self-reports, or "
+                         "only machine-verified ratings (EGD / AGA heartbeats).")
     ap.add_argument("--table", default=TABLE_PATH)
     ap.add_argument("--link", choices=["table", "se-blocks"], default="table",
                     help="'table': the declared-grade first table (as published). "
@@ -661,7 +669,7 @@ def main():
                     help="Resamples of the declarations behind the target, for the "
                          "sampling margin on the matched game count. 0 to skip.")
     ap.add_argument("--seed", type=int, default=0)
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
 
     # --- the win-probability law ---
     cells = parse_even_game_table(args.table)
@@ -715,10 +723,10 @@ def main():
     # --- what we are matching ---
     targets, cohort_ranks, decl = (None, None, None)
     if args.targets:
-        decl = load_declarations(args.targets, args.scope)
+        decl = load_declarations(args.targets, args.scope, args.kind)
         targets = target_stats(decl)
         cohort_ranks = decl[:, 1]
-        print(f"\nonlymove measured accuracy  [scope={args.scope}, "
+        print(f"\nonlymove measured accuracy  [scope={args.scope}, kind={args.kind}, "
               f"n={targets['n']}]")
         print(f"  rho {targets['rho']:.3f}   within1 {100*targets['within1']:.0f}%"
               f"   within2 {100*targets['within2']:.0f}%"
@@ -751,7 +759,7 @@ def main():
               f"{agg['trend_mae']:>+17.4f}")
 
     if targets is None:
-        return
+        return None
 
     # --- match, with the declarations' own sampling margin carried through ---
     # The simulated curves are held fixed and the DECLARATIONS are resampled, because
@@ -802,19 +810,24 @@ def main():
         print(f"{key:>12}{fmt:>11}{shown:>10}"
               + (_margin(key) if args.bootstrap and x_hat is not None else ""))
 
-    named = [match_x(xs, curves[k], targets[k], True)[0]
-             for k in ("rho", "within1", "within2")]
+    matched = {key: match_x(xs, curves[key], targets[key], inc)[0] for key, inc in stats}
+    named = [matched[k] for k in ("rho", "within1", "within2")]
+    headline = headline_sd = None
     if args.bootstrap and boot["headline"] and all(p is not None for p in named):
         v = np.array(boot["headline"])
-        point = float(np.mean(named))
+        headline, headline_sd = float(np.mean(named)), float(v.std())
         print(f"\n  headline (rho + within1 + within2 pooled): "
-              f"{point:.0f} ± {float(v.std()):.0f} games"
+              f"{headline:.0f} ± {headline_sd:.0f} games"
               f"   [bootstrap mean {float(v.mean()):.1f}, "
               f"{np.percentile(v, 2.5):.0f}–{np.percentile(v, 97.5):.0f} at 95%]")
         if censored:
             print(f"  {censored} of {args.bootstrap} draws dropped: at least one "
                   f"statistic matched outside the swept range.")
     print("\n  '>N' / '<N' mean the match lies outside the swept range.")
+    # What a caller (ablations.rank_calibration_figures) reads; None where a
+    # statistic matched outside the swept range.
+    return {"n": targets["n"], "targets": targets, "games": matched,
+            "headline": headline, "headline_sd": headline_sd, "censored": censored}
 
 
 if __name__ == "__main__":

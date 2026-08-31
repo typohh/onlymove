@@ -1,0 +1,285 @@
+{
+  "figures": {
+    "corpus.problems_13": {
+      "value": 113541,
+      "fmt": "~1000",
+      "text": "114,000",
+      "producer": "ablations.corpus_figures",
+      "tier": "about",
+      "note": "published 13×13 problems, to the nearest thousand",
+      "measured": {
+        "at": "2026-08-31T14:01:13Z",
+        "git": "6c92e8b5d18+dirty",
+        "db_max_id": 457114,
+        "data_version": "d0cb02d7066a787e"
+      }
+    },
+    "corpus.problems_9": {
+      "value": 106922,
+      "fmt": "~1000",
+      "text": "107,000",
+      "producer": "ablations.corpus_figures",
+      "tier": "about",
+      "note": "published 9×9 problems, to the nearest thousand",
+      "measured": {
+        "at": "2026-08-31T14:01:13Z",
+        "git": "6c92e8b5d18+dirty",
+        "db_max_id": 457114,
+        "data_version": "d0cb02d7066a787e"
+      }
+    },
+    "corpus.problems_total": {
+      "value": 220463,
+      "fmt": "~1000",
+      "text": "220,000",
+      "producer": "ablations.corpus_figures",
+      "tier": "about",
+      "note": "problems in the published index, to the nearest thousand",
+      "measured": {
+        "at": "2026-08-31T14:01:13Z",
+        "git": "6c92e8b5d18+dirty",
+        "db_max_id": 457114,
+        "data_version": "d0cb02d7066a787e"
+      }
+    },
+    "published.floor_above_calibration": {
+      "value": 11,
+      "fmt": "d",
+      "text": "11",
+      "producer": "ablations.published_params_figures",
+      "tier": "methodology",
+      "note": "published problems whose floor exceeds the calibration probability 0.8, so their rating is a sentinel rather than an 80%-clear point",
+      "measured": {
+        "at": "2026-08-31T13:53:54Z",
+        "git": "6c92e8b5d18+dirty",
+        "db_max_id": 457114,
+        "data_version": "d0cb02d7066a787e"
+      }
+    },
+    "published.floor_above_calibration_rank_strongest": {
+      "value": -14.199644052069761,
+      "fmt": "rank",
+      "text": "15k",
+      "producer": "ablations.published_params_figures",
+      "tier": "methodology",
+      "note": "strongest rank a sentinel rating maps to",
+      "measured": {
+        "at": "2026-08-31T13:53:54Z",
+        "git": "6c92e8b5d18+dirty",
+        "db_max_id": 457114,
+        "data_version": "d0cb02d7066a787e"
+      }
+    },
+    "published.floor_above_calibration_rank_weakest": {
+      "value": -44.53513846676701,
+      "fmt": "rank",
+      "text": "45k",
+      "producer": "ablations.published_params_figures",
+      "tier": "methodology",
+      "note": "weakest rank a sentinel rating maps to through the published curve",
+      "measured": {
+        "at": "2026-08-31T13:53:54Z",
+        "git": "6c92e8b5d18+dirty",
+        "db_max_id": 457114,
+        "data_version": "d0cb02d7066a787e"
+      }
+    },
+    "published.floor_max": {
+      "value": 0.9709672927856445,
+      "fmt": ".3f",
+      "text": "0.971",
+      "producer": "ablations.published_params_figures",
+      "tier": "methodology",
+      "note": "largest guessing floor among the published problems",
+      "measured": {
+        "at": "2026-08-31T13:53:54Z",
+        "git": "6c92e8b5d18+dirty",
+        "db_max_id": 457114,
+        "data_version": "d0cb02d7066a787e"
+      }
+    },
+    "published.floor_near_calibration": {
+      "value": 5,
+      "fmt": "d",
+      "text": "5",
+      "producer": "ablations.published_params_figures",
+      "tier": "methodology",
+      "note": "published problems with a floor in [0.75, 0.8] — the approach band, below the threshold",
+      "measured": {
+        "at": "2026-08-31T13:53:54Z",
+        "git": "6c92e8b5d18+dirty",
+        "db_max_id": 457114,
+        "data_version": "d0cb02d7066a787e"
+      }
+    },
+    "published.floor_p999": {
+      "value": 0.5489345388412492,
+      "fmt": ".2f",
+      "text": "0.55",
+      "producer": "ablations.published_params_figures",
+      "tier": "methodology",
+      "note": "guessing floor at the 99.9th percentile of the published set",
+      "measured": {
+        "at": "2026-08-31T13:53:54Z",
+        "git": "6c92e8b5d18+dirty",
+        "db_max_id": 457114,
+        "data_version": "d0cb02d7066a787e"
+      }
+    },
+    "published.slope_min": {
+      "value": 0.39567798376083374,
+      "fmt": ".2f",
+      "text": "0.40",
+      "producer": "ablations.published_params_figures",
+      "tier": "methodology",
+      "note": "smallest published discrimination slope",
+      "measured": {
+        "at": "2026-08-31T13:53:54Z",
+        "git": "6c92e8b5d18+dirty",
+        "db_max_id": 457114,
+        "data_version": "d0cb02d7066a787e"
+      }
+    },
+    "rank.games_equivalent": {
+      "value": 14.690984615836355,
+      "fmt": ".0f",
+      "text": "15",
+      "producer": "ablations.rank_calibration_figures",
+      "tier": "about",
+      "note": "tournament games per player at which two independent ratings agree as well as the shown rank agrees with a declared EGF rank",
+      "measured": {
+        "at": "2026-08-31T14:01:13Z",
+        "git": "6c92e8b5d18+dirty",
+        "db_max_id": 457114,
+        "data_version": "d0cb02d7066a787e"
+      }
+    },
+    "rank.games_equivalent_sd": {
+      "value": 2.6065726945768977,
+      "fmt": ".0f",
+      "text": "3",
+      "producer": "ablations.rank_calibration_figures",
+      "tier": "about",
+      "note": "its bootstrap SD over the declarations behind the target",
+      "measured": {
+        "at": "2026-08-31T14:01:13Z",
+        "git": "6c92e8b5d18+dirty",
+        "db_max_id": 457114,
+        "data_version": "d0cb02d7066a787e"
+      }
+    },
+    "rank.games_n": {
+      "value": 102,
+      "fmt": "d",
+      "text": "102",
+      "producer": "ablations.rank_calibration_figures",
+      "tier": "about",
+      "note": "EGF declarations the match rests on",
+      "measured": {
+        "at": "2026-08-31T14:01:13Z",
+        "git": "6c92e8b5d18+dirty",
+        "db_max_id": 457114,
+        "data_version": "d0cb02d7066a787e"
+      }
+    },
+    "rank.n_declarations": {
+      "value": 416,
+      "fmt": "~10",
+      "text": "420",
+      "producer": "ablations.rank_calibration_figures",
+      "tier": "about",
+      "note": "self-declared (player, server) ranks",
+      "measured": {
+        "at": "2026-08-31T14:01:13Z",
+        "git": "6c92e8b5d18+dirty",
+        "db_max_id": 457114,
+        "data_version": "d0cb02d7066a787e"
+      }
+    },
+    "rank.n_players": {
+      "value": 212,
+      "fmt": "~10",
+      "text": "210",
+      "producer": "ablations.rank_calibration_figures",
+      "tier": "about",
+      "note": "players behind rank.n_declarations",
+      "measured": {
+        "at": "2026-08-31T14:01:13Z",
+        "git": "6c92e8b5d18+dirty",
+        "db_max_id": 457114,
+        "data_version": "d0cb02d7066a787e"
+      }
+    },
+    "rank.rho": {
+      "value": 0.8444873475097161,
+      "fmt": ".2f",
+      "text": "0.84",
+      "producer": "ablations.rank_calibration_figures",
+      "tier": "about",
+      "note": "per-server Spearman(mapped rating, declared rank), n-weighted, self-declarations",
+      "measured": {
+        "at": "2026-08-31T14:01:13Z",
+        "git": "6c92e8b5d18+dirty",
+        "db_max_id": 457114,
+        "data_version": "d0cb02d7066a787e"
+      }
+    },
+    "rank.rho_se": {
+      "value": 0.024484564355916432,
+      "fmt": ".2f",
+      "text": "0.02",
+      "producer": "ablations.rank_calibration_figures",
+      "tier": "about",
+      "note": "bootstrap SE of rank.rho over players",
+      "measured": {
+        "at": "2026-08-31T14:01:13Z",
+        "git": "6c92e8b5d18+dirty",
+        "db_max_id": 457114,
+        "data_version": "d0cb02d7066a787e"
+      }
+    },
+    "rank.within1_pct": {
+      "value": 0.3076923076923077,
+      "fmt": "%.0f",
+      "text": "31",
+      "producer": "ablations.rank_calibration_figures",
+      "tier": "about",
+      "note": "self-declarations with the shown server rank within one rank of the declared",
+      "measured": {
+        "at": "2026-08-31T14:01:13Z",
+        "git": "6c92e8b5d18+dirty",
+        "db_max_id": 457114,
+        "data_version": "d0cb02d7066a787e"
+      }
+    },
+    "rank.within2_pct": {
+      "value": 0.5841346153846154,
+      "fmt": "%.0f",
+      "text": "58",
+      "producer": "ablations.rank_calibration_figures",
+      "tier": "about",
+      "note": "…within two ranks",
+      "measured": {
+        "at": "2026-08-31T14:01:13Z",
+        "git": "6c92e8b5d18+dirty",
+        "db_max_id": 457114,
+        "data_version": "d0cb02d7066a787e"
+      }
+    },
+    "rank.within_se_pts": {
+      "value": 0.0294568258673581,
+      "fmt": "%.0f",
+      "text": "3",
+      "producer": "ablations.rank_calibration_figures",
+      "tier": "about",
+      "note": "larger bootstrap SE of the two within-shares, percentage points",
+      "measured": {
+        "at": "2026-08-31T14:01:13Z",
+        "git": "6c92e8b5d18+dirty",
+        "db_max_id": 457114,
+        "data_version": "d0cb02d7066a787e"
+      }
+    }
+  },
+  "_about": "Measured figures the documents quote, one key per number. Written by `python -m ablations`; raw `value` + `fmt` are the record, `text` is derived. Never edit by hand — re-run the producer."
+}

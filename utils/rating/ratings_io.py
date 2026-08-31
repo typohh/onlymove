@@ -209,3 +209,23 @@ def load_time_adjust(ratings_dir):
     if not ta:
         return None
     return (float(ta["alpha_per_log10_min"]), float(ta["center_log10_min"]))
+
+
+def read_problem_params(path):
+    """The published per-problem parameter table (`pwa/tsumegos/problem_params.bin`):
+    16-byte rows of a 4-byte id (the 8-hex tsumego id) followed by little-endian
+    float32 (rating, slope, floor), the layout `package_for_pwa.emit_problem_params`
+    writes and the Worker and client read into one Map. Returns
+    {"id": [hex, ...], "rating": f32[], "slope": f32[], "floor": f32[]}. Raises on a
+    missing file or a length that is not a whole number of rows."""
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"no {path} — run pipeline.package_for_pwa")
+    dt = np.dtype([("id", "V4"), ("rating", "<f4"), ("slope", "<f4"), ("floor", "<f4")])
+    size = os.path.getsize(path)
+    if size % dt.itemsize:
+        raise ValueError(f"{path}: {size} bytes is not a whole number of 16-byte rows")
+    arr = np.fromfile(path, dtype=dt)
+    raw = arr["id"].tobytes()
+    ids = [raw[i:i + 4].hex() for i in range(0, len(raw), 4)]
+    return {"id": ids, "rating": arr["rating"].astype(np.float64),
+            "slope": arr["slope"].astype(np.float64), "floor": arr["floor"].astype(np.float64)}

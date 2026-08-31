@@ -5,6 +5,7 @@ import fsSync from 'fs';
 import path from 'path';
 import crypto from 'node:crypto';
 import { buildMethodologyPage } from './scripts/methodology-to-html.mjs';
+import { checkFigures } from './scripts/figures-check.mjs';
 
 const EMBEDDING_META_PATH = 'tsumegos/embedding_meta.json';
 
@@ -224,6 +225,10 @@ async function oneShotBuild() {
     await copyStaticAssets();
     console.log('✅ Static assets copied.');
 
+    // Every figure the documents quote must be the one ablations/figures.json holds.
+    const figures = await checkFigures();
+    console.log(`✅ ${figures.spans} quoted figures match ablations/figures.json.`);
+
     const methodology = await buildMethodologyPage(DIST_DIR);
     console.log(`✅ methodology.html generated (${methodology.sections} headings).`);
 
@@ -283,6 +288,8 @@ async function watchBuild() {
             staticRebuildTimer = null;
             try {
                 await copyStaticAssets();
+                // A warning here, not a failure: a stale figure must not stop the dev loop.
+                await checkFigures().catch(err => console.error(`⚠️  ${err.message}`));
                 await buildMethodologyPage(DIST_DIR);
                 const result = await ctx.rebuild();
                 await patchHtmlAfterBuild(result.metafile, version);

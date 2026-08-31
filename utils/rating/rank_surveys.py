@@ -297,3 +297,35 @@ def load_user_median_solve_minutes(sqlite_path, working_set=WORKING_SET):
         if len(ts) >= TIME_ADJUST_MIN_TIMED:
             out[pref] = float(np.median(ts)) / 60000.0
     return out
+
+
+# Per-server minimum number of (rating, declared rank) pairs for a server to enter
+# the survey rho. Shared by the rating validation and the published figures.
+SURVEY_RHO_MIN_SERVER = 5
+
+
+def server_weighted_spearman(by_server, min_server=SURVEY_RHO_MIN_SERVER):
+    """The survey rho: per server, Spearman between a rating-side value and the
+    declared rank scalar, then the n-weighted mean over servers holding at least
+    `min_server` pairs. Per server rather than pooled because Spearman is offset-
+    and scale-invariant within a server, which is what makes it robust to server
+    populations that skew strong (EGF) or weak (OGS); pooling adds the
+    between-server spread and reports a higher number that is a different
+    statistic. `by_server`: {server: [(x, y), ...]}. Returns
+    (weighted_rho or nan, {server: (n, rho)}) over the servers that entered."""
+    from scipy.stats import spearmanr
+    per = {}
+    for server, pairs in by_server.items():
+        if len(pairs) < min_server:
+            continue
+        x = np.array([p[0] for p in pairs], dtype=float)
+        y = np.array([p[1] for p in pairs], dtype=float)
+        if np.ptp(x) == 0 or np.ptp(y) == 0:
+            continue
+        rho = float(spearmanr(x, y).statistic)
+        if np.isfinite(rho):
+            per[server] = (len(pairs), rho)
+    if not per:
+        return float("nan"), {}
+    w = sum(n for n, _ in per.values())
+    return sum(n * r for n, r in per.values()) / w, per

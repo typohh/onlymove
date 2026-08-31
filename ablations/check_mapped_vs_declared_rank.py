@@ -360,7 +360,7 @@ RANK_BANDS = [
 ]
 
 
-def main():
+def main(argv=None):
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--sql", default=SQL_PATH_DEFAULT)
@@ -381,7 +381,7 @@ def main():
     ap.add_argument("--sqlite",
                     default=DB_SQLITE,
                     help="SQLite DB for per-user median solve time (--time-adjust).")
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
 
     surveys = load_rank_surveys(args.sql)
     if surveys is None or surveys.empty:
