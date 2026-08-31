@@ -766,7 +766,7 @@ def load_joint_picked_activations(sizes, tids_by_size, pca_dim, seed):
     return out, int(k), status
 
 
-def load_first_time_attempts(with_move=False):
+def load_first_time_attempts(with_move=False, max_id=None):
     """Return a DataFrame of first-time attempts: one row per (user_id, problem),
     columns [user_id, problem, success, size, created_at] (plus `move` when
     `with_move`).
@@ -783,18 +783,31 @@ def load_first_time_attempts(with_move=False):
     move has to belong to the same attempt whose success/size/date the rest of
     the row describes. Older clients recorded no move, so the column is empty for
     a large share of rows and every consumer has to treat that as missing rather
-    than as a pass."""
+    than as a pass.
+
+    `max_id` caps the attempt id, which reconstructs this table as it stood
+    at that id: fetch_database only ever appends rows above the local MAX(id),
+    so an id prefix IS an earlier snapshot rather than an arbitrary subset. The
+    cap sits INSIDE the query, BEFORE the dedup, and that ordering is load
+    bearing — backfill inserts historical event times at the id frontier, so a
+    row above the cap can carry an earlier created_at than one below it. Cutting
+    first keeps whichever row that snapshot would have kept; deduping first and
+    filtering the result afterwards would drop the pair instead. Default None
+    reads the whole table."""
     if not os.path.exists(SQLITE_PATH):
         raise SystemExit(
             f"Missing {SQLITE_PATH}. Run `python -m pipeline.fetch_database` first.")
     cols = "user_id, problem, success, size, created_at"
     if with_move:
         cols += ", move"
+    sql = f"SELECT {cols} FROM tsumego_reports WHERE is_repeat = 0"
+    params = ()
+    if max_id is not None:
+        sql += " AND id <= ?"
+        params = (int(max_id),)
     con = sqlite3.connect(f"file:{SQLITE_PATH}?mode=ro", uri=True)
     try:
-        df = pd.read_sql_query(
-            f"SELECT {cols} FROM tsumego_reports WHERE is_repeat = 0",
-            con)
+        df = pd.read_sql_query(sql, con, params=params)
     finally:
         con.close()
     # Deduplicate to the earliest attempt per (user, problem).
@@ -805,7 +818,7 @@ def load_first_time_attempts(with_move=False):
     return df
 
 
-def load_first_time_picks():
+def load_first_time_picks(max_id=None):
     """{(user_id, problem): (size, x, y)} — the cell each FIRST-TIME WRONG attempt
     actually played, for the attempts that recorded one.
 
@@ -823,9 +836,13 @@ def load_first_time_picks():
 
     The GTP -> (x, y) conversion is imported INSIDE the function, following
     utils.rating.motif_rules: this module is read by the whole rating side and
-    importing it must not drag in the KataGo half of utils/."""
+    importing it must not drag in the KataGo half of utils/.
+
+    `max_id` caps the attempt id, and must carry the same value as the caller's
+    own attempt read: the dedup decides which attempt's move this is, so two
+    different cutoffs would pair a row with another attempt's pick."""
     from utils.katago.coords import gtp_to_xy
-    df = load_first_time_attempts(with_move=True)
+    df = load_first_time_attempts(with_move=True, max_id=max_id)
     df = df[(df["success"] == 0) & df["move"].notna() & (df["move"] != "")]
     out = {}
     for uid, tid, size, mv in zip(df["user_id"], df["problem"], df["size"],

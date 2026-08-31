@@ -8,6 +8,11 @@ and a validation bench that EVALUATES on it (auxiliary.rating_dev.validate_ratin
 hash, that they assumed the IDENTICAL set. The hash also implicitly guards against attempts-DB drift
 between the two (a changed universe → changed set → changed hash).
 
+`--max-attempt-id` caps the attempt id every universe is read from, which is how
+a hash recorded against an earlier DB is reproduced from a later one: the table
+only grows upward, so an id prefix IS an earlier snapshot of it.
+`ablations.reconstruct_snapshot` searches for the cutoff reproducing a given hash.
+
 CLI:
   ./.venv/bin/python3 -m auxiliary.rating_dev.holdout_set --seed 0 --frac 0.1   # print count + hash
   ./.venv/bin/python3 -m auxiliary.rating_dev.holdout_set --seed 0 --frac 0.1 --out s.txt # also dump the list
@@ -29,12 +34,14 @@ from utils.rating.features import load_first_time_attempts  # noqa: E402
 SIZES = [9, 13]
 
 
-def attempted_keys():
+def attempted_keys(max_id=None):
     """Sorted list of (size, tid) with >=1 first-time attempt — the held-out universe.
 
     Deterministic (a sorted set), so the seeded draw in held_out_keys is reproducible for a fixed
-    attempts DB. Restricted to SIZES; mirrors the size/problem columns the trainer reads."""
-    df = load_first_time_attempts()
+    attempts DB. Restricted to SIZES; mirrors the size/problem columns the trainer reads.
+
+    `max_id` caps the attempt id, reading the universe as it stood at that id."""
+    df = load_first_time_attempts(max_id=max_id)
     df = df[df["size"].isin(SIZES)]
     return sorted(set(zip(df["size"].astype(int).tolist(), df["problem"].astype(str).tolist())))
 
@@ -47,12 +54,15 @@ def hash_keys(keys):
     return h.hexdigest()[:16]
 
 
-def held_out_keys(seed, frac, universe=None):
+def held_out_keys(seed, frac, universe=None, max_id=None):
     """Return (sorted held-out [(size, tid)], hash). Deterministic in (seed, frac, universe).
 
     Draws round(frac * |universe|) members without replacement via np.random.default_rng(seed) over
-    the SORTED universe, so the selection is index-stable regardless of dict/iteration order."""
-    keys = sorted(universe) if universe is not None else attempted_keys()
+    the SORTED universe, so the selection is index-stable regardless of dict/iteration order.
+
+    `max_id` applies only when the universe is read here; an explicit `universe`
+    is taken as given."""
+    keys = sorted(universe) if universe is not None else attempted_keys(max_id)
     n = len(keys)
     n_ho = int(round(frac * n))
     rng = np.random.default_rng(seed)
@@ -61,7 +71,7 @@ def held_out_keys(seed, frac, universe=None):
     return ho, hash_keys(ho)
 
 
-def all_users():
+def all_users(max_id=None):
     """Sorted user ids over first-time attempts — the user-holdout universe.
 
     Deliberately NOT restricted to users who pass a trainer's MIN_ATTEMPTS
@@ -70,13 +80,15 @@ def all_users():
     users from the same seed. Drawing from everyone keeps the split identical
     across models; each trainer then applies its own filter to whatever remains,
     and the walk-forward simply scores whichever held-out users have the history
-    to be scored."""
-    df = load_first_time_attempts()
+    to be scored.
+
+    `max_id` caps the attempt id, reading the universe as it stood at that id."""
+    df = load_first_time_attempts(max_id=max_id)
     df = df[df["size"].isin(SIZES)]
     return sorted(set(df["user_id"].astype(str).tolist()))
 
 
-def all_rows():
+def all_rows(max_id=None):
     """Sorted (user_id, problem) pairs — the SAMPLE-holdout universe.
 
     The pair is a unique key because these are FIRST-TIME attempts: one row per
@@ -86,8 +98,10 @@ def all_rows():
     attempts, predicting this user's next one — and is the protocol a problem
     holdout (parameters from the feature prior alone) and a time-ordered
     walk-forward (parameters fitted on the very rows being scored) each miss
-    from opposite sides."""
-    df = load_first_time_attempts()
+    from opposite sides.
+
+    `max_id` caps the attempt id, reading the universe as it stood at that id."""
+    df = load_first_time_attempts(max_id=max_id)
     df = df[df["size"].isin(SIZES)]
     return sorted(zip(df["user_id"].astype(str).tolist(),
                       df["problem"].astype(str).tolist()))
@@ -104,20 +118,20 @@ def _draw(keys, seed, frac, fmt):
     return ho, h.hexdigest()[:16]
 
 
-def held_out_users(seed, frac, universe=None):
+def held_out_users(seed, frac, universe=None, max_id=None):
     """(sorted held-out user ids, hash). Whole users, for the WALK-FORWARD:
     parameters that never saw them, then theta fitted causally on their trailing
     window and the next block scored. That is production's walk-forward with its
     leak removed — utils.rating.slope_calibration scores rows whose problems'
     parameters were fitted ON those same rows, which rewards confidence and
     biases the slope scale upward."""
-    return _draw(sorted(universe) if universe is not None else all_users(),
+    return _draw(sorted(universe) if universe is not None else all_users(max_id),
                  seed, frac, lambda u: f"{u}\n")
 
 
-def held_out_rows(seed, frac, universe=None):
+def held_out_rows(seed, frac, universe=None, max_id=None):
     """(sorted held-out (user, problem) pairs, hash) — the SAMPLE holdout."""
-    return _draw(sorted(universe) if universe is not None else all_rows(),
+    return _draw(sorted(universe) if universe is not None else all_rows(max_id),
                  seed, frac, lambda k: f"{k[0]}:{k[1]}\n")
 
 
@@ -129,20 +143,26 @@ def main():
     ap.add_argument("--seed", type=int, required=True)
     ap.add_argument("--frac", type=float, required=True, help="Fraction of attempted problems to hold out.")
     ap.add_argument("--out", default=None, help="If set, write the held-out 'size,tid' list here.")
+    ap.add_argument("--max-attempt-id", type=int, default=None,
+                    help="Cap the attempt id, i.e. read the universe as it stood "
+                         "at that id. Reproduces a hash recorded against an "
+                         "earlier DB; ablations.reconstruct_snapshot finds the "
+                         "cutoff.")
     args = ap.parse_args()
+    mid = args.max_attempt_id
     if args.kind == "user":
-        universe = all_users()
+        universe = all_users(mid)
         ho, h = held_out_users(args.seed, args.frac, universe)
         print(f"universe (users): {len(universe)}")
         print(f"held out: {len(ho)} ({args.frac:g}) | seed {args.seed} | hash {h}")
         return
     if args.kind == "row":
-        universe = all_rows()
+        universe = all_rows(mid)
         ho, h = held_out_rows(args.seed, args.frac, universe)
         print(f"universe (first-time attempts): {len(universe)}")
         print(f"held out: {len(ho)} ({args.frac:g}) | seed {args.seed} | hash {h}")
         return
-    universe = attempted_keys()
+    universe = attempted_keys(mid)
     ho, h = held_out_keys(args.seed, args.frac, universe)
     by_size = {s: sum(1 for sz, _ in ho if sz == s) for s in SIZES}
     print(f"universe (attempted problems): {len(universe)} "

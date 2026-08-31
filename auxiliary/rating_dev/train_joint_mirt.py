@@ -906,6 +906,14 @@ def main():
                          "making the run an earlier refit of itself. Compare "
                          "its axes against the full fit at the same seed to "
                          "measure what one refit's worth of new data moves.")
+    ap.add_argument("--max-attempt-id", type=int, default=None,
+                    help="cap the attempt id, i.e. train against the DB as it "
+                         "stood at that id. The table only grows upward, so an "
+                         "id prefix is an earlier snapshot — this is what lets a "
+                         "run reproduce a holdout hash recorded before a "
+                         "fetch_database. Unlike --drop-recent-frac (a date cut "
+                         "simulating a refit) this reproduces an ACTUAL earlier "
+                         "state. ablations.reconstruct_snapshot finds the cutoff.")
     ap.add_argument("--holdout-user-frac", type=float, default=0.0,
                     help="hold out this fraction of USERS entirely (shared "
                          "generator, hash-printed) so a walk-forward on them is "
@@ -1307,7 +1315,10 @@ def main():
     # --- attempts, with BOTH groupings: profiles for ability (it drifts),
     # whole-user for the axis positions (a skill profile should not, and a
     # 2-month block carries far too few attempts to fit one).
-    df = load_first_time_attempts()
+    df = load_first_time_attempts(max_id=args.max_attempt_id)
+    if args.max_attempt_id is not None:
+        print(f"  ATTEMPT ID CUTOFF: id <= {args.max_attempt_id} — the DB as it "
+              f"stood at that id", flush=True)
     df = df[df["size"].isin(SIZES)].copy()
     if args.drop_recent_frac > 0:
         # SIMULATE THE PREVIOUS REFIT. Cutting by DATE is what makes this an
@@ -1379,7 +1390,8 @@ def main():
     from auxiliary.rating_dev.holdout_set import held_out_keys
     if args.holdout_problem_frac > 0:
         ho_keys, ho_hash = held_out_keys(args.holdout_seed,
-                                         args.holdout_problem_frac)
+                                         args.holdout_problem_frac,
+                                         max_id=args.max_attempt_id)
     else:
         ho_keys, ho_hash = [], "none"
     ho_set = set(ho_keys)
@@ -1402,7 +1414,8 @@ def main():
     if args.holdout_user_frac > 0:
         from auxiliary.rating_dev.holdout_set import held_out_users
         hu_list, hu_hash = held_out_users(args.holdout_seed,
-                                          args.holdout_user_frac)
+                                          args.holdout_user_frac,
+                                          max_id=args.max_attempt_id)
         hu = set(hu_list)
         extra_ho |= np.array([u in hu for u in uid_arr[user_idx]], bool)
         print(f"  HELD-OUT USERS: hash {hu_hash} | {len(hu_list)} accounts, "
@@ -1410,7 +1423,8 @@ def main():
     if args.holdout_row_frac > 0:
         from auxiliary.rating_dev.holdout_set import held_out_rows
         hr_list, hr_hash = held_out_rows(args.holdout_seed,
-                                         args.holdout_row_frac)
+                                         args.holdout_row_frac,
+                                         max_id=args.max_attempt_id)
         hr = set(hr_list)
         m_r = np.array([(uid_arr[ui], str(t)) in hr for ui, t
                         in zip(user_idx, prof_df["problem"])], bool)
@@ -1516,7 +1530,7 @@ def main():
         # per-size lists, so this reproduces the tid set the activation basis was
         # keyed on and the joint-PCA cache hits instead of refitting.
         tids_by_size = {s: [t for (ss, t) in keys if ss == s] for s in SIZES}
-        picks = load_first_time_picks()
+        picks = load_first_time_picks(max_id=args.max_attempt_id)
         # The trainer keys users by the first 8 characters of the id (see
         # user_of_profile), so the pick map is re-keyed the same way — matching on
         # the raw id would miss every row whose profile name is the truncation.

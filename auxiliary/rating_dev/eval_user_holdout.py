@@ -264,15 +264,18 @@ def survey_rho_for(rate, slope, users):
     return _weighted_rho(by), sum(len(v) for v in by.values())
 
 
-def evaluate_one(prod_dir, dump, seed, frac, axes_npz=None):
+def evaluate_one(prod_dir, dump, seed, frac, axes_npz=None, max_attempt_id=None):
     from auxiliary.rating_dev.holdout_set import held_out_users
     from utils.rating.features import load_first_time_attempts
 
-    hu_list, hu_hash = held_out_users(seed, frac)
+    # ONE cutoff for both reads: the draw's universe and the rows being walked
+    # have to come from the same snapshot or the split is drawn from one DB and
+    # scored on another.
+    hu_list, hu_hash = held_out_users(seed, frac, max_id=max_attempt_id)
     hu = set(hu_list)
     rate, slope, floor, lam, loadings = _load(prod_dir, dump, axes_npz)
 
-    df = load_first_time_attempts()
+    df = load_first_time_attempts(max_id=max_attempt_id)
     df = df[df["size"].isin([9, 13])].sort_values("created_at")
     is_held = df["user_id"].astype(str).isin(hu)
     seen = set(df.loc[~is_held, "problem"].astype(str))
@@ -330,6 +333,16 @@ def main():
                          "table; unnamed axes print as 'axis k'")
     ap.add_argument("--no-split-half", action="store_true",
                     help="skip the split-half tables (they add ~1min per dump)")
+    ap.add_argument("--max-attempt-id", type=int, default=None,
+                    help="Cap the attempt id for BOTH the held-out draw and the "
+                         "rows walked, i.e. score against the DB as it stood at "
+                         "that id. This is how a dump trained before a "
+                         "fetch_database run is re-scored against its ORIGINAL "
+                         "holdout; ablations.reconstruct_snapshot finds the "
+                         "cutoff from a recorded hash. It reaches the split-half "
+                         "histories too. Survey rho is NOT capped — the "
+                         "declarations and their attempts come in by a separate "
+                         "reader.")
     ap.add_argument("--prior-ax-sd", type=float, default=None,
                     help="override PRIOR_AX_SD, the scorer's prior sd on a user's "
                          "axis contribution IN LOGITS. This is the measuring "
@@ -349,7 +362,8 @@ def main():
     res = []
     for i, ((pd_, dp), sd) in enumerate(zip(srcs, args.seeds)):
         ax = (args.prod_axes[i] if i < len(args.prod_axes) else None)
-        r = evaluate_one(pd_, dp, sd, args.frac, axes_npz=ax)
+        r = evaluate_one(pd_, dp, sd, args.frac, axes_npz=ax,
+                         max_attempt_id=args.max_attempt_id)
         print(f"  seed {sd}: hash {r['hash']} | {r['n_users']} users, {r['n']} "
               f"novel attempts, {r['n_unseen'] / max(r['n'], 1):.1%} on problems "
               f"training never saw | K={r['k']}", flush=True)
@@ -374,7 +388,8 @@ def main():
                 continue
             print(f"\n  seed {sd}:", end="")
             try:
-                split_half_report(dp, args.axis_labels)
+                split_half_report(dp, args.axis_labels,
+                                  max_id=args.max_attempt_id)
             except Exception as exc:      # never let a diagnostic kill the eval
                 print(f"  split-half unavailable: {exc}")
 

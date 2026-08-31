@@ -135,15 +135,18 @@ def _load(dump):
     }
 
 
-def _sequences(P, sql_path=None):
+def _sequences(P, sql_path=None, max_id=None):
     """Each dump user's attempts in TIME ORDER, which the history curve needs --
-    'their first N' is only meaningful against the order they happened in."""
+    'their first N' is only meaningful against the order they happened in.
+
+    `max_id` caps the attempt id, reading the table as it stood at that id."""
     import sqlite3
     path = sql_path or os.path.join(PROJECT_ROOT, "db/d1.sqlite")
     con = sqlite3.connect(path)
     rows = {}
+    where = "" if max_id is None else f" WHERE id <= {int(max_id)}"
     for u, p_, s in con.execute(
-            "SELECT user_id,problem,success FROM tsumego_reports ORDER BY id"):
+            f"SELECT user_id,problem,success FROM tsumego_reports{where} ORDER BY id"):
         iu, ip = P["uid"].get(u), P["tid"].get(p_)
         if iu is None or ip is None:
             continue
@@ -256,10 +259,11 @@ def _table(A, B, CA, CB, TH, labels, head):
     print(f"    {'CTRL (ability)':<18}{rp:>9.3f}{sb(rp):>8.3f}{rs:>10.3f}{sb(rs):>8.3f}")
 
 
-def split_half_report(dump, labels=(), ridge=HALF_RIDGE, sql_path=None):
+def split_half_report(dump, labels=(), ridge=HALF_RIDGE, sql_path=None,
+                      max_id=None):
     """Disjoint history bands, then the fixed-population history curve."""
     P = _load(dump)
-    rows = _sequences(P, sql_path)
+    rows = _sequences(P, sql_path, max_id)
     K = P["G"].shape[1]
     print(f"\n  split-half reliability — dump users, halves fit at ridge {ridge}")
     print("  (Spearman-Brown corrected; xTHETA = ability leak the control misses)")
@@ -393,8 +397,11 @@ def main():
     ap.add_argument("dump")
     ap.add_argument("--labels", nargs="*", default=[])
     ap.add_argument("--ridge", type=float, default=HALF_RIDGE)
+    ap.add_argument("--max-attempt-id", type=int, default=None,
+                    help="cap the attempt id, i.e. read the histories as they "
+                         "stood at that id")
     a = ap.parse_args()
-    split_half_report(a.dump, a.labels, a.ridge)
+    split_half_report(a.dump, a.labels, a.ridge, max_id=a.max_attempt_id)
 
 
 if __name__ == "__main__":
