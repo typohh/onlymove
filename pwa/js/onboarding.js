@@ -46,7 +46,10 @@ const MIN_GAP_MS = 15 * 1000;
 // Ambient bubbles additionally wait this many completed problems since the last
 // bubble of any kind — the "roughly one every few problems" drip.
 const SPACING_PROBLEMS = 3;
-// At most this many bubbles in one session, whatever the triggers.
+// At most this many AMBIENT bubbles in one session. Trigger bubbles are
+// exempt and don't count: they answer something the user just did (first
+// review, a shared problem, the weakness list appearing), and a long first
+// sitting must not spend the budget on the drip and then miss those moments.
 const SESSION_CAP = 4;
 // A dismiss within this window of a bubble appearing reads as "swatted away".
 const QUICK_DISMISS_MS = 3500;
@@ -84,7 +87,7 @@ let _ready = false;              // init() has run
 let _featureReady = false;       // init() has run; set even for suppressed users
 let _suppressed = true;          // until init() decides otherwise
 let _sessionCount = 1;
-let _shownThisSession = 0;
+let _ambientThisSession = 0;     // ambient bubbles shown this session (SESSION_CAP)
 let _quickDismissals = 0;
 let _backedOff = false;
 let _pending = false;            // a bubble is scheduled or on screen
@@ -153,7 +156,8 @@ const isVisible = (node) => {
 // --- bubble catalogue --------------------------------------------------------
 //
 // kind: 'trigger' fires when its context appears (subject only to the anti-stack
-// time gap); 'ambient' additionally waits SPACING_PROBLEMS. `anchor` names an
+// time gap); 'ambient' additionally waits SPACING_PROBLEMS and is what the
+// per-session SESSION_CAP counts. `anchor` names an
 // entry in `anchors`; 'board' places the bubble over the board pointing at its
 // centre. `eligible(ctx)` is the context gate on top of the fire-once flag.
 // `text` is an i18n key, or a function returning one when the wording depends
@@ -284,8 +288,8 @@ const BUBBLES = {
     // list appears only for a converged user with a trained weakness model —
     // i.e. mostly EXISTING users — so this is the one bubble exempt from the
     // existing-user suppression (bypassSuppression, honored in scheduleShow and
-    // entered via its own hook below). Once-ever, spacing, session cap and
-    // backoff all still apply.
+    // entered via its own hook below). Once-ever, the anti-stack gap and the
+    // backoff still apply.
     trainingFocus: {
         kind: 'trigger', anchor: 'motifBubble', placement: 'above', text: 'onbTrainingFocus',
         bypassSuppression: true,
@@ -306,10 +310,10 @@ const BUBBLES = {
 // --- gating ------------------------------------------------------------------
 
 function spacingOk(def) {
-    if (_shownThisSession >= SESSION_CAP) return false;
     const lastShown = lsNum(K_LAST_SHOWN_AT);
     if (!def.ignoreGap && lastShown && (Date.now() - lastShown) < MIN_GAP_MS) return false;
     if (def.kind === 'ambient') {
+        if (_ambientThisSession >= SESSION_CAP) return false;
         const since = historyLen() - lsNum(K_LAST_AMBIENT_COUNT);
         if (since < SPACING_PROBLEMS) return false;
     }
@@ -425,8 +429,10 @@ function render(id, def) {
     // Record + arm dismissal.
     markShown(id);
     lsSet(K_LAST_SHOWN_AT, Date.now());
-    if (def.kind === 'ambient') lsSet(K_LAST_AMBIENT_COUNT, historyLen());
-    _shownThisSession++;
+    if (def.kind === 'ambient') {
+        lsSet(K_LAST_AMBIENT_COUNT, historyLen());
+        _ambientThisSession++;
+    }
     _shownAtMs = Date.now();
 
     // Any tap/keypress dismisses. A tap OUTSIDE the bubble also reaches
@@ -535,7 +541,7 @@ export function onScoreUnreliable() {
 // tryShow for a FEATURE ANNOUNCEMENT: bypasses the existing-user suppression
 // (an announcement is new to existing users too, and they are usually the only
 // ones who reach its context at all) while keeping every other gate —
-// once-ever, anti-stacking, session cap, backoff.
+// once-ever, anti-stacking, backoff.
 function tryShowFeature(id, ctx = {}) {
     if (!_featureReady || _backedOff || _pending) return;
     if (document.hidden) return;
