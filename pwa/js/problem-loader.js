@@ -13,7 +13,7 @@ import { getRecallCandidates, recallServeShare } from './recall-model.js';
 import { weaknessServeCategories } from './weakness.js';
 import { rankForSize, problemInfoWeight, rankConverged } from './rank-decomposition.js';
 import { DATA_VERSION } from './data-version.js';
-import { onSolvingProblemShown as onboardingSolvingProblemShown } from './onboarding.js';
+import { onSolvingProblemShown as onboardingSolvingProblemShown, onLinkedProblemShown as onboardingLinkedProblemShown } from './onboarding.js';
 
 // The best candidate by `scoreFn`, ties going to the earliest — which, because the
 // pool arrives sorted by distance from the serve rank, means the closest-to-rank of
@@ -678,9 +678,11 @@ function displayProblem(problem, appMode) {
     setAcceptClicks(true);
     updateAllUI();
     // First-run onboarding: a bubble may be offered on the freshly-painted
-    // solving board (intro, recall, rank, komi, install, notify). No-op for
-    // linked/review paints and for anyone but a genuinely new user.
+    // solving board (intro, recall, rank, komi, install, notify) — no-op for
+    // anyone but a genuinely new user — or the try-out notice on a shared
+    // problem, which reaches everyone. Review paints get nothing here.
     if (appMode === APP_MODES.SOLVING) onboardingSolvingProblemShown(problem);
+    else if (appMode === APP_MODES.LINKED) onboardingLinkedProblemShown();
 }
 
 function reportLoadError(error, attempt) {

@@ -62,7 +62,7 @@ import { APP_MODES, HISTORY_BACKFILL_DONE_KEY } from './constants.js';
 import { getCurrentNode } from './board.js';
 import { syncMotifBubble } from './motif-bubble.js';
 import { waitingRecallCount } from './recall-model.js';
-import { onReviewScoreShown as onboardingReviewScoreShown, onScoreUnreliable as onboardingScoreUnreliable } from './onboarding.js';
+import { onReviewScoreShown as onboardingReviewScoreShown, onScoreUnreliable as onboardingScoreUnreliable, onRecallBadgeShown as onboardingRecallBadgeShown } from './onboarding.js';
 
 const formatScore = (score) => score > 0 ? `+${score.toFixed(1)}` : score.toFixed(1);
 
@@ -438,6 +438,8 @@ const updateRecallButton = () => {
     const badge = document.getElementById('button-recall-count');
     badge.textContent = String(waiting);
     badge.hidden = waiting === 0;
+    // First-run onboarding: teach the button the first time the badge shows.
+    if (waiting > 0) onboardingRecallBadgeShown();
 
     const onRecall = !!state.currentProblem?.isRepeat;
     if (waiting > 0 && !onRecall && state.acceptClicks) btn.classList.remove('disabled');

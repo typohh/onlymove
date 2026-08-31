@@ -9,9 +9,9 @@
 //
 // Deliberately isolated: this is the ONLY file that knows about the bubbles.
 // The rest of the app calls the thin trigger hooks below (onSolvingProblemShown,
-// onEnterReview, onReviewScoreShown, onScoreUnreliable, onResume) at existing UI
-// seams; everything else — anchoring, gating, session and progress counting —
-// lives here. The bubble itself (its DOM and its placement) is js/bubble.js,
+// onEnterReview, onReviewScoreShown, onScoreUnreliable, onRecallBadgeShown,
+// onLinkedProblemShown, onResume) at existing UI seams; everything else —
+// anchoring, gating, session and progress counting — lives here. The bubble itself (its DOM and its placement) is js/bubble.js,
 // shared with the hint affordances; styling is the `ui-bubble` block in
 // style.css.
 //
@@ -22,7 +22,7 @@ import { state, getMergedAnswerHistory } from './state.js';
 import { createBubble, placeBubble } from './bubble.js';
 import { getTerm } from './i18n.js';
 import { APP_MODES, HISTORY_BACKFILL_DONE_KEY, usesTapToConfirm } from './constants.js';
-import { flaggedMotifCategories } from './weakness.js';
+import { waitingRecallCount } from './recall-model.js';
 import { supportsNotifications, notificationPermission, getCurrentSubscription } from './notifications.js';
 
 // --- tunables ---------------------------------------------------------------
@@ -30,10 +30,16 @@ import { supportsNotifications, notificationPermission, getCurrentSubscription }
 // A device with more than this many recorded attempts when onboarding first
 // runs is treated as an existing user and never shown any bubble.
 const NEW_USER_MAX_HISTORY = 3;
-// Two boots more than this far apart count as separate "sessions" (drives the
-// install / notify bubbles, which wait for the 2nd / 3rd visit). A
-// service-worker-update reload lands well inside the gap, so it never counts.
+// Two spells of ACTIVITY more than this far apart count as separate "sessions"
+// (drives the install / stats / account bubbles, which wait for a return
+// visit). Activity-based rather than boot-based: a kept-open tab or a resumed
+// PWA never cold-boots, so markActive() does the counting wherever it is
+// called. A service-worker-update reload lands well inside the gap.
 const SESSION_GAP_MS = 2 * 60 * 60 * 1000;   // 2 hours
+// The notify bubble waits this long after the recall-button bubble, so the
+// "get notified when problems come due" pitch lands on someone who has already
+// seen recalls accumulate.
+const NOTIFY_AFTER_RECALL_MS = 48 * 60 * 60 * 1000;
 // Minimum wall-clock gap between any two bubbles — pure anti-stacking, so a
 // burst of triggers (answer wrong → review opens → score shows) can't pile up.
 const MIN_GAP_MS = 15 * 1000;
@@ -66,8 +72,11 @@ const lsGet = (k) => { try { return localStorage.getItem(k); } catch { return nu
 const lsSet = (k, v) => { try { localStorage.setItem(k, String(v)); } catch {} };
 const lsNum = (k) => { const v = parseInt(lsGet(k), 10); return Number.isFinite(v) ? v : 0; };
 
+// The shown flag holds the paint timestamp (older installs hold a literal '1',
+// which reads as "long ago" — fine for every gate that consults the time).
 const wasShown = (id) => !!lsGet(SHOWN_PREFIX + id);
-const markShown = (id) => lsSet(SHOWN_PREFIX + id, '1');
+const markShown = (id) => lsSet(SHOWN_PREFIX + id, Date.now());
+const shownAt = (id) => { const v = parseInt(lsGet(SHOWN_PREFIX + id), 10); return Number.isFinite(v) ? v : 0; };
 
 // --- runtime state ----------------------------------------------------------
 
@@ -122,6 +131,7 @@ const anchors = {
     unreliableScore: () => document.querySelector('.unreliable'),
     board: () => el('board-container'),
     previous: () => el('button1'),
+    recall: () => el('button-recall'),
     share: () => el('button-share'),
     install: () => el('button4'),
     // The hamburger button itself (portrait ☰ / landscape "Menu"): the
@@ -164,6 +174,12 @@ const BUBBLES = {
         kind: 'trigger', anchor: 'title', placement: 'below', text: 'onbRecall',
         eligible: (ctx) => !!ctx.isRepeat,
     },
+    // The Recall button, the first time its waiting-count badge paints — so the
+    // bubble points at a badge with a number in it, never at a bare button.
+    recallButton: {
+        kind: 'trigger', anchor: 'recall', placement: 'below', text: 'onbRecallButton',
+        eligible: () => waitingRecallCount() > 0 && isVisible(anchors.recall()),
+    },
     // Encouragement after a rough start: the 3rd miss within the first 10
     // attempts. Fired from the review entry a wrong answer auto-opens (the
     // failed attempt is already in history by then) and re-attempted on the
@@ -198,9 +214,14 @@ const BUBBLES = {
         kind: 'ambient', anchor: 'install', placement: 'below', text: 'onbInstall',
         eligible: () => _sessionCount >= 2 && !isInstalled() && isVisible(anchors.install()),
     },
+    // Waits for the recall system to have visibly engaged — the recall-button
+    // bubble, which itself needed a waiting recall — plus a couple of days, so
+    // "get notified when problems come due" describes something the user has
+    // already watched happen. Installed only: uninstalled, button4 reads Install.
     notify: {
         kind: 'ambient', anchor: 'install', placement: 'below', text: 'onbNotify',
-        eligible: () => _sessionCount >= 3 && isInstalled() &&
+        eligible: () => isInstalled() && wasShown('recallButton') &&
+            (Date.now() - shownAt('recallButton')) >= NOTIFY_AFTER_RECALL_MS &&
             notificationPermission() !== 'denied' && !_subscribed && isVisible(anchors.install()),
     },
     // Review-mode, at the root position.
@@ -208,19 +229,20 @@ const BUBBLES = {
         kind: 'trigger', anchor: 'board', placement: 'above', text: 'onbReviewIntro',
         eligible: () => state.appMode === APP_MODES.ANALYZING,
     },
-    reviewRank: {
-        kind: 'trigger', anchor: 'rank', placement: 'below', text: 'onbReviewRank',
-        eligible: () => state.appMode === APP_MODES.ANALYZING && wasShown('reviewIntro'),
+    // The review readout is overloaded — the problem's difficulty rank at the
+    // root, the score estimate once inside a variation — and ONE bubble covers
+    // both meanings, offered on a review entry after reviewIntro or from the
+    // score-paint hook, whichever comes first. The two legacy flags belong to
+    // the pre-merge pair; anyone who met either has been told.
+    reviewReadout: {
+        kind: 'trigger', anchor: 'rank', placement: 'below', text: 'onbReviewReadout',
+        eligible: () => state.appMode === APP_MODES.ANALYZING && wasShown('reviewIntro') &&
+            !wasShown('reviewRank') && !wasShown('reviewScore'),
     },
     share: {
         kind: 'trigger', anchor: 'share', placement: 'below', text: 'onbShare',
         eligible: () => state.appMode === APP_MODES.ANALYZING && wasShown('reviewIntro') &&
             isVisible(anchors.share()),
-    },
-    // Review-mode, after stepping into a variation (the score readout is live).
-    reviewScore: {
-        kind: 'trigger', anchor: 'rank', placement: 'below', text: 'onbReviewScore',
-        eligible: () => state.appMode === APP_MODES.ANALYZING,
     },
     reviewScoreUnreliable: {
         kind: 'trigger', anchor: 'unreliableScore', placement: 'below', text: 'onbScoreUnreliable',
@@ -229,15 +251,18 @@ const BUBBLES = {
     // Menu-contained features. We do NOT open the menu for the user (intrusive);
     // instead these point at the Menu button and the text names the item, so the
     // bubble teaches both that the menu exists and what's inside it.
-    // Waits until the Weaknesses pane has a finding to show, so the bubble is
-    // pointing at something rather than at an empty tab. That is what the motif
-    // readings clearing their confidence gate means — a flagged (axis, tail),
-    // the SAME set the pane colours and the training-focus bubble names. The
-    // reporting list, not the serve list: Stats reports every flagged motif,
-    // including the ones barred from steering selection.
+    // The Stats modal as a whole, for a returning user with enough history that
+    // its charts show something. The weaknesses inside it are NOT this bubble's
+    // trigger — trainingFocus announces those when a finding first paints.
     stats: {
         kind: 'ambient', anchor: 'menu', placement: 'below', text: 'onbStats',
-        eligible: () => flaggedMotifCategories().length > 0 && isVisible(anchors.menu()),
+        eligible: () => _sessionCount >= 2 && historyLen() >= 15 && isVisible(anchors.menu()),
+    },
+    // Every active player has an anonymous leaderboard row from their first
+    // report, so this can come early; linkProfile later offers the named version.
+    leaderboard: {
+        kind: 'ambient', anchor: 'menu', placement: 'below', text: 'onbLeaderboard',
+        eligible: () => historyLen() >= 10 && isVisible(anchors.menu()),
     },
     account: {
         // Cross-device sync only matters to an invested, returning user — few
@@ -275,6 +300,14 @@ const BUBBLES = {
         kind: 'trigger', anchor: 'motifBubble', placement: 'above', text: 'onbTrainingFocus',
         bypassSuppression: true,
         eligible: () => state.appMode === APP_MODES.SOLVING && isVisible(anchors.motifBubble()),
+    },
+    // A shared (linked) problem: say up front that it is a try-out — linked
+    // attempts enter neither history nor the rank. Shared links reach existing
+    // users as much as new ones, hence bypassSuppression.
+    linked: {
+        kind: 'trigger', anchor: 'board', placement: 'above', text: 'onbLinked',
+        bypassSuppression: true,
+        eligible: () => state.appMode === APP_MODES.LINKED,
     },
 };
 
@@ -428,7 +461,18 @@ function position(bubble, def) {
 
 // --- session / init ----------------------------------------------------------
 
-function markActive() { lsSet(K_LAST_ACTIVE, Date.now()); }
+// Records activity, and counts a session: a gap longer than SESSION_GAP_MS
+// since the previous activity bumps the counter. Called at boot, on resume and
+// on every solving paint, so a return after hours counts whether or not the
+// app cold-booted or the browser delivered a visibility event.
+function markActive() {
+    const last = lsNum(K_LAST_ACTIVE);
+    if (last && (Date.now() - last) > SESSION_GAP_MS) {
+        _sessionCount = (lsNum(K_SESSION_COUNT) || 1) + 1;
+        lsSet(K_SESSION_COUNT, _sessionCount);
+    }
+    lsSet(K_LAST_ACTIVE, Date.now());
+}
 
 export function initOnboarding() {
     // First ever run: decide new-user vs existing-user once.
@@ -436,18 +480,16 @@ export function initOnboarding() {
         lsSet(K_INITIALIZED, '1');
         if (historyLen() > NEW_USER_MAX_HISTORY) lsSet(K_SUPPRESSED, '1');
         lsSet(K_SESSION_COUNT, '1');
-    } else {
-        // Returning boot: bump the session counter if we've been away a while.
-        const last = lsNum(K_LAST_ACTIVE);
-        let count = lsNum(K_SESSION_COUNT) || 1;
-        if (last && (Date.now() - last) > SESSION_GAP_MS) count++;
-        lsSet(K_SESSION_COUNT, count);
     }
+    markActive();
     _sessionCount = lsNum(K_SESSION_COUNT) || 1;
     _suppressed = !!lsGet(K_SUPPRESSED);
-    markActive();
     // Feature-announcement bubbles (bypassSuppression) run for everyone.
     _featureReady = true;
+
+    // A shared problem opened from its link paints BEFORE this init runs, so
+    // its paint hook was a no-op — evaluate it here.
+    if (state.appMode === APP_MODES.LINKED) onLinkedProblemShown();
 
     if (_suppressed) return;   // existing user — no first-run bubbles, ever
     _ready = true;
@@ -465,11 +507,18 @@ export function onSolvingProblemShown(problem) {
     if (!_ready || _suppressed) return;
     markActive();
     const isRepeat = !!(problem && problem.isRepeat);
-    tryShow(['intro', 'earlyMistakes', 'recall', 'rank', 'previous', 'stats', 'account', 'install', 'notify', 'boardSize', 'komi'], { isRepeat });
+    tryShow(['intro', 'earlyMistakes', 'recall', 'rank', 'previous', 'leaderboard', 'stats', 'account', 'install', 'notify', 'boardSize', 'komi'], { isRepeat });
 }
 
 export function onEnterReview() {
-    tryShow(['earlyMistakes', 'reviewIntro', 'reviewRank', 'share']);
+    tryShow(['earlyMistakes', 'reviewIntro', 'reviewReadout', 'share']);
+}
+
+// The Recall button's waiting-count badge just painted with a non-zero count
+// (ui.js, on every solving repaint) — teach the button the first time there is
+// something behind it.
+export function onRecallBadgeShown() {
+    tryShow(['recallButton']);
 }
 
 // The user clicked the Previous button themselves — they know it; retire the
@@ -480,7 +529,7 @@ export function onPreviousClicked() {
 }
 
 export function onReviewScoreShown() {
-    tryShow(['reviewScore']);
+    tryShow(['reviewReadout']);
 }
 
 export function onScoreUnreliable() {
@@ -516,6 +565,12 @@ export function onTrainingFocusShown() {
 // user has moved on.
 export function onAccountProfileShown(linked) {
     tryShowFeature('linkProfile', { unlinked: linked === null });
+}
+
+// A shared (linked) problem just painted (js/problem-loader.js, and init for
+// the boot-time case). Feature path: shared links reach existing users too.
+export function onLinkedProblemShown() {
+    tryShowFeature('linked');
 }
 
 export function onResume() {
