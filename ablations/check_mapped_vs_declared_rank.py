@@ -254,14 +254,17 @@ def _print_rank_matched_contrast(df):
         servers does not count five times.
 
     Sign follows the tables above: positive means the self-report claims more strength
-    than a verified rating at the same fitted rank would."""
+    than a verified rating at the same fitted rank would.
+
+    Returns the printed estimates so a caller can read them (None where the contrast
+    cannot be formed)."""
     ver = df[df["kind"] == "verified"]
     if ver.empty:
-        return
+        return None
     ver_users = set(ver["prefix"])
     srv = df[(df["kind"] == "survey") & (~df["prefix"].isin(ver_users))]
     if srv.empty:
-        return
+        return None
 
     def per_user(d):
         return d.groupby("prefix").agg(err=("err_server", "mean"),
@@ -273,6 +276,7 @@ def _print_rank_matched_contrast(df):
           f"rating; + = self-reports claim stronger)")
     print(f"{'caliper':<14}{'pairs':>6}{'estimate':>10}{'se':>7}"
           f"{'95% CI':>18}{'p':>7}   unmatched")
+    out = {"n_verified": int(len(v)), "n_selfreport": int(len(s)), "calipers": []}
     for caliper in MATCH_CALIPERS:
         diffs, unmatched = [], 0
         for _, r in v.iterrows():
@@ -290,9 +294,16 @@ def _print_rank_matched_contrast(df):
         print(f"±{caliper:<13.1f}{d.size:>6}{d.mean():>+10.2f}{se:>7.2f}"
               f"{f'[{d.mean()-half:+.2f}, {d.mean()+half:+.2f}]':>18}"
               f"{ttest_1samp(d, 0.0).pvalue:>7.2f}   {unmatched}")
+        out["calipers"].append({
+            "caliper": float(caliper), "pairs": int(d.size),
+            "estimate": float(d.mean()), "se": float(se),
+            "ci_lo": float(d.mean() - half), "ci_hi": float(d.mean() + half),
+            "p": float(ttest_1samp(d, 0.0).pvalue), "unmatched": int(unmatched),
+        })
     print("  matched on the fitted rank, so the fit's own residual and any bias it "
           "absorbed cancel;\n  the binding constraint is the verified count, not the "
           "self-reporters.")
+    return out
 
 
 def _print_selfreport_vs_verified(surveys):
@@ -303,8 +314,14 @@ def _print_selfreport_vs_verified(surveys):
     pure self-report bias. Read it as the exact-match limit of the rank-matched
     contrast below, and as an upper bound rather than an estimate: these are exactly
     the users whose declared rank is publicly checkable. Not restricted to users with
-    a fitted rating, since nothing here needs one."""
+    a fitted rating, since nothing here needs one.
+
+    Returns {verified server: statistics} for a caller, including how many declarations
+    name the band their verified rating actually falls in and how far outside it the
+    rest sit — a declaration is a BAND, so a miss is a distance to that band's EDGE and
+    not the gap between the two numbers."""
     latest = latest_per_user_server(surveys)
+    out = {}
     for server, system in VERIFIED_SERVERS.items():
         v = latest[latest["server"] == server]
         d = latest[latest["server"] == system]
@@ -327,6 +344,8 @@ def _print_selfreport_vs_verified(surveys):
             pairs.append({
                 "prefix": str(r["user_id"])[:8],
                 "declared": m["rank"],
+                # the declared BAND's centre, so the band itself is [floor, floor+1)
+                "declared_scalar": float(m["rank_value"]),
                 "raw": r["rank"],
                 "verified_scalar": g,
                 # + = the self-report claims more strength than the rating shows
@@ -348,6 +367,77 @@ def _print_selfreport_vs_verified(surveys):
                   f"  {r['last_game_at'] or '-'}")
         _stat_header(first="")
         _print_stat_row("", _stats(p["diff"]))
+
+        band = np.floor(p["declared_scalar"].to_numpy(float))
+        vs = p["verified_scalar"].to_numpy(float)
+        diff = p["diff"].to_numpy(float)
+        in_band = np.floor(vs) == band
+        miss = np.where(vs < band, band - vs,
+                        np.where(vs >= band + 1.0, vs - (band + 1.0), 0.0))
+        outside = np.flatnonzero(~in_band)
+        widest = outside[np.argsort(-miss[outside])][:2]
+        total = float(diff.sum())
+        out[server] = {
+            "system": system, "n": int(len(p)),
+            "mean": float(diff.mean()), "sd": float(diff.std(ddof=0)),
+            "within1": int(np.sum(np.abs(diff) <= 1.0)),
+            "in_band": int(in_band.sum()),
+            "misses": sorted(float(x) for x in miss[outside]),
+            # what the two widest-missing rows carry of the mean between them
+            "widest_share": float(diff[widest].sum() / total) if total else None,
+        }
+    return out
+
+
+def _median_fitted_rank(sub):
+    """Median fitted rank over the USERS in a slice, one row per user."""
+    r = sub.groupby("prefix")["our_internal"].first()
+    return float(r.median()) if len(r) else None
+
+
+def _server_residual_means(df):
+    """Per-server mean residual with its standard error and t.
+
+    A coupling's thresholds are free in location, so a bias shared by everyone
+    declaring on one server is absorbed into that server's own thresholds and leaves
+    no residual behind — which is exactly why these means measure the fit's residual
+    on a cohort and never anyone's honesty. Reported so that can be seen rather than
+    assumed."""
+    out = []
+    for server in SERVERS:
+        e = df[df["server"] == server]["err_server"].to_numpy(float)
+        if e.size < 2:
+            continue
+        se = float(e.std(ddof=1) / np.sqrt(e.size))
+        out.append({"server": server, "n": int(e.size), "mean": float(e.mean()),
+                    "se": se, "t": float(e.mean() / se) if se > 0 else 0.0})
+    return out
+
+
+def _residual_spreads(df):
+    """SPREAD of the residual on self-reports against the spread on verified ratings.
+
+    A separate question from the level the contrasts above estimate: symmetric noise
+    in a declaration attenuates the fit rather than displacing it, so a wider spread
+    on self-reports is declaration noise and not dishonesty. Restricted to the
+    verified rows' own fitted-rank range, since the two arms otherwise sit on
+    different parts of the ladder and the residual is not homoscedastic along it."""
+    ver = df[df["kind"] == "verified"]
+    if len(ver) < 2:
+        return None
+    lo, hi = float(ver["our_internal"].min()), float(ver["our_internal"].max())
+    in_range = df[(df["our_internal"] >= lo) & (df["our_internal"] <= hi)]
+    pooled = in_range[in_range["kind"] == "survey"]
+    egf = pooled[pooled["system"] == "EGF"]
+
+    def sd(rows):
+        e = rows["err_server"].to_numpy(float)
+        return (float(e.std(ddof=0)), int(e.size)) if e.size >= 2 else (None, int(e.size))
+
+    out = {"rank_lo": lo, "rank_hi": hi}
+    for name, rows in (("verified", ver), ("survey_egf", egf), ("survey_pooled", pooled)):
+        out[name], out["n_" + name] = sd(rows)
+    return out
 
 
 # Internal-rank bands (scalar: 1k=0, 1d=1). Half-open [lo, hi).
@@ -556,9 +646,11 @@ def main(argv=None):
 
     print("\nby onlymove rank band")
     _stat_header()
+    band_stats = {}
     for lo, hi, label in RANK_BANDS:
         sub = df[(df["our_internal"] >= lo) & (df["our_internal"] < hi)]
-        _print_stat_row(label, _stats(sub["err_server"]))
+        band_stats[label] = _stats(sub["err_server"])
+        _print_stat_row(label, band_stats[label])
 
     print("\nby server  (EGD/AGAR = the verified machine rating, on that system's coupling)")
     _stat_header(first="server")
@@ -569,8 +661,8 @@ def main(argv=None):
         if not sub.empty or server in VERIFIED_SERVERS:
             _print_stat_row(label, _stats(sub["err_server"]))
 
-    _print_rank_matched_contrast(df)
-    _print_selfreport_vs_verified(surveys)
+    matched = _print_rank_matched_contrast(df)
+    exact = _print_selfreport_vs_verified(surveys)
 
     if args.list:
         _print_full_listing(df)
@@ -578,6 +670,18 @@ def main(argv=None):
     if args.csv:
         df.sort_values(["server", "our_internal"]).to_csv(args.csv, index=False)
         print(f"\nPer-declaration table written to {args.csv}")
+
+    return {
+        "n_rows": int(len(df)),
+        "n_screened": int(screened),
+        "band": band_stats,
+        "servers": _server_residual_means(df),
+        "spreads": _residual_spreads(df),
+        "median_rank": {k: _median_fitted_rank(df[df["kind"] == k])
+                        for k in ("verified", "survey")},
+        "matched": matched,
+        "exact_match": exact,
+    }
 
 
 if __name__ == "__main__":

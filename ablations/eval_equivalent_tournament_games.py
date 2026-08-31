@@ -109,6 +109,15 @@ POP_CONSTANTS = os.path.join(PROJECT_ROOT, "ratings", "population_constants.json
 # past the strongest grade in the table.
 MAX_GAP = 4
 
+# The two stretches of ladder the stone value is quoted over. The kyu range is the
+# MIDDLE of the kyu ladder: it leaves out the 20k entry grade, which absorbs everyone
+# weaker and so reads inflated, and the 4k-1k run, which is already the approach to
+# dan and rising steeply. The dan range is every dan band. Both are intersected with
+# the bands the table's own cells reach, so neither figure is read off the smoothness
+# extrapolation past the strongest grade.
+MID_KYU_BANDS = range(-15, -4)          # 15k .. 5k
+DAN_BANDS = range(0, 40)                # 1d and stronger
+
 
 # ---------------------------------------------------------------------------
 # The reference table
@@ -246,6 +255,24 @@ def fit_stone_values(cells, smooth=8.0):
                    options={"maxiter": 4000})
     beta = np.exp(res.x)
     return {b: float(beta[i]) for b, i in index.items()}, (design, n_win, n_all, beta)
+
+
+def stone_value_summary(beta, cells):
+    """Mean logits per stone over the mid-kyu and dan stretches of the ladder.
+
+    What a stone is WORTH is the information density of a game between the players
+    who play it, and it is not a constant: the same one-band gap is a far more
+    decisive advantage between dan players than between kyu players, so a dan game
+    says several times as much about its two players. Averaged over bands the table
+    covers rather than read at a point, since a single band's value rests on that
+    row's games alone."""
+    covered = {k for band, gap, _, _ in cells for k in range(band, band + gap)}
+    out = {}
+    for name, wanted in (("kyu", MID_KYU_BANDS), ("dan", DAN_BANDS)):
+        bands = [b for b in wanted if b in beta and b in covered]
+        out[name] = float(np.mean([beta[b] for b in bands])) if bands else None
+        out[name + "_bands"] = (bands[0], bands[-1]) if bands else None
+    return out
 
 
 def fit_stone_values_se_blocks(blocks, bands):
@@ -827,7 +854,8 @@ def main(argv=None):
     # What a caller (ablations.rank_calibration_figures) reads; None where a
     # statistic matched outside the swept range.
     return {"n": targets["n"], "targets": targets, "games": matched,
-            "headline": headline, "headline_sd": headline_sd, "censored": censored}
+            "headline": headline, "headline_sd": headline_sd, "censored": censored,
+            "stone": stone_value_summary(beta, cells)}
 
 
 if __name__ == "__main__":

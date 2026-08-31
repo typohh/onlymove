@@ -162,17 +162,27 @@ def build_events(rows, params, abilities, all_chains=False):
       novel + wrong    -> 0         (this is how a problem enters the ladder)
       repeat + wrong   -> 0
       repeat + correct -> prev + 1  (or 1 if the previous value was undefined)
+
+    Returns (events, skipped, totals). `totals` counts repeat attempts over
+    EVERY chain against the ones the clean-chain filter removes, which is the
+    exclusion share the population fit pays for insisting on chains that lie
+    wholly inside the region recording repeats.
     """
     events = []
     skipped = defaultdict(int)
+    totals = defaultdict(int)
     by_chain = defaultdict(list)
     for r in rows:
         by_chain[(r["user_id"], r["problem"], r["size"])].append(r)
 
     for (user, problem, size), chain in by_chain.items():
         chain.sort(key=lambda r: r["created_at"])
+        n_repeat = sum(1 for a in chain if a["is_repeat"])
+        totals["repeat attempts"] += n_repeat
+        if chain[0]["created_at"][:10] < REPEAT_LOG_CUTOFF:
+            totals["repeat attempts in pre-cutoff chains"] += n_repeat
         if not all_chains and chain[0]["created_at"][:10] < REPEAT_LOG_CUTOFF:
-            skipped["pre-cutoff chain"] += sum(1 for a in chain if a["is_repeat"])
+            skipped["pre-cutoff chain"] += n_repeat
             continue
         has_params = (size, problem) in params and user in abilities
         z = (cold_solve_logit(abilities[user], *params[(size, problem)])
@@ -208,7 +218,7 @@ def build_events(rows, params, abilities, all_chains=False):
             # novel + correct leaves ssf as-is (undefined until a first failure)
             prev = a
 
-    return events, skipped
+    return events, skipped, totals
 
 
 # ---------------------------------------------------------------------------
@@ -373,10 +383,13 @@ def report_within_user(events, max_rung=6):
         n_ev = sum(len(by_user[u].get(rung, [])) for u in users_at[rung])
         print(f"  {rung:>4}   {len(users_at[rung]):>5}   {n_ev:>6}")
 
+    out = {}
     climbers = {u for u, cells in by_user.items() if any(r >= 1 for r in cells)}
     a = [y for u in by_user if u in climbers for y in by_user[u].get(0, [])]
     b = [y for u in by_user if u not in climbers for y in by_user[u].get(0, [])]
     if a and b:
+        out["rung0_climbers"] = float(np.mean(a))
+        out["rung0_non_climbers"] = float(np.mean(b))
         print(f"\n  rung-0 clear rate, users who reach rung 1+: "
               f"{np.mean(a):6.1%}  n={len(a)}")
         print(f"  rung-0 clear rate, users who never do:      "
@@ -420,6 +433,7 @@ def report_within_user(events, max_rung=6):
             print(f"  {label:<18} too few users with both cells")
             continue
         orr, se, strata = res
+        out[f"mh_{hi}_vs_{lo}"] = (orr, abs(math.log(orr) / se))
         lo_ci, hi_ci = math.exp(math.log(orr) - 1.96 * se), math.exp(math.log(orr) + 1.96 * se)
         # Restate the odds ratio as a rate at the lower rung's own base, which
         # is the form the band test can be applied to.
@@ -430,6 +444,7 @@ def report_within_user(events, max_rung=6):
         print(f"  {label:<18} OR {orr:5.2f}  [{lo_ci:.2f}, {hi_ci:.2f}]  "
               f"{abs(math.log(orr) / se):4.1f} sd   {strata} users   "
               f"implies {odds / (1 + odds):.1%} from a {base:.1%} base")
+    return out
 
 
 def report_recent_windows(events, min_n, retention, windows=(30, 60)):
@@ -481,6 +496,7 @@ def report_stability_correction(events, x0, min_n, max_rung=4):
     if 0 not in by_r or len(by_r[0]) < min_n:
         print("  not enough events at rung 0 — skipping")
         return
+    out = {"rung0_rate": float(np.mean(by_r[0])), "parity": {}, "realized": {}}
     rate0 = float(np.mean(by_r[0]))
     mid = math.sqrt(WINDOW_OPEN_R * WINDOW_CLOSE_R)   # geometric mid of the band
     print(f"  band midpoint {mid:.3f}; rung-0 realized rate {rate0:.3f}")
@@ -493,6 +509,8 @@ def report_stability_correction(events, x0, min_n, max_rung=4):
         obs = float(np.mean(ys))
         f_mid = math.log(mid) / math.log(obs)
         f_par = math.log(rate0) / math.log(obs)
+        out["realized"][rung] = obs
+        out["parity"][rung] = f_par
         line = (f"  {rung:>4}  {len(ys):>5}   {obs:8.3f}   {f_mid:>21.2f}   "
                 f"{f_par:>17.2f}")
         if prev is not None:
@@ -508,6 +526,8 @@ def report_stability_correction(events, x0, min_n, max_rung=4):
                          for r in (0, 1))}
     if zs.get(0) and zs.get(1):
         dz = float(np.mean(zs[1])) - float(np.mean(zs[0]))
+        out["dz_rung0_to_1"] = dz
+        out["model_visible_stability"] = math.exp(kappa * dz)
         print(f"\n  mean cold-solve log-odds rises {dz:+.2f} from rung 0 to rung 1, which")
         print(f"  the difficulty term already turns into x{math.exp(kappa * dz):.2f} of stability —")
         print(f"  so model-visible selection covers only that much of the step above.")
@@ -517,6 +537,26 @@ def report_stability_correction(events, x0, min_n, max_rung=4):
     print("  NOTE the interaction with delivery: longer intervals mean fewer serves")
     print("  per entry inside any fixed horizon, and delivery is already the binding")
     print("  constraint (check 11). These two pull against each other.")
+    return out
+
+
+def gap_trend(bins):
+    """Weighted least-squares slope of a rung's bin rates against log2 of the
+    bin's geometric centre — clear-rate points per DOUBLING of the elapsed gap,
+    with its own sigma. Same estimator as the across-rung trend in check 1:
+    inverse binomial variance, so a thin bin cannot carry the line. Returns
+    None below three bins, where a slope is not a statement about a shape."""
+    usable = [b for b in bins if b["n"] > 0 and 0 < b["rate"] < 1]
+    if len(usable) < 3:
+        return None
+    x = np.array([math.log2(math.sqrt(b["lo"] * b["hi"])) for b in usable])
+    y = np.array([b["rate"] for b in usable])
+    w = np.array([b["n"] for b in usable], float) / (y * (1 - y))
+    A = np.vstack([np.ones_like(x), x]).T
+    cov = np.linalg.inv(A.T @ (A * w[:, None]))
+    beta = cov @ ((A * w[:, None]).T @ y)
+    se = math.sqrt(cov[1, 1])
+    return 100.0 * float(beta[1]), abs(float(beta[1]) / se)
 
 
 def report_within_rung_decay(events, min_n):
@@ -527,17 +567,22 @@ def report_within_rung_decay(events, min_n):
     only for a high-stability item. Within a rung the scheduler's spread of
     intervals is much narrower and mostly reflects when the user came back, so
     this is the closest thing the log offers to a retention curve.
+
+    Returns {rung: [{lo, hi, n, rate}, ...]} — the same cells the table prints,
+    for a caller that needs the shape rather than the reading of it.
     """
     print("\n" + "=" * 78)
     print("4. RETENTION DECAY WITHIN A RUNG")
     print("   Pooled across rungs, elapsed gap is confounded with stability.")
     print("=" * 78)
     edges = [0.25, 0.5, 1, 2, 4, 8, 16, 10_000]
+    out = {}
     for rung in (0, 1, 2):
         evs = [e for e in events if e["r"] == rung]
         if len(evs) < min_n:
             continue
         print(f"\n  r = {rung}   (n={len(evs)}, clear {np.mean([e['y'] for e in evs]):.1%})")
+        cells = []
         for lo, hi in zip(edges[:-1], edges[1:]):
             sub = [e["y"] for e in evs if lo <= e["gap_days"] < hi]
             if len(sub) < min_n // 2:
@@ -546,6 +591,10 @@ def report_within_rung_decay(events, min_n):
             span = f"{lo:g}-{hi:g}d" if hi < 1000 else f">{lo:g}d"
             print(f"    {span:<10} n={len(sub):>5}   {np.mean(sub):6.1%}  "
                   f"[{clo:5.1%}, {chi:5.1%}]")
+            cells.append({"lo": float(lo), "hi": float(hi), "n": len(sub),
+                          "rate": float(np.mean(sub))})
+        out[rung] = cells
+    return out
 
 
 def report_by_month(events, min_n, max_rung=3):
@@ -712,6 +761,12 @@ def report_heldout(events, x0, seed=0):
     print(f"    0.80 target       {logloss(y_te, np.full_like(y_te, X_SERVE)):.4f}")
     print("    (a recalibration slope well below 1 means the ordering is real and"
           " the spread is too wide)")
+    out = {
+        "platt_slope": float(ab[1]), "platt_intercept": float(ab[0]),
+        "ll_shipped": logloss(y_te, R_ship), "ll_recalibrated": logloss(y_te, R_cal),
+        "ll_rung_only": logloss(y_te, R_rung),
+        "ll_constant": logloss(y_te, np.full_like(y_te, base)),
+    }
 
     # The interval is what the model is FOR, so also report how much of the
     # gap-length signal it captures: does R beat a model that ignores the gap?
@@ -727,6 +782,7 @@ def report_heldout(events, x0, seed=0):
         span = f"{lo:g}-{hi:g}d" if hi < 1000 else f">{lo:g}d"
         print(f"    {span:<10} n={int(m.sum()):>5}   "
               f"{np.mean(y_all[m]):6.1%}  [{clo:5.1%}, {chi:5.1%}]")
+    return out
 
 
 def report_growth_forms(events, x0, seed=0):
@@ -771,6 +827,7 @@ def report_growth_forms(events, x0, seed=0):
                 + p[3] * (r == 1) + p[4] * (r == 2) + p[5] * (r >= 3))
 
     n_extra = {"linear": 0, "step": 1, "free": 3}
+    out = {}
     for form in ("linear", "step", "free"):
         def nll(p, form=form):
             R = np.clip(np.exp(-g_tr / np.exp(np.clip(ln_s(form, p, z_tr, r_tr),
@@ -784,11 +841,14 @@ def report_growth_forms(events, x0, seed=0):
                                                      LN_S_TRAIN_MIN, LN_S_TRAIN_MAX))),
                        1e-9, 1 - 1e-9)
         print(f"  {form:<7} held-out LL {logloss(y_te, R_te):.4f}")
+        out[form] = logloss(y_te, R_te)
     base = float(np.mean(y_tr))
+    out["constant"] = logloss(y_te, np.full_like(y_te, base))
     print(f"  {'constant':<7} held-out LL {logloss(y_te, np.full_like(y_te, base)):.4f}")
     print("  A free per-rung effect is the best any reshaping of the streak term")
     print("  could ever do. If it does not close the gap to the constant, the")
     print("  shape of that term is not where the loss lives.")
+    return out
 
 
 def report_forward_per_user(events, x0, min_events=20, max_rung=6):
@@ -1011,6 +1071,7 @@ def report_per_user_step(rows, events, thresholds=(5, 10, 20)):
     print("\n" + "=" * 78)
     print("12. HOW CONSISTENT IS THE RUNG-0 -> RUNG-1 STEP ACROSS USERS?")
     print("=" * 78)
+    out = {"cuts": {}}
     cells = defaultdict(lambda: {0: [0, 0], 1: [0, 0]})
     for e in events:
         c = cells[e["user"]][0 if e["r"] == 0 else 1]
@@ -1043,6 +1104,11 @@ def report_per_user_step(rows, events, thresholds=(5, 10, 20)):
         df = len(lo) - 1
         I2 = max(0.0, (Q - df) / Q) if Q > 0 else 0.0
         qs = np.exp(np.percentile(lo, [10, 25, 50, 75, 90]))
+        out["cuts"][min_cell] = {
+            "users": len(lo), "pooled_or": math.exp(pooled),
+            "direction_share": float(np.mean(lo > 0)),
+            "q": Q, "df": df, "i2": I2, "tau2": tau2,
+        }
         print(f"\n  >= {min_cell:>2} events per cell  ({len(lo)} users)")
         print(f"     pooled OR {math.exp(pooled):.2f}   "
               f"per-user OR p10={qs[0]:.2f} p25={qs[1]:.2f} p50={qs[2]:.2f} "
@@ -1082,6 +1148,13 @@ def report_per_user_step(rows, events, thresholds=(5, 10, 20)):
                             for q in (10, 25, 50, 75, 90)))
     print(f"   {float(np.mean(v == 0)):.0%} of users have none at all; "
           f"{float(np.mean(v >= 20)):.0%} have twenty or more.")
+    out["density"] = {
+        "users": len(users),
+        "none_share": float(np.mean(v == 0)),
+        "median": float(np.median(v)),
+        "twenty_plus_share": float(np.mean(v >= 20)),
+    }
+    return out
 
 
 def report_serves_per_entry(rows, events, params, abilities, x0, min_n,
@@ -1201,7 +1274,12 @@ def report_serves_per_entry(rows, events, params, abilities, x0, min_n,
     print("  deducted. Read the schedulable row, not the first one.")
 
 
-def main():
+def main(argv=None):
+    """Run every check and return the statistics the figure producer quotes.
+
+    The return value is the same numbers the tables print, keyed by check, so a
+    figure is read off the run rather than re-derived beside it.
+    """
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--db", default=DB_SQLITE)
@@ -1220,7 +1298,7 @@ def main():
     ap.add_argument("--per-user-ln-c", action="store_true",
                     help="also score calibration with a per-user LN_C, shrunk to the "
                          "population prior the way the client shrinks it")
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
 
     import json
     with open(args.constants) as f:
@@ -1255,7 +1333,7 @@ def main():
             np.array([1 if e[1] else 0 for e in ev], float))
     print(f"  fitted ability for {len(abilities)} users")
 
-    events, skipped = build_events(rows, params, abilities, args.all_chains)
+    events, skipped, totals = build_events(rows, params, abilities, args.all_chains)
     print(f"\n{len(events)} scheduled-repeat events "
           f"({'all chains' if args.all_chains else f'chains starting >= {REPEAT_LOG_CUTOFF}'})")
     for reason, n in sorted(skipped.items(), key=lambda kv: -kv[1]):
@@ -1276,11 +1354,12 @@ def main():
         return
 
     report_by_rung(events, args.min_n, (kappa, growth, ln_c_prior))
-    report_within_user(events)
+    within_user = report_within_user(events)
     report_by_month(events, args.min_n)
     report_recent_windows(events, args.min_n, (kappa, growth, ln_c_prior))
-    report_within_rung_decay(events, args.min_n)
-    report_stability_correction(events, (kappa, growth, ln_c_prior), args.min_n)
+    decay = report_within_rung_decay(events, args.min_n)
+    correction = report_stability_correction(events, (kappa, growth, ln_c_prior),
+                                             args.min_n)
 
     print("\n" + "=" * 78)
     print("6. OBSERVED VS PREDICTED RETENTION")
@@ -1293,14 +1372,20 @@ def main():
                            "per-user LN_C (client-style shrinkage)")
     if R is not None:
         report_window(R)
-    report_heldout(events, (kappa, growth, ln_c_prior))
-    report_growth_forms(events, (kappa, growth, ln_c_prior))
+    heldout = report_heldout(events, (kappa, growth, ln_c_prior))
+    growth_forms = report_growth_forms(events, (kappa, growth, ln_c_prior))
     report_forward_per_user(events, (kappa, growth, ln_c_prior))
     report_equilibrium(events, rows, args.min_n,
                        (kappa, growth, ln_c_prior))
-    report_per_user_step(rows, events)
+    per_user_step = report_per_user_step(rows, events)
     report_serves_per_entry(rows, events, params, abilities,
                             (kappa, growth, ln_c_prior), args.min_n, args.all_chains)
+    return {
+        "events": len(events), "totals": dict(totals), "skipped": dict(skipped),
+        "within_user": within_user, "decay": decay, "correction": correction,
+        "heldout": heldout, "growth_forms": growth_forms,
+        "per_user_step": per_user_step,
+    }
 
 
 if __name__ == "__main__":

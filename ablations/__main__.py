@@ -30,6 +30,10 @@ from ablations._figures import (
 # whether a `--tier` run includes it.
 PRODUCERS = (
     "corpus_figures",
+    "corpus_claim_figures",
+    "serve_log_figures",
+    "curve_shape_figures",
+    "recall_figures",
     "rank_calibration_figures",
     "published_params_figures",
     "motif_null_figures",
