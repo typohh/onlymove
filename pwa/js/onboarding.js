@@ -139,9 +139,6 @@ const anchors = {
     // firing only once the menu is already open.
     menu: () => firstVisible(['menu-toggle-h', 'menu-toggle']),
     motifBubble: () => el('motif-bubble'),
-    // Inside the Account dialog, so it exists only while that dialog is open —
-    // which is exactly when its bubble fires (js/account-ui.js).
-    accountProfile: () => el('account-profile-cell'),
 };
 
 const isVisible = (node) => {
@@ -259,7 +256,7 @@ const BUBBLES = {
         eligible: () => _sessionCount >= 2 && historyLen() >= 15 && isVisible(anchors.menu()),
     },
     // Every active player has an anonymous leaderboard row from their first
-    // report, so this can come early; linkProfile later offers the named version.
+    // report, so this can come early; the text names the way to a named row.
     leaderboard: {
         kind: 'ambient', anchor: 'menu', placement: 'below', text: 'onbLeaderboard',
         eligible: () => historyLen() >= 10 && isVisible(anchors.menu()),
@@ -276,19 +273,6 @@ const BUBBLES = {
         kind: 'ambient', anchor: 'menu', placement: 'below', text: 'onbBoardSize',
         eligible: () => (_sessionCount >= 2 || historyLen() >= 12) && isVisible(anchors.menu()),
     },
-    // The Account dialog's Profile row, on an account with nothing linked. The
-    // row already carries a "?" explaining what linking does; this is the
-    // unprompted version of it, for the majority who never tap a "?" — so it
-    // adds the reason a linked name is worth having rather than restating the
-    // mechanics. Like trainingFocus it is a feature announcement, and for the
-    // same reason: the users who HAVE an EGD or AGA record are established
-    // players, precisely the ones the first-run suppression silences.
-    // topLayer because it sits over a modal.
-    linkProfile: {
-        kind: 'trigger', anchor: 'accountProfile', placement: 'auto',
-        text: 'onbLinkProfile', bypassSuppression: true, topLayer: true,
-        eligible: (ctx) => ctx.unlinked === true && isVisible(anchors.accountProfile()),
-    },
     // A NEW-FEATURE announcement rather than a first-run tip: fires the first
     // time the training-focus list (motif-bubble.js, solving mode) paints. The
     // list appears only for a converged user with a trained weakness model —
@@ -303,11 +287,13 @@ const BUBBLES = {
     },
     // A shared (linked) problem: say up front that it is a try-out — linked
     // attempts enter neither history nor the rank. Shared links reach existing
-    // users as much as new ones, hence bypassSuppression.
+    // users as much as new ones, hence bypassSuppression. Only for someone who
+    // HAS a rank to worry about: a newcomer's first bubble should be the intro,
+    // and a bubble here would hold it back through the anti-stack gap.
     linked: {
         kind: 'trigger', anchor: 'board', placement: 'above', text: 'onbLinked',
         bypassSuppression: true,
-        eligible: () => state.appMode === APP_MODES.LINKED,
+        eligible: () => state.appMode === APP_MODES.LINKED && historyLen() >= 5,
     },
 };
 
@@ -555,16 +541,6 @@ function tryShowFeature(id, ctx = {}) {
 // existing ones, hence the announcement path.
 export function onTrainingFocusShown() {
     tryShowFeature('trainingFocus');
-}
-
-// The Account dialog's Profile row just painted with its server state in hand
-// (js/account-ui.js). `linked` is that row's value: the linked player, or null
-// for an account that has none. Only the second case has anything to say, and
-// the bubble anchors INSIDE the dialog, so it lives exactly as long as the
-// dialog does — a re-check after the show delay finds the anchor gone if the
-// user has moved on.
-export function onAccountProfileShown(linked) {
-    tryShowFeature('linkProfile', { unlinked: linked === null });
 }
 
 // A shared (linked) problem just painted (js/problem-loader.js, and init for
