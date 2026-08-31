@@ -22,6 +22,14 @@
 //   writes -> a generated SQL file, applied to the LOCAL miniflare D1
 //             (--local) or to production (--remote); neither = dry run
 //
+// IT NEVER WRITES db/d1.sqlite. The --remote path needs a mirror fetched INSIDE the
+// freeze (below), but it takes that into a PRIVATE COPY under $TMPDIR and deletes it
+// on the way out, so the canonical db/d1.{sqlite,sql} and the wrangler dev D1 are
+// exactly as they were — a re-rate leaves other work reading the snapshot it was
+// reading, and `npm run dev` may stay up. `--keep-refresh` opts into the in-place
+// refresh instead, which is then a plain `pipeline.fetch_database` with all of its
+// usual effects (and so requires `npm run dev` stopped).
+//
 // Per user (novel attempts only, INSERT order — the AUTOINCREMENT id):
 //   buffer          = last BUFFER_CAP novel attempts, newest first, MATCHING
 //                     buildRowStateFromReports' ORDER BY id. Id order is the
@@ -68,7 +76,7 @@
 // the race is not merely unlikely but IMPOSSIBLE. So `--remote` is one call:
 //
 //   freeze (wrangler secret put MAINTENANCE_MODE=1)  ->  wait for a probe to
-//   confirm it  ->  pipeline.fetch_database  ->  snapshot check  ->  recompute
+//   confirm it  ->  fetch a private mirror  ->  snapshot check  ->  recompute
 //   ->  apply  ->  postflight  ->  thaw (MAINTENANCE_MODE=0), verified.
 //
 // MAINTENANCE_MODE is a wrangler SECRET rather than a [vars] entry precisely so
@@ -100,6 +108,10 @@
 //                                                                 #     past week with no leaderboard row (production
 //                                                                 #     only adds them lazily on their next /report)
 //   node auxiliary/update_leaderboard_ranks.mjs --user <id>       # limit to one user (repeatable; also scopes populate)
+//   node auxiliary/update_leaderboard_ranks.mjs --remote --keep-refresh
+//                                                                 #     take the in-window fetch into db/d1.sqlite
+//                                                                 #     itself (overwrites it + the dev D1; stop
+//                                                                 #     `npm run dev` first) instead of a private copy
 //   node auxiliary/update_leaderboard_ranks.mjs --remote --allow-unfrozen
 //                                                                 #     manage the freeze yourself: no freeze, no fetch,
 //                                                                 #     no snapshot check, no thaw (see above)
@@ -117,7 +129,10 @@ import { fileURLToPath } from 'node:url';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PWA_DIR = path.join(REPO, 'pwa');
+// The canonical local mirror. Read-only here: with --keep-refresh the in-window
+// fetch updates it in place, otherwise `mirrorDb` is repointed at a private copy.
 const DB_PATH = path.join(REPO, 'db', 'd1.sqlite');
+let mirrorDb = DB_PATH;
 const PARAMS_BIN = path.join(PWA_DIR, 'tsumegos', 'problem_params.bin');
 const VENV_PY = path.join(REPO, '.venv', 'bin', 'python3');
 // The freeze flag is a wrangler secret (see pwa/wrangler.toml) so it can be flipped
@@ -128,8 +143,9 @@ const FREEZE_SECRET = 'MAINTENANCE_MODE';
 const FREEZE_PROBE_RETRIES = 15;
 const FREEZE_PROBE_DELAY_MS = 2000;
 const FREEZE_STABLE_PROBES = 3;
-// `wrangler dev`'s port. fetch_database overwrites the miniflare D1 file, and doing
-// that under a live workerd corrupts its view — so the in-window refresh refuses.
+// `wrangler dev`'s port. An in-place fetch overwrites the miniflare D1 file, and
+// doing that under a live workerd corrupts its view — so --keep-refresh refuses
+// while it is up. The private refresh writes neither file and does not care.
 const DEV_PORT = 8787;
 const USER_ID_RE = /^[A-Za-z0-9_-]{1,40}$/;
 const DAY_MS = 86400000;
@@ -142,6 +158,7 @@ const ACTIVE_WINDOW_DAYS = 7;
 // --- CLI ------------------------------------------------------------------------
 const args = process.argv.slice(2);
 let applyLocal = false, applyRemote = false, populate = false, allowUnfrozen = false;
+let keepRefresh = false;
 let originOverride = null;
 const onlyUsers = new Set();
 let sqlOut = path.join(os.tmpdir(), 'leaderboard_rank_update.sql');
@@ -151,6 +168,7 @@ for (let i = 0; i < args.length; i++) {
     else if (a === '--remote') applyRemote = true;
     else if (a === '--populate') populate = true;
     else if (a === '--allow-unfrozen') allowUnfrozen = true;
+    else if (a === '--keep-refresh') keepRefresh = true;
     else if (a === '--origin') originOverride = args[++i];
     else if (a === '--user') onlyUsers.add(args[++i]);
     else if (a === '--sql-out') sqlOut = path.resolve(args[++i]);
@@ -202,7 +220,7 @@ function loadProblemParamsLocal() {
 
 // --- local sqlite reads -----------------------------------------------------------
 function sqliteJson(sql) {
-    const out = execFileSync('sqlite3', ['-json', DB_PATH, sql],
+    const out = execFileSync('sqlite3', ['-json', mirrorDb, sql],
         { encoding: 'utf8', maxBuffer: 512 * 1024 * 1024 });
     const text = out.trim();
     return text ? JSON.parse(text) : [];
@@ -353,19 +371,60 @@ function devServerRunning() {
     });
 }
 
+// The private mirror this run owns, or null. Removed on EVERY exit path (the
+// process 'exit' hook below), so a crash inside the freeze leaves no orphan copy
+// of the whole database behind.
+let privateMirrorDir = null;
+
+function discardPrivateMirror() {
+    if (!privateMirrorDir) return;
+    const dir = privateMirrorDir;
+    privateMirrorDir = null;
+    try {
+        fs.rmSync(dir, { recursive: true, force: true });
+    } catch (err) {
+        console.error(`could not remove the private mirror at ${dir}: ${err.message}`);
+    }
+}
+
+// Pull the rows that landed between the last ordinary fetch and the freeze.
+//
+// By DEFAULT this goes into a private copy: db/d1.sqlite is copied into a temp dir,
+// `--db-dir` points the incremental fetch at that copy (which is also its id
+// baseline, so the pull stays the usual `WHERE id > MAX(local id)` handful of rows),
+// and everything below reads it via `mirrorDb`. The canonical mirror is a shared
+// input — other analysis is mid-flight against it and a re-rate is reproducible only
+// against a fixed snapshot — so a leaderboard refresh has no business advancing it.
+// The private dir also skips the dev-D1 sync, so `npm run dev` may stay up.
+//
+// --keep-refresh fetches in place and keeps the result, for when you WANT the
+// canonical mirror advanced to the freeze boundary anyway. It then carries every
+// effect of an ordinary fetch, the miniflare overwrite included.
 async function refreshLocalMirror() {
     if (!fs.existsSync(VENV_PY)) {
         throw new Error(`missing ${VENV_PY} — cannot refresh the local mirror inside the freeze`);
     }
-    if (await devServerRunning()) {
-        throw new Error(`something is listening on 127.0.0.1:${DEV_PORT} (wrangler dev?).\n`
-            + '  pipeline.fetch_database overwrites the miniflare D1 file, and doing that under\n'
-            + '  a live workerd corrupts its view. Stop `npm run dev` and re-run.');
+    const fetchArgs = ['-u', '-m', 'pipeline.fetch_database'];
+    let privateDb = null;
+    if (keepRefresh) {
+        if (await devServerRunning()) {
+            throw new Error(`something is listening on 127.0.0.1:${DEV_PORT} (wrangler dev?).\n`
+                + '  --keep-refresh overwrites the miniflare D1 file, and doing that under a live\n'
+                + '  workerd corrupts its view. Stop `npm run dev`, or drop --keep-refresh so the\n'
+                + '  fetch goes to a private copy and touches neither file.');
+        }
+        console.log(`\nrefreshing ${DB_PATH} IN PLACE inside the freeze (--keep-refresh)...`);
+    } else {
+        privateMirrorDir = fs.mkdtempSync(path.join(os.tmpdir(), 'leaderboard-mirror-'));
+        privateDb = path.join(privateMirrorDir, path.basename(DB_PATH));
+        console.log(`\nrefreshing a PRIVATE copy of the mirror inside the freeze:\n  ${privateDb}`
+            + `\n  (${DB_PATH} and the dev D1 are left untouched — pass --keep-refresh to advance them)`);
+        fs.copyFileSync(DB_PATH, privateDb);
+        fetchArgs.push('--db-dir', privateMirrorDir);
     }
-    console.log('\nrefreshing the local mirror inside the freeze (pipeline.fetch_database)...');
-    const res = spawnSync(VENV_PY, ['-u', '-m', 'pipeline.fetch_database'],
-        { cwd: REPO, stdio: 'inherit' });
+    const res = spawnSync(VENV_PY, fetchArgs, { cwd: REPO, stdio: 'inherit' });
     if (res.status !== 0) throw new Error(`pipeline.fetch_database failed (${res.status})`);
+    if (privateDb) mirrorDb = privateDb;
 }
 
 const localMaxReportId = () => sqliteJson('SELECT MAX(id) AS m FROM tsumego_reports')[0]?.m ?? null;
@@ -504,6 +563,10 @@ async function main() {
             + '  snapshot, not thawing. Any attempt reported during this run is truncated out\n'
             + '  of that user\'s buffer.');
     }
+    if (keepRefresh && !frozenWindow) {
+        console.warn('NOTE: --keep-refresh does nothing here — only the freeze window fetches, and\n'
+            + '  this run does not open one. Run pipeline.fetch_database yourself.');
+    }
 
     const [{ m: latest }] = sqliteJson('SELECT MAX(created_at) AS m FROM tsumego_reports');
     const ageMs = Date.now() - Date.parse(latest || 0);
@@ -628,6 +691,11 @@ async function main() {
 for (const stream of [process.stdout, process.stderr]) {
     stream.on('error', (err) => { if (err.code !== 'EPIPE') throw err; });
 }
+
+// The private mirror is discarded from 'exit' rather than from the finally below, for
+// the same reason: it has to survive the paths that never reach it. 'exit' runs
+// synchronously on process.exit() too, so the signal/crash handler covers it as well.
+process.on('exit', discardPrivateMirror);
 
 // SYNCHRONOUS, and that is the whole design of it. An async handler yields at its
 // first await, which RESUMES THE SUSPENDED MAIN FLOW — measured: a SIGINT during the

@@ -39,7 +39,7 @@ This file is the always-loaded operating layer: what to run, what breaks, and wh
 Always invoke pipeline modules through the venv's Python so PYTHONPATH resolves correctly:
 
 ```bash
-./.venv/bin/python3 -m pipeline.fetch_database            # incremental pull of new tsumego_reports rows + small tables whole → db/d1.{sqlite,sql} + local D1. --full re-downloads
+./.venv/bin/python3 -m pipeline.fetch_database            # incremental pull of new tsumego_reports rows + small tables whole → db/d1.{sqlite,sql} + local D1. --full re-downloads; --db-dir DIR fetches a private throwaway snapshot and leaves db/ + the dev D1 alone
 ./.venv/bin/python3 -m pipeline.tune_engine <size>        # tune bots/analysis.cfg for this GPU (size ∈ {9,13}, mandatory)
 ./.venv/bin/python3 -m pipeline.generate_tsumegos <size>  # long-running generator → tsumegos/<size>/
 ./.venv/bin/python3 -m pipeline.benchmark_bots <size>     # bots solve generated tsumegos → attempts/<size>/

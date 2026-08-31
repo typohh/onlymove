@@ -30,10 +30,22 @@ from utils.paths import DB_DIR, DB_SQL, DB_SQLITE, PROJECT_ROOT  # noqa: E402
 FETCH_PAGE = 50000
 
 
+# Where this run writes. Normally the canonical db/ from utils.paths; --db-dir
+# redirects the WHOLE fetch into a private directory instead, leaving db/ and the
+# wrangler dev D1 exactly as they are. A private snapshot is a throwaway read
+# baseline for one consumer (auxiliary/update_leaderboard_ranks.mjs, which needs
+# an up-to-the-second mirror inside a production freeze without spending the
+# canonical one), so it skips both shared side effects: the dev-D1 sync and the
+# db/d1.sql regeneration.
+_db_dir = DB_DIR
+
+
 def _paths():
     pwa_dir = os.path.join(PROJECT_ROOT, "pwa")
-    os.makedirs(DB_DIR, exist_ok=True)
-    return PROJECT_ROOT, pwa_dir, DB_DIR, DB_SQL, DB_SQLITE
+    os.makedirs(_db_dir, exist_ok=True)
+    return (PROJECT_ROOT, pwa_dir, _db_dir,
+            os.path.join(_db_dir, os.path.basename(DB_SQL)),
+            os.path.join(_db_dir, os.path.basename(DB_SQLITE)))
 
 
 # ---------------------------------------------------------------------------
@@ -270,13 +282,16 @@ def emit_dump(con, sql_file):
                 f.write(line + "\n")
 
 
-def incremental_fetch(do_local_d1=True):
+def incremental_fetch(do_local_d1=True, emit_sql_dump=True):
     """Default path: append only new `tsumego_reports` rows (by AUTOINCREMENT
     id) and re-fetch every other table whole, merging into the canonical
     db/d1.sqlite, then regenerate db/d1.sql and sync the
     wrangler dev (local) D1.
 
     Falls back to a full fetch if there is no local SQLite baseline yet.
+
+    `emit_sql_dump=False` skips the text dump: a --db-dir snapshot has no
+    text consumers, and regenerating one writes every row.
     """
     _, pwa_dir, _, sql_file, sqlite_file = _paths()
 
@@ -328,8 +343,9 @@ def incremental_fetch(do_local_d1=True):
               f"{len(whole_tables)} other table(s) refreshed ({refreshed} rows).")
 
         # 3. Regenerate the text dump from the merged SQLite.
-        print(f"Regenerating {sql_file} from {sqlite_file}...")
-        emit_dump(con, sql_file)
+        if emit_sql_dump:
+            print(f"Regenerating {sql_file} from {sqlite_file}...")
+            emit_dump(con, sql_file)
     finally:
         con.close()
 
@@ -549,12 +565,30 @@ def main():
         action="store_true",
         help="Skip refreshing wrangler's local D1 (the `npm run dev` database).",
     )
+    parser.add_argument(
+        "--db-dir",
+        metavar="DIR",
+        help="Fetch into DIR/d1.sqlite instead of the canonical db/, leaving db/ "
+             "and the dev D1 untouched. DIR/d1.sqlite is the incremental fetch's "
+             "id baseline, so copy the canonical one there first for a cheap pull "
+             "(without it this seeds DIR with a --full export). A private snapshot "
+             "has no text consumers and no dev-D1 role, so it also skips the "
+             "db/d1.sql regeneration and the local-D1 sync.",
+    )
     args = parser.parse_args()
 
+    private = args.db_dir is not None
+    if private:
+        global _db_dir
+        _db_dir = os.path.abspath(args.db_dir)
+        print(f"Private snapshot: fetching into {_db_dir} "
+              "(db/ and the dev D1 are left as they are).")
+
     if args.full:
-        _full_fetch(do_local_d1=not args.no_local_d1)
+        _full_fetch(do_local_d1=not args.no_local_d1 and not private)
     else:
-        incremental_fetch(do_local_d1=not args.no_local_d1)
+        incremental_fetch(do_local_d1=not args.no_local_d1 and not private,
+                          emit_sql_dump=not private)
 
 
 if __name__ == "__main__":
