@@ -81,7 +81,9 @@ function tendencyTest(nOver, n, sumP, sumPQ) {
     // reported finding contradicting the number printed under it. Locked to
     // MOTIF_Z, and drawn at the NULL's standard error, so "band clear of the
     // null share" IS "flagged", by construction.
-    return { share, nullShare, n, z,
+    // `se` is reported alongside the band because the band's ends are CLAMPED
+    // to the unit interval and the width cannot be read back off them.
+    return { share, nullShare, n, z, se,
              lo: Math.max(0, share - MOTIF_Z * se), hi: Math.min(1, share + MOTIF_Z * se) };
 }
 
@@ -203,6 +205,7 @@ export function computeMotifStats(history = null) {
             // = stronger at it. Divide by dP/drank to state it in ranks.
             strength = {
                 ranks: fit.slope / dpPerRank,
+                se: fit.se / dpPerRank,
                 // Same gate-width band as the sign test above, same reason.
                 lo: (fit.slope - MOTIF_Z * fit.se) / dpPerRank,
                 hi: (fit.slope + MOTIF_Z * fit.se) / dpPerRank,

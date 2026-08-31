@@ -104,11 +104,13 @@ export function buildMotifPane(kind, history = state.answerHistory) {
             k: st.k,
             side,
             name: labelFor(st.k, side),
+            // A standard error is unsigned, so mirroring leaves it alone.
             strength: g && {
                 ranks: flip ? -g.ranks : g.ranks,
                 lo: flip ? -g.hi : g.lo,
                 hi: flip ? -g.lo : g.hi,
                 z: flip ? -g.z : g.z,
+                se: g.se,
             },
             // Mirroring a share reflects it — null share included — since
             // "toward the named motif" flips with the tail that names it.
@@ -119,6 +121,7 @@ export function buildMotifPane(kind, history = state.answerHistory) {
                 hi: flip ? 1 - t.lo : t.hi,
                 z: flip ? -t.z : t.z,
                 n: t.n,
+                se: t.se,
             },
         });
     }
@@ -155,7 +158,8 @@ function buildIntervalNote() {
     const note = document.createElement('div');
     note.className = 'wk-note';
     note.textContent = getTerm('statsMotifCiNote',
-        { z: MOTIF_Z, pct: Math.round((2 * normCdf(MOTIF_Z) - 1) * 100) });
+        { z: MOTIF_Z, pct: Math.round((2 * normCdf(MOTIF_Z) - 1) * 100) })
+        + ' ' + getTerm('statsMotifSdNote', { z1: MOTIF_Z, z2: TONE_STRONG_Z });
     return note;
 }
 
@@ -183,7 +187,32 @@ function buildHeaderRow(kind) {
 }
 
 const clamp01 = (v) => Math.max(0, Math.min(1, v));
-const rankFrac = (r) => clamp01(0.5 + r / (2 * RANK_FULL_SCALE));
+// Unclamped first: the SE ticks below have to know when a position falls OFF
+// the track, which a clamped fraction can no longer say.
+const rawRankFrac = (r) => 0.5 + r / (2 * RANK_FULL_SCALE);
+const rankFrac = (r) => clamp01(rawRankFrac(r));
+
+// The posterior's own scale, drawn on the track: thin ticks either side of the
+// neutral mark at the gate's width and at twice it — the SAME two thresholds
+// toneWeight steps at, taken from those constants rather than restated, so a
+// reader can see WHY a row is uncoloured, muted or full instead of holding the
+// legend in the note. That also gives the track a unit: without them the dot's
+// distance from centre is only readable against the printed value, and how far
+// out it is IN STANDARD ERRORS — the thing the row is actually a claim about —
+// is not on the picture at all. A tick landing outside the track is DROPPED
+// rather than clamped: parked on the end it would claim a threshold at a place
+// the scale does not reach.
+function sdTicks(rawFrac, neutral, se) {
+    if (!(se > 0)) return [];
+    const ticks = [];
+    for (const level of [MOTIF_Z, TONE_STRONG_Z]) {
+        for (const dir of [-1, 1]) {
+            const frac = rawFrac(neutral + dir * level * se);
+            if (frac > 0 && frac < 1) ticks.push({ frac, strong: level === TONE_STRONG_Z });
+        }
+    }
+    return ticks;
+}
 
 // Colour weight for a statistic sitting z posterior SEs from its neutral point:
 // none below the MOTIF_Z gate, half-strength between the gate and TONE_STRONG_Z,
@@ -205,7 +234,7 @@ function toneWeight(z) {
 // read twice — and the row is a claim about a direction, not a measurement
 // anybody acts on to two decimals. The point estimate stays, on the label's own
 // line, because that is what names the size of the effect.
-function buildMetricCell({ frac, loFrac, hiFrac }) {
+function buildMetricCell({ frac, loFrac, hiFrac, ticks = [] }) {
     const cell = document.createElement('div');
     cell.className = 'wk-metric';
 
@@ -219,6 +248,18 @@ function buildMetricCell({ frac, loFrac, hiFrac }) {
     band.style.left = `${(lo * 100).toFixed(2)}%`;
     band.style.width = `${Math.max(0.5, (hi - lo) * 100).toFixed(2)}%`;
     track.appendChild(band);
+
+    // Over the band, not under it: the ticks and the band overlap on most rows
+    // — the band is the gate's width around the estimate and the ticks are the
+    // same width around the neutral point — and a tick hidden exactly where the
+    // reading sits is hidden where it is being read.
+    for (const t of ticks) {
+        const tick = document.createElement('span');
+        tick.className = 'wk-sd';
+        if (t.strong) tick.dataset.strong = '1';
+        tick.style.left = `${(t.frac * 100).toFixed(2)}%`;
+        track.appendChild(tick);
+    }
 
     // The neutral mark sits at the track's centre on every pane: each reading
     // is drawn as its deviation from its own neutral point (the tendency
@@ -271,6 +312,7 @@ function cellFor(kind, row) {
             frac: rankFrac(g.ranks),
             loFrac: rankFrac(g.lo),
             hiFrac: rankFrac(g.hi),
+            ticks: sdTicks(rawRankFrac, 0, g.se),
             valueText: getTerm('statsMotifRanks', { value: fmtRank(g.ranks) }),
             tone: g.z < 0 ? 'weak' : 'strong',
             weight: toneWeight(g.z),
@@ -280,11 +322,13 @@ function cellFor(kind, row) {
     if (!t) return null;
     // Deviation space: the dot's distance from the centre IS the printed lean,
     // and the centre IS the availability null, on every row.
-    const leanFrac = (v) => clamp01(0.5 + (v - t.nullShare) / (2 * TENDENCY_FULL_SCALE));
+    const rawLeanFrac = (v) => 0.5 + (v - t.nullShare) / (2 * TENDENCY_FULL_SCALE);
+    const leanFrac = (v) => clamp01(rawLeanFrac(v));
     return {
         frac: leanFrac(t.share),
         loFrac: leanFrac(t.lo),
         hiFrac: leanFrac(t.hi),
+        ticks: sdTicks(rawLeanFrac, t.nullShare, t.se),
         valueText: fmtLean(t.share, t.nullShare),
         tone: t.z > 0 ? 'over' : 'under',
         weight: toneWeight(t.z),

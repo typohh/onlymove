@@ -287,6 +287,8 @@ Why each has that shape is `methodology.md` §2.9. What binds from elsewhere:
 
 **The displayed band is the gate's own width (`MOTIF_Z`), not a conventional 95%.** At any other multiple a flagged row can show a band straddling the neutral point — a reported finding contradicting the number printed under it. It is locked so that "band clear of the neutral line" **is** "flagged", by construction.
 
+The track also carries **thin ticks at `MOTIF_Z` and `TONE_STRONG_Z` standard errors either side of the neutral mark** — read from those constants, never restated as literals, so they stay the two thresholds the colour steps at and give the track a unit the printed value alone cannot supply. A tick falling outside the track is **dropped, not clamped**: parked on the end it would claim a threshold where the scale does not reach. They are inset and quieter than the neutral mark, which runs full height — at equal weight the row becomes five identical lines with no anchor.
+
 **`MOTIF_Z` is one constant deliberately gating three things** — problem-motif display in `motif-bubble.js`, the serve flag, and the statistics pane's admission bar `normCdf(MOTIF_Z)` — locked so the three cannot drift apart. They are z-scores of *different* statistics, corpus salience versus posterior confidence, so retuning it anywhere retunes all three.
 
 **The gate is confidence only, with no minimum effect size**: a bias the user is reliably making is worth reporting however small.
