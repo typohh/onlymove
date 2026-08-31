@@ -179,16 +179,20 @@ function trainingFocusMotifs() {
         // Korean needs a phrasing that avoids an object particle the motif
         // names do not all take the same form of.
         //
-        // The skill sentence is the one that asserts something about the user
-        // rather than about their errors, so it carries the confidence of the
-        // reading in its wording: flat past CONFIDENT_Z, hedged between the
-        // admission gate and it. Each strength is its own whole sentence for the
-        // same reason the kinds are — the hedge sits in a different place in
-        // each language.
-        const text = kind === 'overplay' ? getTerm('trainingFocusOvervalued', { motif: name })
-                   : kind === 'underplay' ? getTerm('trainingFocusUndervalued', { motif: name })
-                   : getTerm(z > CONFIDENT_Z ? 'trainingFocusWeak'
-                                             : 'trainingFocusWeakTentative', { motif: name });
+        // Every sentence also carries the CONFIDENCE of the reading behind it:
+        // stated flatly past CONFIDENT_Z, hedged between the admission gate and
+        // it. Six sentences rather than three plus a qualifier, for the reason
+        // above — the hedge sits in a different place in each language, and in
+        // Japanese and Korean it rewrites the verb ending.
+        const confident = z > CONFIDENT_Z;
+        const text = kind === 'overplay'
+                   ? getTerm(confident ? 'trainingFocusOvervalued'
+                                       : 'trainingFocusOvervaluedTentative', { motif: name })
+                   : kind === 'underplay'
+                   ? getTerm(confident ? 'trainingFocusUndervalued'
+                                       : 'trainingFocusUndervaluedTentative', { motif: name })
+                   : getTerm(confident ? 'trainingFocusWeak'
+                                       : 'trainingFocusWeakTentative', { motif: name });
         scored.push({ z, text });
     }
     scored.sort((a, b) => b.z - a.z);
