@@ -223,9 +223,13 @@ const BUBBLES = {
             (Date.now() - shownAt('recallButton')) >= NOTIFY_AFTER_RECALL_MS &&
             notificationPermission() !== 'denied' && !_subscribed && isVisible(anchors.install()),
     },
-    // Review-mode, at the root position.
+    // Review-mode, at the root position. Must land on the FIRST review, which a
+    // wrong answer usually opens seconds after the intro — so it ignores the
+    // anti-stack gap (that gap is for bursts within one context; entering
+    // review is a context switch, and onEnterReview clears the old bubble).
     reviewIntro: {
         kind: 'trigger', anchor: 'board', placement: 'above', text: 'onbReviewIntro',
+        ignoreGap: true,
         eligible: () => state.appMode === APP_MODES.ANALYZING,
     },
     // The review readout is overloaded — the problem's difficulty rank at the
@@ -301,11 +305,11 @@ const BUBBLES = {
 
 // --- gating ------------------------------------------------------------------
 
-function spacingOk(kind) {
+function spacingOk(def) {
     if (_shownThisSession >= SESSION_CAP) return false;
     const lastShown = lsNum(K_LAST_SHOWN_AT);
-    if (lastShown && (Date.now() - lastShown) < MIN_GAP_MS) return false;
-    if (kind === 'ambient') {
+    if (!def.ignoreGap && lastShown && (Date.now() - lastShown) < MIN_GAP_MS) return false;
+    if (def.kind === 'ambient') {
         const since = historyLen() - lsNum(K_LAST_AMBIENT_COUNT);
         if (since < SPACING_PROBLEMS) return false;
     }
@@ -321,7 +325,7 @@ function tryShow(ids, ctx = {}) {
         const def = BUBBLES[id];
         if (!def || wasShown(id)) continue;
         try { if (!def.eligible(ctx)) continue; } catch { continue; }
-        if (!spacingOk(def.kind)) return;   // gate is global — don't fall through to a lower-priority one
+        if (!spacingOk(def)) return;   // gate is global — don't fall through to a lower-priority one
         scheduleShow(id, def, ctx);
         return;
     }
@@ -499,7 +503,11 @@ export function onSolvingProblemShown(problem) {
 }
 
 export function onEnterReview() {
-    tryShow(['earlyMistakes', 'reviewIntro', 'reviewReadout', 'share']);
+    // A context switch: a solving-mode bubble still up or scheduled describes
+    // a board that is gone, and left alone it would hold the review bubbles
+    // back (`_pending`). Clear it. Not counted as a dismissal.
+    removeBubble();
+    tryShow(['reviewIntro', 'earlyMistakes', 'reviewReadout', 'share']);
 }
 
 // The Recall button's waiting-count badge just painted with a non-zero count
@@ -534,7 +542,7 @@ function tryShowFeature(id, ctx = {}) {
     if (wasShown(id)) return;
     const def = BUBBLES[id];
     try { if (!def.eligible(ctx)) return; } catch { return; }
-    if (!spacingOk(def.kind)) return;
+    if (!spacingOk(def)) return;
     scheduleShow(id, def, ctx);
 }
 
