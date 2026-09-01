@@ -897,15 +897,15 @@
       }
     },
     "determinism.repeat_files_compared": {
-      "value": 11,
+      "value": 22,
       "fmt": "d",
-      "text": "11",
+      "text": "22",
       "producer": "ablations.refit_determinism_figures",
       "tier": "refit",
       "note": "output files compared across all repeats — the size of the check behind the zero above",
       "measured": {
-        "at": "2026-09-01T03:16:17Z",
-        "git": "aa809484f64+dirty",
+        "at": "2026-09-01T13:31:21Z",
+        "git": "7b5e2fadd02+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -918,22 +918,22 @@
       "tier": "refit",
       "note": "the same over EVERY output a run writes, the model checkpoint and the axis artifacts included",
       "measured": {
-        "at": "2026-09-01T03:16:17Z",
-        "git": "aa809484f64+dirty",
+        "at": "2026-09-01T13:31:21Z",
+        "git": "7b5e2fadd02+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
     },
     "determinism.repeat_pairs": {
-      "value": 1,
+      "value": 2,
       "fmt": "d",
-      "text": "1",
+      "text": "2",
       "producer": "ablations.refit_determinism_figures",
       "tier": "refit",
       "note": "independent repeats found among the refit panels' arms — pairs of separate processes that ran one configuration on one machine at one revision",
       "measured": {
-        "at": "2026-09-01T03:16:17Z",
-        "git": "aa809484f64+dirty",
+        "at": "2026-09-01T13:31:21Z",
+        "git": "7b5e2fadd02+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -946,8 +946,8 @@
       "tier": "refit",
       "note": "per-problem output files that differ between the two runs of a repeat. §1.8's bitwise claim is this being zero, which is what a fig-guard holds it to, not a number worth quoting",
       "measured": {
-        "at": "2026-09-01T03:16:17Z",
-        "git": "aa809484f64+dirty",
+        "at": "2026-09-01T13:31:21Z",
+        "git": "7b5e2fadd02+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -960,8 +960,8 @@
       "tier": "refit",
       "note": "problems whose full parameter row was compared in each repeat",
       "measured": {
-        "at": "2026-09-01T03:16:17Z",
-        "git": "aa809484f64+dirty",
+        "at": "2026-09-01T13:31:21Z",
+        "git": "7b5e2fadd02+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -974,8 +974,8 @@
       "tier": "refit",
       "note": "1 when every repeat's held-out convergence trace matches value for value, 0 otherwise — the training path itself repeating, not only what it wrote",
       "measured": {
-        "at": "2026-09-01T03:16:17Z",
-        "git": "aa809484f64+dirty",
+        "at": "2026-09-01T13:31:21Z",
+        "git": "7b5e2fadd02+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -1359,43 +1359,43 @@
       }
     },
     "lr.net_slow_converge_epoch": {
-      "value": 1975.0,
+      "value": 2196.6666666666665,
       "fmt": ".0f",
-      "text": "1975",
+      "text": "2197",
       "producer": "ablations.refit_lr_figures",
       "tier": "refit",
-      "note": "the same epoch for the three-times-slower network, averaged over the panel's 2 seeds",
+      "note": "the same epoch for the three-times-slower network, averaged over the panel's 3 seeds",
       "measured": {
-        "at": "2026-09-01T05:07:42Z",
-        "git": "6b2bec99c41+dirty",
+        "at": "2026-09-01T13:31:19Z",
+        "git": "7b5e2fadd02+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
     },
     "lr.net_slow_converge_ratio": {
-      "value": 0.8061224489795918,
+      "value": 0.8845637583892616,
       "fmt": ".1f",
-      "text": "0.8",
+      "text": "0.9",
       "producer": "ablations.refit_lr_figures",
       "tier": "refit",
       "note": "how many times longer the slower network takes to reach its own plateau, at the same held-out margin — the second averaged epoch over the first, so above 1 means the slower network plateaus later",
       "measured": {
-        "at": "2026-09-01T05:07:42Z",
-        "git": "6b2bec99c41+dirty",
+        "at": "2026-09-01T13:31:19Z",
+        "git": "7b5e2fadd02+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
     },
     "lr.net_slow_cost_mnat": {
-      "value": 9.064868092536926,
+      "value": 11.529505252838135,
       "fmt": ".2f",
-      "text": "9.06",
+      "text": "11.53",
       "producer": "ablations.refit_lr_figures",
       "tier": "refit",
-      "note": "the same cost of a three-times-slower network at the shipped field rate; signed, positive means the slower network is the worse fit. The claim is a tie, read at the last checkpoint both traces are finite — the final epoch for an arm that stayed finite, and the fit that would actually ship; PAIRED against the shipped arm of its own seed — one seed is one held-out draw, so the arms inside it hold aside the same stop rows — then meaned over the 2 seeds",
+      "note": "the same cost of a three-times-slower network at the shipped field rate; signed, positive means the slower network is the worse fit. The claim is a tie, read at the last checkpoint both traces are finite — the final epoch for an arm that stayed finite, and the fit that would actually ship; PAIRED against the shipped arm of its own seed — one seed is one held-out draw, so the arms inside it hold aside the same stop rows — then meaned over the 3 seeds",
       "measured": {
-        "at": "2026-09-01T05:07:42Z",
-        "git": "6b2bec99c41+dirty",
+        "at": "2026-09-01T13:31:19Z",
+        "git": "7b5e2fadd02+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -1408,36 +1408,36 @@
       "tier": "refit",
       "note": "1 when every seed puts this cost on the same side of zero on BOTH readings, 0 when the seeds disagree. An indicator for a `fig-guard: lr.net_slow_cost_sign_consistent == 1` beside any sentence naming the direction of that cost, never for a span",
       "measured": {
-        "at": "2026-09-01T05:07:42Z",
-        "git": "6b2bec99c41+dirty",
+        "at": "2026-09-01T13:31:19Z",
+        "git": "7b5e2fadd02+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
     },
     "lr.net_slow_tail_cost_mnat": {
-      "value": 6.677851375966936,
+      "value": 9.546744744769798,
       "fmt": ".2f",
-      "text": "6.68",
+      "text": "9.55",
       "producer": "ablations.refit_lr_figures",
       "tier": "refit",
-      "note": "held-out (stop-split) cost of a three-times-slower network at the shipped field rate; signed, positive means the slower network is the worse fit. The claim is a tie, millinats, over the last third of the budget — PAIRED against the shipped arm of its own seed — one seed is one held-out draw, so the arms inside it hold aside the same stop rows — then meaned over the 2 seeds. The headline reading: it is the level the arm settled at, which a final checkpoint alone samples only once",
+      "note": "held-out (stop-split) cost of a three-times-slower network at the shipped field rate; signed, positive means the slower network is the worse fit. The claim is a tie, millinats, over the last third of the budget — PAIRED against the shipped arm of its own seed — one seed is one held-out draw, so the arms inside it hold aside the same stop rows — then meaned over the 3 seeds. The headline reading: it is the level the arm settled at, which a final checkpoint alone samples only once",
       "measured": {
-        "at": "2026-09-01T05:07:42Z",
-        "git": "6b2bec99c41+dirty",
+        "at": "2026-09-01T13:31:19Z",
+        "git": "7b5e2fadd02+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
     },
     "lr.ratio10x_cost_mnat": {
-      "value": 0.29581785202026367,
+      "value": 2.6274224122365317,
       "fmt": ".1f",
-      "text": "0.3",
+      "text": "2.6",
       "producer": "ablations.refit_lr_figures",
       "tier": "refit",
-      "note": "the same cost at a ten-fold field/net ratio against the shipped ~33-fold — the bottom of the saturating region, read at the last checkpoint both traces are finite — the final epoch for an arm that stayed finite, and the fit that would actually ship; PAIRED against the shipped arm of its own seed — one seed is one held-out draw, so the arms inside it hold aside the same stop rows — then meaned over the 2 seeds",
+      "note": "the same cost at a ten-fold field/net ratio against the shipped ~33-fold — the bottom of the saturating region, read at the last checkpoint both traces are finite — the final epoch for an arm that stayed finite, and the fit that would actually ship; PAIRED against the shipped arm of its own seed — one seed is one held-out draw, so the arms inside it hold aside the same stop rows — then meaned over the 3 seeds",
       "measured": {
-        "at": "2026-09-01T05:07:42Z",
-        "git": "6b2bec99c41+dirty",
+        "at": "2026-09-01T13:31:19Z",
+        "git": "7b5e2fadd02+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -1450,36 +1450,36 @@
       "tier": "refit",
       "note": "1 when every seed puts this cost on the same side of zero on BOTH readings, 0 when the seeds disagree. An indicator for a `fig-guard: lr.ratio10x_cost_sign_consistent == 1` beside any sentence naming the direction of that cost, never for a span",
       "measured": {
-        "at": "2026-09-01T05:07:42Z",
-        "git": "6b2bec99c41+dirty",
+        "at": "2026-09-01T13:31:19Z",
+        "git": "7b5e2fadd02+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
     },
     "lr.ratio10x_tail_cost_mnat": {
-      "value": -4.185479761350253,
+      "value": -0.7213256736792925,
       "fmt": ".1f",
-      "text": "-4.2",
+      "text": "-0.7",
       "producer": "ablations.refit_lr_figures",
       "tier": "refit",
-      "note": "held-out (stop-split) cost at a ten-fold field/net ratio against the shipped ~33-fold — the bottom of the saturating region, millinats, over the last third of the budget — PAIRED against the shipped arm of its own seed — one seed is one held-out draw, so the arms inside it hold aside the same stop rows — then meaned over the 2 seeds. The headline reading: it is the level the arm settled at, which a final checkpoint alone samples only once",
+      "note": "held-out (stop-split) cost at a ten-fold field/net ratio against the shipped ~33-fold — the bottom of the saturating region, millinats, over the last third of the budget — PAIRED against the shipped arm of its own seed — one seed is one held-out draw, so the arms inside it hold aside the same stop rows — then meaned over the 3 seeds. The headline reading: it is the level the arm settled at, which a final checkpoint alone samples only once",
       "measured": {
-        "at": "2026-09-01T05:07:42Z",
-        "git": "6b2bec99c41+dirty",
+        "at": "2026-09-01T13:31:19Z",
+        "git": "7b5e2fadd02+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
     },
     "lr.shared_rate_cost_mnat": {
-      "value": -1.8222033977508545,
+      "value": -1.0250210762023926,
       "fmt": ".0f",
-      "text": "-2",
+      "text": "-1",
       "producer": "ablations.refit_lr_figures",
       "tier": "refit",
-      "note": "the same cost of one shared rate against the shipped split, read at the last checkpoint both traces are finite — the final epoch for an arm that stayed finite, and the fit that would actually ship; PAIRED against the shipped arm of its own seed — one seed is one held-out draw, so the arms inside it hold aside the same stop rows — then meaned over the 2 seeds",
+      "note": "the same cost of one shared rate against the shipped split, read at the last checkpoint both traces are finite — the final epoch for an arm that stayed finite, and the fit that would actually ship; PAIRED against the shipped arm of its own seed — one seed is one held-out draw, so the arms inside it hold aside the same stop rows — then meaned over the 3 seeds",
       "measured": {
-        "at": "2026-09-01T05:07:42Z",
-        "git": "6b2bec99c41+dirty",
+        "at": "2026-09-01T13:31:19Z",
+        "git": "7b5e2fadd02+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -1492,8 +1492,8 @@
       "tier": "refit",
       "note": "1 when every seed puts this cost on the same side of zero on BOTH readings, 0 when the seeds disagree. An indicator for a `fig-guard: lr.shared_rate_cost_sign_consistent == 1` beside any sentence naming the direction of that cost, never for a span",
       "measured": {
-        "at": "2026-09-01T05:07:42Z",
-        "git": "6b2bec99c41+dirty",
+        "at": "2026-09-01T13:31:19Z",
+        "git": "7b5e2fadd02+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -1506,8 +1506,8 @@
       "tier": "refit",
       "note": "the earliest epoch at which any seed's single-shared-rate arm first met that test; 0 means no seed did",
       "measured": {
-        "at": "2026-09-01T05:07:42Z",
-        "git": "6b2bec99c41+dirty",
+        "at": "2026-09-01T13:31:19Z",
+        "git": "7b5e2fadd02+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -1520,36 +1520,36 @@
       "tier": "refit",
       "note": "1 when the single-shared-rate arm (field rate pulled onto the network's) diverged at ANY seed, 0 when it did so at none — non-finite, or 20 millinats above its own running best held-out score. The claim is that one shared rate CAN blow up, so one seed doing it is the finding. An indicator for a fig-guard, not a span",
       "measured": {
-        "at": "2026-09-01T05:07:42Z",
-        "git": "6b2bec99c41+dirty",
+        "at": "2026-09-01T13:31:19Z",
+        "git": "7b5e2fadd02+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
     },
     "lr.shared_rate_tail_cost_mnat": {
-      "value": -4.719106277616902,
+      "value": -2.8370541117765753,
       "fmt": ".0f",
-      "text": "-5",
+      "text": "-3",
       "producer": "ablations.refit_lr_figures",
       "tier": "refit",
-      "note": "held-out (stop-split) cost of one shared rate against the shipped split, millinats, over the last third of the budget — PAIRED against the shipped arm of its own seed — one seed is one held-out draw, so the arms inside it hold aside the same stop rows — then meaned over the 2 seeds. The headline reading: it is the level the arm settled at, which a final checkpoint alone samples only once",
+      "note": "held-out (stop-split) cost of one shared rate against the shipped split, millinats, over the last third of the budget — PAIRED against the shipped arm of its own seed — one seed is one held-out draw, so the arms inside it hold aside the same stop rows — then meaned over the 3 seeds. The headline reading: it is the level the arm settled at, which a final checkpoint alone samples only once",
       "measured": {
-        "at": "2026-09-01T05:07:42Z",
-        "git": "6b2bec99c41+dirty",
+        "at": "2026-09-01T13:31:19Z",
+        "git": "7b5e2fadd02+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
     },
     "lr.shipped_converge_epoch": {
-      "value": 2450.0,
+      "value": 2483.3333333333335,
       "fmt": ".0f",
-      "text": "2450",
+      "text": "2483",
       "producer": "ablations.refit_lr_figures",
       "tier": "refit",
-      "note": "first epoch from which the shipped arm's held-out score never again rises above its own final value by more than its own closing spread — the band it settles into, each arm measured against the band it actually reaches. A per-fit property, averaged over the panel's 2 seeds",
+      "note": "first epoch from which the shipped arm's held-out score never again rises above its own final value by more than its own closing spread — the band it settles into, each arm measured against the band it actually reaches. A per-fit property, averaged over the panel's 3 seeds",
       "measured": {
-        "at": "2026-09-01T05:07:42Z",
-        "git": "6b2bec99c41+dirty",
+        "at": "2026-09-01T13:31:19Z",
+        "git": "7b5e2fadd02+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -3626,86 +3626,268 @@
         "data_version": "f6fba7b749bc0ecb"
       }
     },
-    "schedule.between_run_range_constant_mnat": {
-      "value": 8.091390132904053,
-      "fmt": ".1f",
-      "text": "8.1",
+    "schedule.budgets_swept": {
+      "value": 7,
+      "fmt": "d",
+      "text": "7",
       "producer": "ablations.refit_schedule_figures",
       "tier": "refit",
-      "note": "THE FIGURE THAT DECIDES REPLICATION: how far the final held-out-PROBLEM score lands apart across runs of the constant schedule scored on identical problems. The draw is pinned, so it spans what a seed re-rolls — feature basis, initial weights, batch order — and not the data",
+      "note": "distinct cosine epoch budgets the panel runs on the held-out problem unit, each with its own replicated arms — a shorter cosine run is not a prefix of a longer one, so every point is its own fit",
       "measured": {
-        "at": "2026-09-01T08:37:49Z",
-        "git": "b84c23cdcce+dirty",
+        "at": "2026-09-01T13:20:07Z",
+        "git": "7b5e2fadd02+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
     },
-    "schedule.between_run_range_cosine_mnat": {
-      "value": 2.5802254676818848,
+    "schedule.constant_epoch_draw_mnat": {
+      "value": 4.572790529992858,
       "fmt": ".1f",
-      "text": "2.6",
+      "text": "4.6",
       "producer": "ablations.refit_schedule_figures",
       "tier": "refit",
-      "note": "the same spread under the cosine decay AT MATCHED-OR-BETTER WORK. Dropping replicates needs this small against the contrasts a panel is asked to resolve",
+      "note": "mean over those runs of (the single held-out score at 80% of the budget - the run's final level), millinats: how much what ships depends on where the budget happens to fall",
       "measured": {
-        "at": "2026-09-01T08:37:49Z",
-        "git": "b84c23cdcce+dirty",
+        "at": "2026-09-01T13:20:07Z",
+        "git": "7b5e2fadd02+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
     },
-    "schedule.cosine_level_cost_equal_epochs_mnat": {
-      "value": 7.1422656377155835,
-      "fmt": ".1f",
-      "text": "7.1",
+    "schedule.constant_initializations": {
+      "value": 6,
+      "fmt": "d",
+      "text": "6",
       "producer": "ablations.refit_schedule_figures",
       "tier": "refit",
-      "note": "the same level comparison against a cosine arm run for the same EPOCHS rather than the same work — what adopting the schedule without lengthening the budget would cost, kept because that is the naive change someone would make",
+      "note": "runs of the retired constant schedule at 3000 epochs behind the reference level, all on held-out problems at one pinned draw, differing only in the seed",
       "measured": {
-        "at": "2026-09-01T08:37:49Z",
-        "git": "b84c23cdcce+dirty",
+        "at": "2026-09-01T13:20:07Z",
+        "git": "7b5e2fadd02+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
     },
-    "schedule.cosine_level_cost_mnat": {
-      "value": -0.6795724232991907,
+    "schedule.constant_level_sd_mnat": {
+      "value": 4.278787887942855,
       "fmt": ".1f",
+      "text": "4.3",
+      "producer": "ablations.refit_schedule_figures",
+      "tier": "refit",
+      "note": "run-to-run sd of that constant configuration's final level (mean of the last 2% of checkpoints) on held-out problems, millinats",
+      "measured": {
+        "at": "2026-09-01T13:20:07Z",
+        "git": "7b5e2fadd02+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "schedule.constant_long_level_cost_mnat": {
+      "value": 6.716108274838373,
+      "fmt": "+.1f",
+      "text": "+6.7",
+      "producer": "ablations.refit_schedule_figures",
+      "tier": "refit",
+      "note": "final level of the constant schedule run to 7000 epochs minus its own 3000-epoch level, held-out problems, millinats — positive means the undecayed fit also gets worse when given the longer budget",
+      "measured": {
+        "at": "2026-09-01T13:20:07Z",
+        "git": "7b5e2fadd02+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "schedule.overfit_budget": {
+      "value": 12000,
+      "fmt": "d",
+      "text": "12000",
+      "producer": "ablations.refit_schedule_figures",
+      "tier": "refit",
+      "note": "smallest cosine budget whose final level is worse than the shipping budget's by more than the window's run-to-run sd — the definition of the window's upper bound, not a separate test",
+      "measured": {
+        "at": "2026-09-01T13:20:07Z",
+        "git": "7b5e2fadd02+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "schedule.overfit_level_cost_mnat": {
+      "value": 5.730720384726551,
+      "fmt": "+.1f",
+      "text": "+5.7",
+      "producer": "ablations.refit_schedule_figures",
+      "tier": "refit",
+      "note": "that budget's final level minus the shipping budget's, held-out problems, millinats",
+      "measured": {
+        "at": "2026-09-01T13:20:07Z",
+        "git": "7b5e2fadd02+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "schedule.overfit_max_climb_mnat": {
+      "value": 16.18211468060815,
+      "fmt": ".1f",
+      "text": "16.2",
+      "producer": "ablations.refit_schedule_figures",
+      "tier": "refit",
+      "note": "over that budget's runs, the largest (final level - the run's own held-out minimum), millinats: how far past its best point a run finishes, which the decay to zero makes permanent",
+      "measured": {
+        "at": "2026-09-01T13:20:07Z",
+        "git": "7b5e2fadd02+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "schedule.overfit_work_epochs": {
+      "value": 6000,
+      "fmt": ".0f",
+      "text": "6000",
+      "producer": "ablations.refit_schedule_figures",
+      "tier": "refit",
+      "note": "that budget's learning-rate integral in constant-rate epochs — the optimization it actually delivered, not its epoch count",
+      "measured": {
+        "at": "2026-09-01T13:20:07Z",
+        "git": "7b5e2fadd02+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "schedule.sd_ratio": {
+      "value": 1.979916785403199,
+      "fmt": ".2f",
+      "text": "1.98",
+      "producer": "ablations.refit_schedule_figures",
+      "tier": "refit",
+      "note": "constant-schedule run-to-run sd over the window's, both on held-out problems: how much of the fit's wander the decay takes out of the RESULT rather than out of one run's tail",
+      "measured": {
+        "at": "2026-09-01T13:20:07Z",
+        "git": "7b5e2fadd02+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "schedule.sd_ratio_p": {
+      "value": 0.06329083194321733,
+      "fmt": ".2f",
+      "text": "0.06",
+      "producer": "ablations.refit_schedule_figures",
+      "tier": "refit",
+      "note": "one-sided F-test p that the constant spread exceeds the window's, at 5 and 6 degrees of freedom — the honest reading of a variance ratio from this few runs",
+      "measured": {
+        "at": "2026-09-01T13:20:07Z",
+        "git": "7b5e2fadd02+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "schedule.shipped_budget": {
+      "value": 7000,
+      "fmt": "d",
+      "text": "7000",
+      "producer": "ablations.refit_schedule_figures",
+      "tier": "refit",
+      "note": "the cosine epoch budget production trains, read from pipeline.train_mirt and required to be an arm of this panel",
+      "measured": {
+        "at": "2026-09-01T13:20:07Z",
+        "git": "7b5e2fadd02+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "schedule.shipped_level_cost_mnat": {
+      "value": -0.7009220028679763,
+      "fmt": "+.1f",
       "text": "-0.7",
       "producer": "ablations.refit_schedule_figures",
       "tier": "refit",
-      "note": "what the cosine schedule costs on held-out PROBLEMS against the constant one, millinats, positive meaning the decayed fit generalizes worse — measured with the decayed arm given at least as much optimization, so a cost here is the schedule and not a shorter run",
+      "note": "final level of the shipping cosine budget minus the constant baseline's, held-out problems, millinats — negative means the shipped fit generalizes better",
       "measured": {
-        "at": "2026-09-01T08:37:49Z",
-        "git": "b84c23cdcce+dirty",
+        "at": "2026-09-01T13:20:07Z",
+        "git": "7b5e2fadd02+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
     },
-    "schedule.cosine_work_ratio": {
-      "value": 1.1666666666666667,
+    "schedule.shipped_work_epochs": {
+      "value": 3500,
+      "fmt": ".0f",
+      "text": "3500",
+      "producer": "ablations.refit_schedule_figures",
+      "tier": "refit",
+      "note": "the shipping budget's learning-rate integral in constant-rate epochs",
+      "measured": {
+        "at": "2026-09-01T13:20:07Z",
+        "git": "7b5e2fadd02+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "schedule.wall_clock_ratio": {
+      "value": 1.881097785299095,
       "fmt": ".2f",
-      "text": "1.17",
+      "text": "1.88",
       "producer": "ablations.refit_schedule_figures",
       "tier": "refit",
-      "note": "learning-rate integral of that cosine arm over the constant arm's, both in constant-rate epochs. At or above one the decayed arm was not starved; a cosine to zero delivers about half its epoch count, so equal epochs would put this near 0.5",
+      "note": "median wall clock of the shipping cosine arms over the constant baseline's — arms shared a GPU pool, so this tracks the budget ratio rather than timing a run",
       "measured": {
-        "at": "2026-09-01T08:37:49Z",
-        "git": "b84c23cdcce+dirty",
+        "at": "2026-09-01T13:20:07Z",
+        "git": "7b5e2fadd02+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
     },
-    "schedule.initializations": {
-      "value": 3,
+    "schedule.window_hi_budget": {
+      "value": 10000,
       "fmt": "d",
-      "text": "3",
+      "text": "10000",
       "producer": "ablations.refit_schedule_figures",
       "tier": "refit",
-      "note": "runs per configuration behind the spreads above. Three points estimate a spread crudely, and the range of three understates the distribution they came from",
+      "note": "highest cosine budget still level with the shipping one: the walk upward stops before the first budget that is worse by more than the window's own spread",
       "measured": {
-        "at": "2026-09-01T08:37:49Z",
-        "git": "b84c23cdcce+dirty",
+        "at": "2026-09-01T13:20:07Z",
+        "git": "7b5e2fadd02+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "schedule.window_level_cost_mnat": {
+      "value": -1.3699909819969713,
+      "fmt": "+.1f",
+      "text": "-1.4",
+      "producer": "ablations.refit_schedule_figures",
+      "tier": "refit",
+      "note": "the same comparison pooled over every cosine budget in the plateau window, millinats",
+      "measured": {
+        "at": "2026-09-01T13:20:07Z",
+        "git": "7b5e2fadd02+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "schedule.window_level_sd_mnat": {
+      "value": 2.1610948093818516,
+      "fmt": ".1f",
+      "text": "2.2",
+      "producer": "ablations.refit_schedule_figures",
+      "tier": "refit",
+      "note": "run-to-run sd inside that window, pooled about each budget's own mean, millinats — the spread a paired contrast under the shipped schedule is read against",
+      "measured": {
+        "at": "2026-09-01T13:20:07Z",
+        "git": "7b5e2fadd02+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "schedule.window_lo_budget": {
+      "value": 7000,
+      "fmt": "d",
+      "text": "7000",
+      "producer": "ablations.refit_schedule_figures",
+      "tier": "refit",
+      "note": "lowest cosine budget in the plateau window, which is the shipping budget by construction",
+      "measured": {
+        "at": "2026-09-01T13:20:07Z",
+        "git": "7b5e2fadd02+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -3716,10 +3898,10 @@
       "text": "6.7",
       "producer": "ablations.refit_schedule_figures",
       "tier": "refit",
-      "note": "the band a run wanders inside at its end under the CONSTANT rate that ships: peak-to-peak of its held-out score over the last third of the budget, millinats, averaged over runs",
+      "note": "the band a run wanders inside at its end under the retired CONSTANT rate: peak-to-peak of its held-out-ROW score over the last third of the budget, millinats, averaged over runs",
       "measured": {
-        "at": "2026-09-01T08:37:49Z",
-        "git": "b84c23cdcce+dirty",
+        "at": "2026-09-01T13:20:07Z",
+        "git": "7b5e2fadd02+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -3730,10 +3912,10 @@
       "text": "2.1",
       "producer": "ablations.refit_schedule_figures",
       "tier": "refit",
-      "note": "the same band under a cosine decay to zero — far narrower almost by construction, since a rate going to zero stops moving the parameters, which is why it settles nothing on its own",
+      "note": "the same band under the cosine decay to zero, at the 3000-epoch row-unit arms, the only cosine budget the row unit carries — far narrower almost by construction, since a rate going to zero stops moving the parameters, which is why it settles nothing on its own",
       "measured": {
-        "at": "2026-09-01T08:37:49Z",
-        "git": "b84c23cdcce+dirty",
+        "at": "2026-09-01T13:20:07Z",
+        "git": "7b5e2fadd02+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -4313,43 +4495,43 @@
       }
     },
     "stopping.patience_advantage_best_mnat": {
-      "value": 0.035822391510009766,
+      "value": 0.08180737495422363,
       "fmt": ".1f",
-      "text": "0.0",
+      "text": "0.1",
       "producer": "ablations.refit_stopping_figures",
       "tier": "refit",
       "note": "the rule's BEST case over every seed and setting tried — the most it could claim under its own criterion",
       "measured": {
-        "at": "2026-09-01T06:33:59Z",
-        "git": "1e9f45029f5+dirty",
+        "at": "2026-09-01T13:31:19Z",
+        "git": "7b5e2fadd02+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
     },
     "stopping.patience_advantage_mnat": {
-      "value": -16.60676548878352,
+      "value": -13.944389919439951,
       "fmt": ".1f",
-      "text": "-16.6",
+      "text": "-13.9",
       "producer": "ablations.refit_stopping_figures",
       "tier": "refit",
       "note": "millinats the selected epoch beats the FINAL epoch by on the held-aside rows, meaned over seeds and settings; SIGNED, so a negative value means the rule stops early and ships the worse fit. Flattering to the rule by construction: the selected epoch is a running minimum over the very rows the selection reads",
       "measured": {
-        "at": "2026-09-01T06:33:59Z",
-        "git": "1e9f45029f5+dirty",
+        "at": "2026-09-01T13:31:19Z",
+        "git": "7b5e2fadd02+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
     },
     "stopping.patience_best_case_epoch": {
-      "value": 2990.0,
+      "value": 2960.0,
       "fmt": "~10",
-      "text": "2,990",
+      "text": "2,960",
       "producer": "ablations.refit_stopping_figures",
       "tier": "refit",
       "note": "the epoch the rule stopped at in that best case. Read it beside the advantage: a rule can only match a budget it is competing with by declining to stop early, which is the budget's own answer arrived at expensively",
       "measured": {
-        "at": "2026-09-01T06:33:59Z",
-        "git": "1e9f45029f5+dirty",
+        "at": "2026-09-01T13:31:19Z",
+        "git": "7b5e2fadd02+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -4362,78 +4544,78 @@
       "tier": "refit",
       "note": "1 if a patience rule beat the final epoch at any seed and any setting, 0 if it never did. An indicator for a fig-guard: 0 says the fixed budget is not merely lower-variance but better",
       "measured": {
-        "at": "2026-09-01T06:33:59Z",
-        "git": "1e9f45029f5+dirty",
+        "at": "2026-09-01T13:31:19Z",
+        "git": "7b5e2fadd02+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
     },
     "stopping.patience_setting_over_seed_ratio": {
-      "value": 2.4186046511627906,
+      "value": 3.0684931506849313,
       "fmt": ".1f",
-      "text": "2.4",
+      "text": "3.1",
       "producer": "ablations.refit_stopping_figures",
       "tier": "refit",
       "note": "the first spread over the second: how many times more the chosen epoch answers to the rule's own tuning than to the fit it is reading. Above one means the setting dominates",
       "measured": {
-        "at": "2026-09-01T06:33:59Z",
-        "git": "1e9f45029f5+dirty",
+        "at": "2026-09-01T13:31:19Z",
+        "git": "7b5e2fadd02+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
     },
     "stopping.patience_spread_seeds": {
-      "value": 752.5,
+      "value": 730.0,
       "fmt": "~10",
-      "text": "750",
+      "text": "730",
       "producer": "ablations.refit_stopping_figures",
       "tier": "refit",
       "note": "how far it moves when only the SEED changes, at a fixed setting, averaged over the settings — the same spread taken the other way round, over the same numbers",
       "measured": {
-        "at": "2026-09-01T06:33:59Z",
-        "git": "1e9f45029f5+dirty",
+        "at": "2026-09-01T13:31:19Z",
+        "git": "7b5e2fadd02+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
     },
     "stopping.patience_spread_settings": {
-      "value": 1820.0,
+      "value": 2240.0,
       "fmt": "~10",
-      "text": "1,820",
+      "text": "2,240",
       "producer": "ablations.refit_stopping_figures",
       "tier": "refit",
       "note": "how far the epoch a patience rule selects moves when only the PATIENCE SETTING changes, averaged over seeds — the rule's answer as a property of its own tuning",
       "measured": {
-        "at": "2026-09-01T06:33:59Z",
-        "git": "1e9f45029f5+dirty",
+        "at": "2026-09-01T13:31:19Z",
+        "git": "7b5e2fadd02+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
     },
     "stopping.prob_tail_detrended_sd_mnat": {
-      "value": 0.8304133547141342,
+      "value": 1.7620045441438867,
       "fmt": ".1f",
-      "text": "0.8",
+      "text": "1.8",
       "producer": "ablations.refit_stopping_figures",
       "tier": "refit",
       "note": "and its detrended noise, on that unit",
       "measured": {
-        "at": "2026-09-01T06:33:59Z",
-        "git": "1e9f45029f5+dirty",
+        "at": "2026-09-01T13:31:19Z",
+        "git": "7b5e2fadd02+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
     },
     "stopping.prob_tail_trend_mnat_per_500": {
-      "value": -1.3419677102202447,
+      "value": -3.557330351435,
       "fmt": ".1f",
-      "text": "-1.3",
+      "text": "-3.6",
       "producer": "ablations.refit_stopping_figures",
       "tier": "refit",
       "note": "the same slope on whole HELD-OUT PROBLEMS — the unit that can tell continued generalizing from continued fitting, and the criterion a budget belongs on. Flat here while the row split still descends is the ordinary shape of a budget that has arrived",
       "measured": {
-        "at": "2026-09-01T06:33:59Z",
-        "git": "1e9f45029f5+dirty",
+        "at": "2026-09-01T13:31:19Z",
+        "git": "7b5e2fadd02+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -4444,38 +4626,38 @@
       "text": "3",
       "producer": "ablations.refit_stopping_figures",
       "tier": "refit",
-      "note": "seeds of the shipped configuration whose recorded traces a patience rule is replayed on; runs of one seed are bitwise identical, so each seed counts once",
+      "note": "seeds of the CONSTANT-RATE configuration whose recorded traces a patience rule is replayed on. They share one held-aside draw, so what separates two of them is the initialization alone",
       "measured": {
-        "at": "2026-09-01T06:33:59Z",
-        "git": "1e9f45029f5+dirty",
+        "at": "2026-09-01T13:31:19Z",
+        "git": "7b5e2fadd02+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
     },
     "stopping.tail_detrended_sd_mnat": {
-      "value": 1.58092516290079,
+      "value": 1.4855655541929111,
       "fmt": ".1f",
-      "text": "1.6",
+      "text": "1.5",
       "producer": "ablations.refit_stopping_figures",
       "tier": "refit",
       "note": "what is left of that window's spread once the slope is removed: the run-to-run noise, against which the raw spread overstates the noise by whatever the trend contributes",
       "measured": {
-        "at": "2026-09-01T06:33:59Z",
-        "git": "1e9f45029f5+dirty",
+        "at": "2026-09-01T13:31:19Z",
+        "git": "7b5e2fadd02+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
     },
     "stopping.tail_trend_mnat_per_500": {
-      "value": -4.991463707896306,
+      "value": -3.865335420876226,
       "fmt": ".1f",
-      "text": "-5.0",
+      "text": "-3.9",
       "producer": "ablations.refit_stopping_figures",
       "tier": "refit",
       "note": "the SLOPE of the ROW-held-out score through the last third of the budget, millinats per 500 epochs, averaged over seeds. This is the trainer's convergence detector, whose rows share their users and problems with training — it keeps descending, which is why it is not what a budget is chosen on",
       "measured": {
-        "at": "2026-09-01T06:33:59Z",
-        "git": "1e9f45029f5+dirty",
+        "at": "2026-09-01T13:31:19Z",
+        "git": "7b5e2fadd02+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }

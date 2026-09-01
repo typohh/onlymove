@@ -137,14 +137,22 @@ from utils.rating.mirt_net import build_trunk  # noqa: E402
 from utils.rating.tail_agreement import (  # noqa: E402
     TAIL_HINGE, hinged_r, tail_weight as tail_weight_np)
 
-# The fit runs a FIXED budget. The stop split is flat well before the end — it
-# settles into a band a thousandth wide and then wanders inside it — so a
-# patience rule reading it selects an epoch out of that noise rather than out of
-# the fit, and the epoch it lands on moves by thousands of epochs between runs
-# that are otherwise identical. A fixed budget removes that source of variance
-# entirely; the split is still measured and printed, as the record of where the
-# fit got to, but nothing is selected on it.
-EPOCHS = 3000
+# The fit runs a FIXED budget under a cosine decay of both rates to zero, and the
+# final epoch is what ships. Nothing is selected on the stop split: it is measured
+# and printed as the record of where the fit got to and as the signal that would
+# show a run diverging. The decay is what makes the budget a real choice rather
+# than a stopping rule in disguise. Under a constant rate the fit wanders inside a
+# band at its end and the shipped value is whichever point of that band the last
+# epoch lands on, so a patience rule reading the split selects an epoch out of
+# the noise rather than out of the fit; the decay freezes the fit wherever it
+# stands as the rate reaches zero — which cuts both ways, since a budget long
+# enough for the held-out-problem score to have turned locks the overfit in. The
+# budget is chosen on held-out PROBLEMS over a sweep (docs/mirt_benchmark.md).
+# The row split cannot choose it: a held-out row shares its users and problems
+# with training, so it keeps improving past the point where generalization to
+# unseen problems has flattened.
+EPOCHS = 7000
+LR_SCHEDULE = "cosine"
 CHECK_EVERY = 10
 BATCH = 65536
 # SPLIT RATES, and the split is mandatory. What the grid measures is the RATIO
@@ -542,7 +550,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         shallow_w=SHALLOW_W, shallow_samples=SHALLOW_SAMPLES,
         teach_weight=TEACH_WEIGHT, stop_row_frac=STOP_ROW_FRAC,
         pca_dim=PCA_DIM, blocks=PRODUCTION_BLOCKS, stop_unit="row",
-        split_seed=None, pca_seed=None, lr_schedule="constant",
+        split_seed=None, pca_seed=None, lr_schedule=LR_SCHEDULE,
         k_axes=K_AXES, dropout=DROPOUT, input_dropout=INPUT_DROPOUT,
         weight_decay=0.0, out_dir=OUT_DIR, axes_dir=AXES_DIR):
     """The shipped fit, callable. Every keyword defaults to the production
@@ -638,11 +646,12 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
     opt = torch.optim.Adam(m.param_groups(lr_net, lr_field),
                            weight_decay=weight_decay)
     o_tau = float(np.log(np.expm1(shallow_tau)))
-    # A COSINE DECAY IS THE ALTERNATIVE TO A CONSTANT RATE, and what it is being
-    # asked is whether the settled band narrows: a constant rate keeps taking
-    # full-size steps long after the fit has arrived, which is what a run
-    # wandering inside a wide band at its end looks like. `constant` is what
-    # ships and leaves every step exactly as it was.
+    # THE COSINE DECAY SHIPS; `constant` is the comparison arm and leaves every
+    # step at the base rate. A constant rate keeps taking full-size steps long
+    # after the fit has arrived, which is what a run wandering inside a wide band
+    # at its end looks like, and the shipped value is then whichever point of
+    # the band the last epoch lands on. The decay removes that draw: the fit is
+    # frozen where it stands as the rate reaches zero.
     if lr_schedule not in ("constant", "cosine"):
         raise ValueError(f"unknown lr_schedule {lr_schedule!r}")
     base_lrs = [g["lr"] for g in opt.param_groups]

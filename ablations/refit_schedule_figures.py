@@ -1,39 +1,55 @@
 #!/usr/bin/env python3
-"""Does decaying the learning rate make a run consistent enough to stop
-replicating it? Read from the `schedule` refit panel.
+"""What stops the shipped fit: the learning-rate schedule and the epoch budget.
+Read from the `schedule` refit panel.
 
-THE QUESTION IS NOT THE OBVIOUS ONE. A constant rate keeps taking full-size
-steps long after the fit has arrived, so a cosine decay to zero should narrow
-the band a run wanders inside at its end almost by construction — that much is
-nearly a tautology and settles nothing. What decides whether a comparison needs
-more than one seed is the spread of the RESULT between runs: a paired contrast
-is read against how far two runs of one configuration land apart, and a run that
-sits perfectly still at the wrong place is no more useful than one that wanders.
-So this producer reports three things and refuses to collapse them:
+Production decays the rate to zero over a fixed budget and ships the final epoch.
+This producer measures the two things that decision rests on — whether the decay
+costs held-out accuracy, and where the budget can sit — against the constant-rate
+schedule and budget it replaced. Nothing here is assumed from the trainer's
+constants except which budget SHIPS, which is read from `pipeline.train_mirt` so
+the panel is required to contain the shipping configuration rather than something
+near it.
 
-  the WITHIN-RUN band   what the decay is expected to shrink,
-  the BETWEEN-RUN spread what actually licenses dropping replicates,
-  the LEVEL             whether the consistency was bought by fitting worse.
+A RUN'S LEVEL IS THE MEAN OF ITS LAST 2% OF CHECKPOINTS, not its closing third.
+What ships is the final epoch, so the level has to describe where a run ENDS: the
+decayed tail is flat and the constant tail is one draw from a band the fit is
+still wandering inside, and a short terminal window is the fair reading of both.
+The closing third is not, and reading it that way is what this producer got wrong
+before: on held-out PROBLEMS the constant fit is still descending through its own
+closing third, so a third-of-the-budget mean scores it above where its runs
+actually end and hands the schedule a win it did not earn. The window is a
+fraction of each arm's OWN budget, since the panel runs arms at many budgets.
 
-WHY THE ARMS ARE COMPARABLE AT ALL. A seed normally drives the held-aside draw
-too, so two runs at different seeds differ in the fit AND in the rows the fit is
-scored on — their difference is not a property of the fit. Every arm of this
-panel pins the draw (`split_seed`), so the between-run spread below is the fit
-moving and the two schedules' levels are scored on identical rows.
+THE UNIT IS HELD-OUT PROBLEMS. A held-out ROW is one more attempt by a user whose
+ability was fitted, on a problem whose parameters were, so it keeps improving
+while the fit sharpens on material it has already seen — which is exactly what a
+decay to zero stops. Judged there, any decay looks costly whether or not it gave
+up anything that generalizes. The row arms are read for one thing only: the band
+a run wanders inside at its end, which is the trainer's own convergence signal
+and the reason a patience rule cannot be trusted to pick an epoch.
 
-WHAT "THE FIT MOVING" INCLUDES, stated because it is broader than it sounds: one
-seed re-rolls the randomized joint-PCA FEATURE BASIS, the network's initial
-weights and the minibatch order together. A spread between arms differing in the
-seed is all three at once. The panel's `pinpca` and `pcaonly` arms separate
-them — a large share coming from the basis would point at a variance fix that
-has nothing to do with the learning rate.
+THE BUDGET IS A WINDOW, NOT A POINT. Cosine budgets at or above the shipping one
+are walked upward while each stays level with it; the walk stops at the first
+budget whose runs land worse than the shipping budget's by more than the spread
+already accumulated, and that budget is the OVERFIT one. What the window shows is
+a plateau — a range of budgets that agree, which is what makes the cheapest of
+them a defensible choice rather than the argmax of a noisy curve.
 
-WHAT WOULD LICENSE ONE SEED. Not a small number in isolation: the between-run
-spread has to be small against the contrasts the panels are asked to resolve.
-`schedule.between_run_range_cosine_mnat` is that spread; compare it to the
-differences quoted in methodology §1.7 and §1.8 before concluding anything, and
-note that three initializations estimate a spread crudely — the range of three
-draws understates the spread of the distribution they came from.
+WHY THE DECAY MAKES OVERFITTING PERMANENT. Under a constant rate a run that has
+gone too far keeps moving and can wander back; the decay freezes the fit wherever
+it stands as the rate reaches zero, so a budget long enough for the held-out
+score to have turned locks in whatever it had reached by then. That is what the
+overfit budget's climb figure measures — how far above its own held-out minimum a
+run finishes — and it is why the window is bounded from above rather than open.
+The learning-rate INTEGRAL, in constant-rate epochs, is what makes the two
+schedules' budgets comparable at all: a cosine to zero delivers about half its
+epoch count, so equal epochs are not equal optimization in either direction.
+
+WHY THE ARMS ARE COMPARABLE. A seed normally drives the held-aside draw too, so
+two runs at different seeds differ in the fit AND in the rows they are scored on.
+Every arm here pins the draw (`split_seed`), so a difference between runs is the
+fit moving — which spans everything one seed re-rolls: the randomized joint-PCA
+feature basis, the initial weights and the minibatch order.
 
     ./.venv/bin/python3 -m ablations.refit_schedule_figures
 """
@@ -41,6 +57,7 @@ draws understates the spread of the distribution they came from.
 import json
 import math
 import os
+import sqlite3
 import statistics
 import sys
 
@@ -51,8 +68,6 @@ if PROJECT_ROOT not in sys.path:
 from ablations._figures import Figure, require  # noqa: E402
 from utils.paths import DB_SQLITE  # noqa: E402
 
-import sqlite3  # noqa: E402
-
 TIER = "refit"
 
 PANEL = "schedule"
@@ -60,8 +75,24 @@ PANEL_DIR = os.path.join(PROJECT_ROOT, "ablations", "dev_runs", PANEL)
 MANIFEST = os.path.join(PROJECT_ROOT, "ablations", "panels", f"{PANEL}.json")
 SCHEDULES = ("constant", "cosine")
 
+# The terminal window a run's LEVEL is read over, as a fraction of its own
+# checkpoint trace: what ships is the last epoch, so the level describes the end
+# of the run rather than its closing stretch.
+LEVEL_TAIL_FRAC = 0.02
+# Where the "which epoch was it cut at" probe reads, as a fraction of the budget.
+EPOCH_DRAW_FRAC = 0.8
+# The within-run band the row arms report is peak-to-peak over the closing third
+# of the budget: wander, not descent, needs a window wide enough to contain the
+# oscillation and short enough to sit past convergence.
+BAND_FRAC = 2.0 / 3.0
+
 
 def load_panel():
+    """Every arm's record, grouped `unit -> (schedule, budget) -> [(arm, rec)]`,
+    with the panel's identity checks. A record that is not this arm, a pin that
+    differs across arms, a moved attempt log or an unpinned draw all fail here:
+    the whole panel is a set of paired comparisons and none of them survives any
+    of those."""
     require(os.path.exists(MANIFEST), f"no {MANIFEST}")
     manifest = json.load(open(MANIFEST))
     arms = {}
@@ -76,13 +107,12 @@ def load_panel():
                 f"{arm} ran {rec['config']!r}, the manifest declares "
                 f"{manifest['arms'][arm]!r} — the record is not this arm")
         arms[arm] = rec
-    # THIS PANEL CARRIES TWO BUDGETS ON PURPOSE, which is why it does not use
-    # the one-budget rule every other panel does: a decayed schedule compared at
-    # equal EPOCHS is compared at unequal WORK, and the arms that raise the
-    # budget exist precisely to remove that confound. What is required instead
-    # is that every arm recorded the integral, so the comparison can be stated
-    # in the units that matter.
-    for arm, rec in arms.items():
+    # THIS PANEL CARRIES MANY BUDGETS ON PURPOSE, which is why it does not use
+    # the one-budget rule every other panel does: the budget is one of the two
+    # things being measured. What is required instead is that every arm can
+    # state the WORK it delivered, so budgets under two schedules can be put on
+    # one axis.
+    for rec in arms.values():
         rec["metrics"]["lr_integral_epochs"] = lr_integral(rec["metrics"])
 
     base = next(iter(arms.values()))["pins"]
@@ -121,16 +151,16 @@ def load_panel():
                 f"{arm} records schedule {sched!r}, which this producer does "
                 f"not read")
         unit = rec["config"].get("stop_unit", "row")
-        by_unit.setdefault(unit, {s: [] for s in SCHEDULES})[sched].append(
-            (arm, rec))
-    for unit, by_sched in by_unit.items():
-        for s, group in by_sched.items():
+        key = (sched, int(rec["metrics"]["epochs"]))
+        by_unit.setdefault(unit, {}).setdefault(key, []).append((arm, rec))
+    for unit, groups in by_unit.items():
+        for (sched, budget), group in groups.items():
             require(len(group) >= 2,
-                    f"the {s} schedule has {len(group)} arm(s) on the {unit} "
-                    f"unit — a spread between runs needs at least two")
-    for unit, by_sched in by_unit.items():
+                    f"{sched}@{budget} has {len(group)} arm(s) on the {unit} "
+                    f"unit — a spread between runs needs at least two, and "
+                    f"every figure here is read against one")
         rows = {rec["metrics"]["stop_rows"]
-                for group in by_sched.values() for _, rec in group}
+                for group in groups.values() for _, rec in group}
         require(len(rows) == 1,
                 f"the {unit}-unit arms hold aside different row counts ({rows}) "
                 f"at one pinned draw — they are not scored on the same rows")
@@ -140,6 +170,11 @@ def load_panel():
             "with training, so a decay that stops the fit sharpening on seen "
             "material looks costly there whether or not it gave up anything "
             "that generalizes")
+    # The panel's `pinpca` and `pcaonly` arms decompose what a seed re-rolls
+    # (feature basis against initialization and batch order). They are constant
+    # row-unit runs like the other row arms, so they enter the within-run band
+    # as further samples of it and nothing else — the level comparison is
+    # problem-unit only, and the decomposition is not a schedule question.
     return by_unit
 
 
@@ -149,8 +184,8 @@ def lr_integral(metrics):
     Recorded by the trainer, and DERIVED for arms that predate the metric —
     exactly, not approximately: the schedule is a closed form of the budget with
     nothing fitted in it, so recomputing from the recorded schedule and epoch
-    count reproduces what the run did. Re-training six arms to write down a
-    number already implied by two fields they carry would be waste, not rigour.
+    count reproduces what the run did. Re-training arms to write down a number
+    already implied by two fields they carry would be waste, not rigour.
     """
     recorded = metrics.get("lr_integral_epochs")
     if recorded is not None:
@@ -165,172 +200,368 @@ def lr_integral(metrics):
                      for ep in range(epochs)))
 
 
-def read(rec):
-    """An arm's closing window and its final score.
+def level(metrics):
+    """Where a run ENDED: the mean held-out score over its last checkpoints. See
+    the module docstring for why this window and not the closing third."""
+    trace = [r["stop_bce"] for r in metrics["trace"]]
+    n = max(1, round(LEVEL_TAIL_FRAC * len(trace)))
+    require(len(trace) > n,
+            f"an arm's trace holds {len(trace)} checkpoints — too few to read a "
+            f"terminal level off")
+    return statistics.fmean(trace[-n:])
 
-    THE WINDOW IS RELATIVE TO THE ARM'S OWN BUDGET. This panel deliberately runs
-    arms at two budgets, so a window fixed at the shipped budget's last third
-    would cover the last third of a 3000-epoch arm and most of a 7000-epoch one
-    — including the stretch where the longer arm was still descending, which
-    would report its descent as wander."""
-    trace = rec["metrics"]["trace"]
-    tail_from = 2 * rec["metrics"]["epochs"] // 3
-    tail = [r["stop_bce"] for r in trace if r["epoch"] >= tail_from]
-    require(len(tail) > 1,
-            f"an arm carries no tail window past epoch {tail_from}")
-    return {"final": trace[-1]["stop_bce"],
-            "tail_mean": statistics.fmean(tail),
-            "within_sd": 1e3 * statistics.stdev(tail),
-            "within_range": 1e3 * (max(tail) - min(tail))}
+
+def at_fraction(metrics, frac):
+    """The single checkpoint nearest a given fraction of the arm's budget — one
+    epoch's score, deliberately not averaged, because the question it answers is
+    what a run would have shipped had it been cut there."""
+    target = frac * int(metrics["epochs"])
+    return min(metrics["trace"], key=lambda r: abs(r["epoch"] - target))
+
+
+def summarize(group):
+    """One configuration: the arms, their levels, and the spread between them."""
+    levels = {arm: level(rec["metrics"]) for arm, rec in group}
+    work = {round(rec["metrics"]["lr_integral_epochs"]) for _, rec in group}
+    require(len(work) == 1,
+            f"the arms {sorted(levels)} delivered different learning-rate "
+            f"integrals {sorted(work)} — they are not one configuration")
+    return {
+        "arms": sorted(levels),
+        "n": len(levels),
+        "epochs": {rec["metrics"]["epochs"] for _, rec in group}.pop(),
+        "work": work.pop(),
+        "levels": list(levels.values()),
+        "level": statistics.fmean(levels.values()),
+        "sd_mnat": 1e3 * statistics.stdev(levels.values()),
+        "elapsed_s": statistics.median(rec["metrics"]["elapsed_s"]
+                                       for _, rec in group),
+        "max_climb_mnat": max(
+            1e3 * (level(rec["metrics"])
+                   - min(r["stop_bce"] for r in rec["metrics"]["trace"]))
+            for _, rec in group),
+        "epoch_draw_mnat": statistics.fmean(
+            1e3 * (at_fraction(rec["metrics"], EPOCH_DRAW_FRAC)["stop_bce"]
+                   - level(rec["metrics"]))
+            for _, rec in group),
+    }
+
+
+def band(group):
+    """The within-run wander band the row arms report: peak-to-peak of the
+    held-out score over the closing third of the budget, averaged over runs."""
+    out = []
+    for _, rec in group:
+        metrics = rec["metrics"]
+        floor_epoch = BAND_FRAC * int(metrics["epochs"])
+        tail = [r["stop_bce"] for r in metrics["trace"]
+                if r["epoch"] >= floor_epoch]
+        require(len(tail) > 1,
+                f"an arm carries no closing-third window past epoch "
+                f"{floor_epoch:.0f}")
+        out.append(1e3 * (max(tail) - min(tail)))
+    return statistics.fmean(out)
+
+
+def shipped_budget():
+    """The budget production ships, from the trainer itself — never restated
+    here. The schedule is checked with it: this producer reads a cosine panel,
+    so a production move off the decay makes every figure below the wrong
+    comparison and has to fail rather than quietly measure the retired one."""
+    from pipeline.train_mirt import EPOCHS, LR_SCHEDULE
+    require(LR_SCHEDULE == "cosine",
+            f"production now ships the {LR_SCHEDULE!r} schedule; this panel "
+            f"measures the cosine decay against the constant rate and cannot "
+            f"speak for a third one")
+    return int(EPOCHS)
+
+
+def pooled_sd(groups):
+    """Run-to-run sd pooled over several configurations: residuals about each
+    configuration's OWN mean, so a level difference between budgets never enters
+    the spread. df = sum(n - 1)."""
+    ss = sum((x - g["level"]) ** 2 for g in groups for x in g["levels"])
+    df = sum(g["n"] - 1 for g in groups)
+    require(df > 0, "no residual degrees of freedom to pool a spread over")
+    return 1e3 * math.sqrt(ss / df), df
 
 
 def measure():
     by_unit = load_panel()
-    return {unit: measure_unit(by_sched) for unit, by_sched in by_unit.items()}
+    prob = {k: summarize(g) for k, g in by_unit["problem"].items()}
+    ships = shipped_budget()
 
+    const_budgets = sorted(b for s, b in prob if s == "constant")
+    require(const_budgets, "the panel has no constant-schedule arm on the "
+                           "problem unit — nothing to compare the decay to")
+    baseline_budget = min(const_budgets)
+    baseline = prob[("constant", baseline_budget)]
 
-def measure_unit(by_sched):
-    """One holdout unit, grouped by SCHEDULE AND BUDGET.
+    # The constant schedule run to the SHIPPING budget separates the two things
+    # the change moved: without it, a decayed arm that beats the baseline has
+    # both a different schedule and a longer budget and the win cannot be
+    # attributed to either.
+    require(("constant", ships) in prob,
+            f"the panel has no constant-schedule arm at {ships} epochs — with "
+            f"the schedule and the budget both moving at once, neither can be "
+            f"credited for what the shipping arm does")
+    baseline_long = prob[("constant", ships)]
 
-    Three groups can appear: the constant arms, cosine arms at the constant's
-    own budget (matched EPOCHS, and so about half the work), and cosine arms at
-    a raised budget (matched or better WORK). They are kept apart because the
-    two cosine groups answer different questions and averaging them would answer
-    neither."""
-    out = {}
-    const = by_sched["constant"]
-    require(const, "the panel has no constant-schedule arm to compare against")
-    const_budget = {rec["metrics"]["epochs"] for _, rec in const}
-    require(len(const_budget) == 1,
-            f"the constant arms ran at {sorted(const_budget)} epochs — the "
-            f"baseline every comparison here is taken against has to be one fit")
-    const_budget = const_budget.pop()
+    cosine_budgets = sorted(b for s, b in prob if s == "cosine")
+    require(ships in cosine_budgets,
+            f"the panel does not contain the shipping configuration: production "
+            f"trains {ships} cosine epochs and the problem-unit cosine arms run "
+            f"{cosine_budgets}")
+    shipped = prob[("cosine", ships)]
 
-    def summarize(group):
-        reads = {arm: read(rec) for arm, rec in group}
-        finals = [r["final"] for r in reads.values()]
-        work = {round(rec["metrics"]["lr_integral_epochs"]) for _, rec in group}
-        require(len(work) == 1,
-                f"the arms {sorted(reads)} delivered different learning-rate "
-                f"integrals {sorted(work)} — they are not one configuration")
-        return {"arms": sorted(reads), "n": len(reads),
-                "epochs": {rec["metrics"]["epochs"] for _, rec in group}.pop(),
-                "work": work.pop(),
-                "within_sd": statistics.fmean(r["within_sd"]
-                                              for r in reads.values()),
-                "within_range": statistics.fmean(r["within_range"]
-                                                 for r in reads.values()),
-                "between_range": 1e3 * (max(finals) - min(finals)),
-                "level": statistics.fmean(finals)}
+    # THE WINDOW, grown upward from the shipping budget. Each next budget is
+    # admitted while it stays level with the shipping one, judged against the
+    # spread the window has accumulated so far — the same yardstick a paired
+    # contrast would be read against. The first budget that fails is the
+    # OVERFIT one, and the walk stops there rather than skipping it: what is
+    # being established is a contiguous plateau, not a set of budgets that
+    # happen to pass.
+    window = [shipped]
+    overfit = None
+    for budget in [b for b in cosine_budgets if b > ships]:
+        sd, _ = pooled_sd(window)
+        if 1e3 * (prob[("cosine", budget)]["level"] - shipped["level"]) > sd:
+            overfit = prob[("cosine", budget)]
+            break
+        window.append(prob[("cosine", budget)])
+    require(overfit is not None,
+            "no cosine budget in the panel is worse than the shipping one — the "
+            "sweep ends at a boundary rather than at a turn, so the window has "
+            "no upper bound and the budget cannot be defended as bounded above. "
+            "Extend the panel to a longer budget")
+    window_sd, window_df = pooled_sd(window)
+    window_level = statistics.fmean(x for g in window for x in g["levels"])
 
-    out["constant"] = summarize(const)
-    for arm, rec in by_sched["cosine"]:
-        label = ("cosine_epochs" if rec["metrics"]["epochs"] == const_budget
-                 else "cosine_work")
-        out.setdefault(label, []).append((arm, rec))
-    for label in ("cosine_epochs", "cosine_work"):
-        if label in out:
-            out[label] = summarize(out[label])
-            out[label]["level_cost"] = 1e3 * (out[label]["level"]
-                                              - out["constant"]["level"])
-            out[label]["work_ratio"] = (out[label]["work"]
-                                        / out["constant"]["work"])
-    return out
+    from scipy import stats as scipy_stats
+    f_stat = (baseline["sd_mnat"] / window_sd) ** 2
+    f_p = float(scipy_stats.f.sf(f_stat, baseline["n"] - 1, window_df))
+
+    rowu = by_unit.get("row", {})
+    row_const = [k for k in rowu if k[0] == "constant"]
+    require(len(row_const) == 1,
+            f"the row unit carries constant arms at {sorted(b for _, b in row_const)} "
+            f"epochs — the within-run band is reported for one configuration")
+    row_cos = [b for s, b in rowu if s == "cosine"]
+    require(row_cos, "the row unit carries no cosine arm — the within-run band "
+                     "the decay is supposed to shrink has nothing to shrink from")
+    row_cos_budget = ships if ships in row_cos else min(row_cos)
+
+    return {
+        "problem": prob,
+        "baseline": baseline,
+        "baseline_long": baseline_long,
+        "baseline_budget": baseline_budget,
+        "const_budgets": const_budgets,
+        "cosine_budgets": cosine_budgets,
+        "ships": ships,
+        "shipped": shipped,
+        "window": window,
+        "window_level": window_level,
+        "window_sd": window_sd,
+        "window_df": window_df,
+        "window_n": sum(g["n"] for g in window),
+        "overfit": overfit,
+        "sd_ratio": baseline["sd_mnat"] / window_sd,
+        "f_stat": f_stat,
+        "f_p": f_p,
+        "row_band_constant": band(rowu[row_const[0]]),
+        "row_band_cosine": band(rowu[("cosine", row_cos_budget)]),
+        "row_const_budget": row_const[0][1],
+        "row_cos_budget": row_cos_budget,
+    }
 
 
 def figures():
     m = measure()
-    prob, rowu = m["problem"], m["row"]
-    require("cosine_work" in prob,
-            "the panel carries no cosine arm at a raised budget on the problem "
-            "unit. Without one the level comparison is between a constant run "
-            "and a decayed run given about half the optimization, and a loss "
-            "cannot be attributed to the schedule")
-    work, epochs_matched = prob["cosine_work"], prob.get("cosine_epochs")
+    base, ship, win, over = (m["baseline"], m["shipped"], m["window"],
+                             m["overfit"])
+    lo, hi = win[0]["epochs"], win[-1]["epochs"]
+    cos_note = ("at the shipping budget's own row-unit arms"
+                if m["row_cos_budget"] == m["ships"] else
+                f"at the {m['row_cos_budget']}-epoch row-unit arms, the only "
+                f"cosine budget the row unit carries")
     return [
+        Figure("schedule.constant_initializations", base["n"], "d",
+               f"runs of the retired constant schedule at {m['baseline_budget']} "
+               f"epochs behind the reference level, all on held-out problems at "
+               f"one pinned draw, differing only in the seed"),
+        Figure("schedule.constant_level_sd_mnat", base["sd_mnat"], ".1f",
+               "run-to-run sd of that constant configuration's final level "
+               "(mean of the last 2% of checkpoints) on held-out problems, "
+               "millinats"),
+        Figure("schedule.constant_epoch_draw_mnat", base["epoch_draw_mnat"],
+               ".1f",
+               "mean over those runs of (the single held-out score at 80% of "
+               "the budget - the run's final level), millinats: how much what "
+               "ships depends on where the budget happens to fall"),
+        Figure("schedule.constant_long_level_cost_mnat",
+               1e3 * (m["baseline_long"]["level"] - base["level"]), "+.1f",
+               f"final level of the constant schedule run to {m['ships']} epochs "
+               f"minus its own {m['baseline_budget']}-epoch level, held-out "
+               f"problems, millinats — positive means the undecayed fit also "
+               f"gets worse when given the longer budget"),
+        Figure("schedule.shipped_budget", m["ships"], "d",
+               "the cosine epoch budget production trains, read from "
+               "pipeline.train_mirt and required to be an arm of this panel"),
+        Figure("schedule.shipped_level_cost_mnat",
+               1e3 * (ship["level"] - base["level"]), "+.1f",
+               "final level of the shipping cosine budget minus the constant "
+               "baseline's, held-out problems, millinats — negative means the "
+               "shipped fit generalizes better"),
+        Figure("schedule.window_level_cost_mnat",
+               1e3 * (m["window_level"] - base["level"]), "+.1f",
+               "the same comparison pooled over every cosine budget in the "
+               "plateau window, millinats"),
+        Figure("schedule.window_level_sd_mnat", m["window_sd"], ".1f",
+               "run-to-run sd inside that window, pooled about each budget's "
+               "own mean, millinats — the spread a paired contrast under the "
+               "shipped schedule is read against"),
+        Figure("schedule.sd_ratio", m["sd_ratio"], ".2f",
+               "constant-schedule run-to-run sd over the window's, both on "
+               "held-out problems: how much of the fit's wander the decay takes "
+               "out of the RESULT rather than out of one run's tail"),
+        Figure("schedule.sd_ratio_p", m["f_p"], ".2f",
+               f"one-sided F-test p that the constant spread exceeds the "
+               f"window's, at {base['n'] - 1} and {m['window_df']} degrees of "
+               f"freedom — the honest reading of a variance ratio from this few "
+               f"runs"),
+        Figure("schedule.window_lo_budget", lo, "d",
+               "lowest cosine budget in the plateau window, which is the "
+               "shipping budget by construction"),
+        Figure("schedule.window_hi_budget", hi, "d",
+               "highest cosine budget still level with the shipping one: the "
+               "walk upward stops before the first budget that is worse by more "
+               "than the window's own spread"),
+        Figure("schedule.overfit_budget", over["epochs"], "d",
+               "smallest cosine budget whose final level is worse than the "
+               "shipping budget's by more than the window's run-to-run sd — the "
+               "definition of the window's upper bound, not a separate test"),
+        Figure("schedule.overfit_level_cost_mnat",
+               1e3 * (over["level"] - ship["level"]), "+.1f",
+               "that budget's final level minus the shipping budget's, held-out "
+               "problems, millinats"),
+        Figure("schedule.overfit_max_climb_mnat", over["max_climb_mnat"], ".1f",
+               "over that budget's runs, the largest (final level - the run's "
+               "own held-out minimum), millinats: how far past its best point a "
+               "run finishes, which the decay to zero makes permanent"),
+        Figure("schedule.overfit_work_epochs", over["work"], ".0f",
+               "that budget's learning-rate integral in constant-rate epochs — "
+               "the optimization it actually delivered, not its epoch count"),
+        Figure("schedule.shipped_work_epochs", ship["work"], ".0f",
+               "the shipping budget's learning-rate integral in constant-rate "
+               "epochs"),
+        Figure("schedule.wall_clock_ratio",
+               ship["elapsed_s"] / base["elapsed_s"], ".2f",
+               "median wall clock of the shipping cosine arms over the constant "
+               "baseline's — arms shared a GPU pool, so this tracks the budget "
+               "ratio rather than timing a run"),
         Figure("schedule.within_run_range_constant_mnat",
-               rowu["constant"]["within_range"], ".1f",
-               "the band a run wanders inside at its end under the CONSTANT "
-               "rate that ships: peak-to-peak of its held-out score over the "
+               m["row_band_constant"], ".1f",
+               "the band a run wanders inside at its end under the retired "
+               "CONSTANT rate: peak-to-peak of its held-out-ROW score over the "
                "last third of the budget, millinats, averaged over runs"),
-        Figure("schedule.within_run_range_cosine_mnat",
-               rowu["cosine_epochs"]["within_range"], ".1f",
-               "the same band under a cosine decay to zero — far narrower "
-               "almost by construction, since a rate going to zero stops moving "
-               "the parameters, which is why it settles nothing on its own"),
-        Figure("schedule.between_run_range_constant_mnat",
-               prob["constant"]["between_range"], ".1f",
-               "THE FIGURE THAT DECIDES REPLICATION: how far the final "
-               "held-out-PROBLEM score lands apart across runs of the constant "
-               "schedule scored on identical problems. The draw is pinned, so "
-               "it spans what a seed re-rolls — feature basis, initial weights, "
-               "batch order — and not the data"),
-        Figure("schedule.between_run_range_cosine_mnat",
-               work["between_range"], ".1f",
-               "the same spread under the cosine decay AT MATCHED-OR-BETTER "
-               "WORK. Dropping replicates needs this small against the "
-               "contrasts a panel is asked to resolve"),
-        Figure("schedule.cosine_level_cost_mnat", work["level_cost"], ".1f",
-               "what the cosine schedule costs on held-out PROBLEMS against the "
-               "constant one, millinats, positive meaning the decayed fit "
-               "generalizes worse — measured with the decayed arm given at "
-               "least as much optimization, so a cost here is the schedule and "
-               "not a shorter run"),
-        Figure("schedule.cosine_work_ratio", work["work_ratio"], ".2f",
-               "learning-rate integral of that cosine arm over the constant "
-               "arm's, both in constant-rate epochs. At or above one the "
-               "decayed arm was not starved; a cosine to zero delivers about "
-               "half its epoch count, so equal epochs would put this near 0.5"),
-        Figure("schedule.cosine_level_cost_equal_epochs_mnat",
-               (epochs_matched or work)["level_cost"], ".1f",
-               "the same level comparison against a cosine arm run for the same "
-               "EPOCHS rather than the same work — what adopting the schedule "
-               "without lengthening the budget would cost, kept because that is "
-               "the naive change someone would make"),
-        Figure("schedule.initializations", prob["constant"]["n"], "d",
-               "runs per configuration behind the spreads above. Three points "
-               "estimate a spread crudely, and the range of three understates "
-               "the distribution they came from"),
+        Figure("schedule.within_run_range_cosine_mnat", m["row_band_cosine"],
+               ".1f",
+               f"the same band under the cosine decay to zero, {cos_note} — far "
+               f"narrower almost by construction, since a rate going to zero "
+               f"stops moving the parameters, which is why it settles nothing "
+               f"on its own"),
+        Figure("schedule.budgets_swept", len(m["cosine_budgets"]), "d",
+               "distinct cosine epoch budgets the panel runs on the held-out "
+               "problem unit, each with its own replicated arms — a shorter "
+               "cosine run is not a prefix of a longer one, so every point is "
+               "its own fit"),
     ]
 
 
 def main():
     m = measure()
-    for unit in ("row", "problem"):
-        d = m.get(unit)
-        if d is None:
-            continue
-        head = ("held-out ROWS — the trainer's own convergence signal"
-                if unit == "row" else
-                "held-out PROBLEMS — the unit the level is judged on")
-        print(f"\n=== {head} ===")
-        print(f"{'configuration':<16}{'epochs':>8}{'work':>7}{'within p2p':>12}"
-              f"{'between p2p':>13}{'level':>11}{'vs constant':>13}")
-        for label in ("constant", "cosine_epochs", "cosine_work"):
-            g = d.get(label)
-            if g is None:
-                continue
-            cost = ("" if label == "constant"
-                    else f"{g['level_cost']:+.2f} mnat")
-            print(f"{label:<16}{g['epochs']:>8}{g['work']:>7}"
-                  f"{g['within_range']:>12.2f}{g['between_range']:>13.2f}"
-                  f"{g['level']:>11.5f}{cost:>13}")
-        print("  work = the learning-rate integral in constant-rate epochs; a "
-              "cosine to zero delivers\n  about half its epoch count, so equal "
-              "epochs is NOT equal optimization.")
+    base, ship, over = m["baseline"], m["shipped"], m["overfit"]
+    win_budgets = [g["epochs"] for g in m["window"]]
 
-    prob = m.get("problem", {})
-    if "cosine_work" in prob:
-        w = prob["cosine_work"]
-        print(f"\nthe decision, on held-out problems with the decay given "
-              f"{w['work_ratio']:.2f}x the constant arm's work:")
-        print(f"  level              {w['level_cost']:+.2f} mnat")
-        print(f"  between-run spread constant "
-              f"{prob['constant']['between_range']:.2f} -> cosine "
-              f"{w['between_range']:.2f} mnat")
-        print("  a decay that narrows one run's own band while leaving the "
-              "spread BETWEEN runs\n  where it was has not made replication "
-              "unnecessary; it has made each run tidier.")
+    print("\n=== held-out PROBLEMS — the unit the level is judged on ===")
+    print(f"level = mean held-out score over the last {LEVEL_TAIL_FRAC:.0%} of "
+          f"each run's own checkpoints (what ships is the final epoch)")
+    print(f"{'schedule':<10}{'budget':>8}{'n':>4}{'work':>7}{'level':>10}"
+          f"{'sd':>7}{'vs base':>9}   role")
+    for sched in SCHEDULES:
+        for budget in sorted(b for s, b in m["problem"] if s == sched):
+            g = m["problem"][(sched, budget)]
+            role = []
+            if g is base:
+                role.append("baseline")
+            if g is ship:
+                role.append("SHIPS")
+            if budget in win_budgets and sched == "cosine":
+                role.append("window")
+            if g is over:
+                role.append("overfit")
+            print(f"{sched:<10}{budget:>8}{g['n']:>4}{g['work']:>7}"
+                  f"{g['level']:>10.5f}{g['sd_mnat']:>7.2f}"
+                  f"{1e3 * (g['level'] - base['level']):>+9.2f}   "
+                  f"{'/'.join(role)}")
+    print("  work = learning-rate integral in constant-rate epochs; a cosine to "
+          "zero delivers about\n  half its epoch count, so equal epochs is NOT "
+          "equal optimization. sd and 'vs base' are millinats.")
+
+    print(f"\n=== the window: cosine budgets level with the shipping one "
+          f"({m['ships']}) ===")
+    print(f"{'quantity':<34}{'value':>12}")
+    for label, value in (
+            (f"window {win_budgets[0]}..{win_budgets[-1]}, runs",
+             f"{m['window_n']:d}"),
+            ("pooled level", f"{m['window_level']:.5f}"),
+            (f"vs constant@{m['baseline_budget']}",
+             f"{1e3 * (m['window_level'] - base['level']):+.2f} mnat"),
+            ("pooled run-to-run sd",
+             f"{m['window_sd']:.2f} mnat (df {m['window_df']})"),
+            (f"constant@{m['baseline_budget']} run-to-run sd",
+             f"{base['sd_mnat']:.2f} mnat (df {base['n'] - 1})"),
+            ("sd ratio constant/window", f"{m['sd_ratio']:.2f}"),
+            ("one-sided F-test",
+             f"F={m['f_stat']:.2f}, p={m['f_p']:.3f}"),
+            ("shipping budget wall clock",
+             f"{ship['elapsed_s'] / base['elapsed_s']:.2f}x the baseline"),
+    ):
+        print(f"{label:<34}{value:>12}")
+
+    print(f"\n=== the upper bound: cosine@{over['epochs']} ===")
+    print(f"{'quantity':<34}{'value':>12}")
+    for label, value in (
+            (f"level vs shipping@{m['ships']}",
+             f"{1e3 * (over['level'] - ship['level']):+.2f} mnat"),
+            ("work delivered",
+             f"{over['work']:.0f} vs {ship['work']:.0f} epochs"),
+            ("max climb above own minimum",
+             f"{over['max_climb_mnat']:.2f} mnat"),
+            (f"constant@{m['ships']} vs constant@{m['baseline_budget']}",
+             f"{1e3 * (m['baseline_long']['level'] - base['level']):+.2f} mnat"),
+    ):
+        print(f"{label:<34}{value:>12}")
+    print("  the decay freezes the fit as the rate reaches zero, so a budget "
+          "past the turn ships\n  the overfit rather than wandering back out of "
+          "it — and the constant schedule overfits\n  its own longer budget too, "
+          "so the turn is the budget and not the schedule.")
+
+    print(f"\n=== held-out ROWS — the trainer's own convergence signal ===")
+    print(f"{'schedule':<10}{'budget':>8}{'closing-third p2p':>20}")
+    print(f"{'constant':<10}{m['row_const_budget']:>8}"
+          f"{m['row_band_constant']:>20.2f}")
+    print(f"{'cosine':<10}{m['row_cos_budget']:>8}"
+          f"{m['row_band_cosine']:>20.2f}")
+    print("  peak-to-peak of one run's held-out-row score over the closing "
+          "third, millinats, averaged\n  over runs. This is the band a patience "
+          "rule would be selecting an epoch out of.")
+    print(f"\n  a constant run's own end wanders "
+          f"{m['row_band_constant'] / m['row_band_cosine']:.1f}x wider than a "
+          f"decayed one's, but what licenses the\n  budget decision is the "
+          f"PROBLEM-unit table above: level parity across a window of budgets,\n"
+          f"  bounded above by a turn the decay makes permanent.")
 
 
 if __name__ == "__main__":

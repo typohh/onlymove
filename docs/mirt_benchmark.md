@@ -115,6 +115,38 @@ arm                  rating   combined   axis    verdict
 - **`BURN_IN_EPOCHS` stays at 300.** 450 looked like an architecture-shifted optimum at 0.5 mnat, but that is 1.2 sd against the measured seed noise. The bracket shape holds (600/750 degrade the rating for real); the claim that 450 beats 300 does not.
 - **The warm start is what makes coupling SAFE.** Under raw features, dropping it left the rating untouched and only cost the axes. Under the shared trunk it costs the rating 2.1 mnat here, because a badly-initialized axis map sends its gradients into the trunk the rating depends on — and takes 1360 epochs instead of 380. The two changes are complements, not independent knobs. **See the warm-start section below**: re-measured under the production protocol at patience 30, where the cold arm needs 2670-3200 epochs to stop improving, the rating gap does not survive — 1360 epochs was very likely still descending.
 
+## THE SCHEDULE AND THE BUDGET — COSINE AT 7000 SHIPS — MEASURED 2026-09-01
+
+`EPOCHS = 7000`, `LR_SCHEDULE = "cosine"` (`pipeline/train_mirt.py`), replacing a constant rate at 3000. Both rates decay to zero over the budget with their ratio held. The panel is `ablations/panels/schedule.json`, 40 arms on one RTX 3080 Ti at attempt-log frontier 457,114, every arm at ONE pinned holdout draw (`split_seed 0`) so a between-run difference is the fit moving and not the scored rows; the producer is `ablations/refit_schedule_figures.py`, and this is the one panel that is NOT re-measured under the baseline it produced.
+
+**The level is the FINAL level** — the mean held-out score over the last 2% of checkpoints — because the final epoch is what ships. Reading the constant fit at its closing-third mean instead overstates the cosine advantage by several millinats: the constant fit's problem-holdout score is still descending through that window, so its window mean sits above where the run ends. That misreading was made and withdrawn during this measurement.
+
+Held-out PROBLEMS (whole problems held aside; the unit a claim about generalization is scored on), final level and run-to-run sd in millinats:
+
+| arm | runs | work (constant-rate epochs) | final level | sd | vs constant@3000 |
+|---|---|---|---|---|---|
+| constant@3000 | 6 | 3000 | 0.50467 | 4.28 | — |
+| constant@7000 | 3 | 7000 | 0.51139 | 6.29 | +6.7 |
+| cosine@3000 | 3 | 1500 | 0.51179 | 6.41 | +7.1 |
+| cosine@5000 | 3 | 2500 | 0.50775 | 6.82 | +3.1 |
+| cosine@6000 | 3 | 3000 | 0.50679 | 3.11 | +2.1 |
+| **cosine@7000** | 3 | 3500 | 0.50397 | 1.36 | −0.7 |
+| cosine@8000 | 3 | 4000 | 0.50205 | 3.01 | −2.6 |
+| cosine@10000 | 3 | 5000 | 0.50389 | 1.77 | −0.8 |
+| cosine@12000 | 3 | 6000 | 0.50970 | 8.71 | +5.0 |
+
+**Level: parity.** Pooled over the plateau (7000–10000, n = 9) the decayed fit is −1.4 ± 1.9 mnat against constant@3000. Nothing here is a level improvement.
+
+**Spread: about halved.** Pooled within-budget sd over the plateau is 2.16 mnat (df 6) against the constant fit's 4.28 (df 5): ratio 3.9 in variance, one-sided F-test p ≈ 0.06. The constant fit's spread is not seed noise in the usual sense but the STOPPING EPOCH: within its six runs, the score at 80% of the budget averages 4.6 mnat above the final, and at 90% matches it — the shipped value is one draw from a ±4 mnat wander that the decay averages out. Bucketing adjacent budgets (5000+6000 vs 7000+8000) was tried first and reads the spread badly, because it discards the budget coordinate inside a bucket; the pooled within-budget residual is the right statistic, and a curve fit over budget (power law and exponential both, resid sd 4.0 ≈ the within-budget sd, so no lack of fit) cannot pin an asymptote from six budgets — the model-free isotonic read is what the window bounds rest on.
+
+**The window is bounded above, and the mechanism is overfitting the decay locks in.** At 12000 the held-out minimum comes early (epochs 2980 / 3850 / 4830 across the three runs) and the final sits above it by 16.2 / 1.1 / 9.9 mnat while train loss keeps falling; the high-rate half overfits and the decay freezes the fit there. One 10000 run already shows it at 4.0. The learning-rate integral says why: 12000 cosine = 6000 constant-equivalent epochs, past the point where the constant fit itself turns (constant@7000 is +6.7). So a decayed budget is chosen inside the constant fit's own useful work range, and "longer" is not safer. **7000 is the cheapest budget that has arrived on both level and spread and the farthest from the cliff**, which also makes 8000 a worse hedge than it looks: its −2.6 is one seed set, 10000 is back at −0.8, and the isotonic fit pools 8000–12000.
+
+**Cost.** Median elapsed 1278 s for cosine@7000 against 680 s for constant@3000 in the same shared pool — a budget ratio of 2.33, an elapsed ratio nearer 1.9. What the spread buys is that a two-seed paired contrast has half the standard error it had, which is the difference between resolving the 3–4 mnat effects the remaining panels are asked about and not.
+
+**Held-out ROWS** (the trainer's own convergence split) are not the level's unit and were measured only for the within-run band: the cosine tail is flat by construction and the constant tail wanders by several millinats peak to peak, which settles nothing on its own and is why the between-run spread above is the figure that was decided on.
+
+Reproduction: `vast_orchestration.py ablate schedule` (or the queue); `./.venv/bin/python3 -m ablations.refit_schedule_figures` prints the table above from the records.
+
 ## THE K PANEL AND THE RULE WIDTHS — MEASURED 2026-08-21
 
 Nested rule banks at K = 4, 6, 8 — K=4 a subset of K=6 a subset of K=8 — four
