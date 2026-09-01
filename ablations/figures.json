@@ -141,71 +141,239 @@
       }
     },
     "barrier.off_rating_high": {
-      "value": 143.78345288797283,
+      "value": 79.01231424390873,
       "fmt": ".0f",
-      "text": "144",
+      "text": "79",
       "producer": "ablations.refit_barrier_figures",
       "tier": "refit",
-      "note": "…and the 99.9th percentile, the high side",
+      "note": "…and the 99.9th percentile, the high side; averaged over the panel's 2 seeds",
       "measured": {
-        "at": "2026-09-01T03:05:50Z",
-        "git": "aa809484f64",
+        "at": "2026-09-01T05:09:49Z",
+        "git": "6b2bec99c41+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "barrier.off_rating_high_seed_ratio": {
+      "value": 10.096319077024887,
+      "fmt": ".0f",
+      "text": "10",
+      "producer": "ablations.refit_barrier_figures",
+      "tier": "refit",
+      "note": "how many times the barrier-off arm's 99.9th rating percentile moved between the panel's seeds — the blow-out HAPPENS every time, while its size is not itself a reproducible quantity, which is what an unbounded tail does",
+      "measured": {
+        "at": "2026-09-01T05:09:49Z",
+        "git": "6b2bec99c41+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
     },
     "barrier.off_rating_low": {
-      "value": -4.81705043369832,
+      "value": -5.276406364250025,
       "fmt": ".0f",
       "text": "-5",
       "producer": "ablations.refit_barrier_figures",
       "tier": "refit",
-      "note": "0.1th percentile of the derived rating with the slope barrier removed — the low side of the blow-out",
+      "note": "0.1th percentile of the derived rating with the slope barrier removed — the low side of the blow-out. A per-fit property, averaged over the panel's 2 seeds",
       "measured": {
-        "at": "2026-09-01T03:05:50Z",
-        "git": "aa809484f64",
+        "at": "2026-09-01T05:09:49Z",
+        "git": "6b2bec99c41+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
     },
     "barrier.off_slope_at_floor_pct": {
-      "value": 0.005456697949315758,
+      "value": 0.0027306169289177773,
       "fmt": "%.0f",
-      "text": "1",
+      "text": "0",
       "producer": "ablations.refit_barrier_figures",
       "tier": "refit",
-      "note": "share of slopes on the clamp with the barrier removed",
+      "note": "share of slopes on the clamp with the barrier removed, averaged over the panel's 2 seeds",
       "measured": {
-        "at": "2026-09-01T03:05:50Z",
-        "git": "aa809484f64",
+        "at": "2026-09-01T05:09:49Z",
+        "git": "6b2bec99c41+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
     },
     "barrier.off_stop_cost_mnat": {
-      "value": 5.644857883453369,
+      "value": 7.439717650413513,
       "fmt": ".0f",
-      "text": "6",
+      "text": "7",
       "producer": "ablations.refit_barrier_figures",
       "tier": "refit",
-      "note": "held-out (stop-split) cost of removing the barrier, millinats, paired rows against the shipped arm",
+      "note": "the same paired held-out cost read at the FINAL epoch — the fit that would actually ship, averaged over the panel's 2 seeds",
       "measured": {
-        "at": "2026-09-01T03:05:50Z",
-        "git": "aa809484f64",
+        "at": "2026-09-01T05:09:49Z",
+        "git": "6b2bec99c41+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "barrier.off_stop_cost_sign_consistent": {
+      "value": 1,
+      "fmt": "d",
+      "text": "1",
+      "producer": "ablations.refit_barrier_figures",
+      "tier": "refit",
+      "note": "1 when every seed puts the barrier-off cost on the same side of zero on BOTH readings, 0 when the seeds disagree. An indicator for a `fig-guard: barrier.off_stop_cost_sign_consistent == 1` beside any sentence naming the direction of that cost, never for a span",
+      "measured": {
+        "at": "2026-09-01T05:09:49Z",
+        "git": "6b2bec99c41+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "barrier.off_stop_tail_cost_mnat": {
+      "value": 4.56122995013053,
+      "fmt": ".0f",
+      "text": "5",
+      "producer": "ablations.refit_barrier_figures",
+      "tier": "refit",
+      "note": "held-out (stop-split) cost of removing the barrier over the last third of the budget, millinats — PAIRED against the shipped arm of its own seed, then meaned over the seeds. The headline reading: it is the level the arm settled at, which a final checkpoint alone samples only once",
+      "measured": {
+        "at": "2026-09-01T05:09:49Z",
+        "git": "6b2bec99c41+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "barrier.shipped_no_rating_max": {
+      "value": 728.0,
+      "fmt": "d",
+      "text": "728",
+      "producer": "ablations.refit_barrier_figures",
+      "tier": "refit",
+      "note": "and the most, in a run differing only in the seed. The pair is the figure: this count is a property of a particular fit and not of the model, so it is re-read after a refit rather than carried",
+      "measured": {
+        "at": "2026-09-01T05:09:49Z",
+        "git": "6b2bec99c41+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "barrier.shipped_no_rating_min": {
+      "value": 4.0,
+      "fmt": "d",
+      "text": "4",
+      "producer": "ablations.refit_barrier_figures",
+      "tier": "refit",
+      "note": "fewest problems left with no defined rating — a floor at or above the calibration probability — across the panel's runs of the SHIPPED configuration",
+      "measured": {
+        "at": "2026-09-01T05:09:49Z",
+        "git": "6b2bec99c41+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "barrier.shipped_rating_span": {
+      "value": 8.380711717387477,
+      "fmt": ".1f",
+      "text": "8.4",
+      "producer": "ablations.refit_barrier_figures",
+      "tier": "refit",
+      "note": "p0.1..p99.9 span of the derived rating as SHIPPED, the same per-fit property the two arms above are compared against, averaged over the panel's 2 seeds — without it neither blow-out nor compression has a reference",
+      "measured": {
+        "at": "2026-09-01T05:09:49Z",
+        "git": "6b2bec99c41+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "barrier.shipped_wander_range_mnat": {
+      "value": 11.267304420471191,
+      "fmt": ".1f",
+      "text": "11.3",
+      "producer": "ablations.refit_barrier_figures",
+      "tier": "refit",
+      "note": "the same wander as a peak-to-peak range, averaged over the seeds — how far apart two honest single-arm readings of one configuration can land",
+      "measured": {
+        "at": "2026-09-01T05:09:49Z",
+        "git": "6b2bec99c41+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "barrier.shipped_wander_sd_mnat": {
+      "value": 4.4052578221901975,
+      "fmt": ".1f",
+      "text": "4.4",
+      "producer": "ablations.refit_barrier_figures",
+      "tier": "refit",
+      "note": "standard deviation of the SHIPPED arm's own held-out score across the last third of its budget, millinats, averaged over the seeds — the panel's resolution floor. No contrast smaller than this is resolved by one arm per configuration, which is why every configuration here is replicated",
+      "measured": {
+        "at": "2026-09-01T05:09:49Z",
+        "git": "6b2bec99c41+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "barrier.tenx_cost_sign_consistent": {
+      "value": 1,
+      "fmt": "d",
+      "text": "1",
+      "producer": "ablations.refit_barrier_figures",
+      "tier": "refit",
+      "note": "1 when every seed puts the ten-times cost on the same side of zero on both readings. An indicator for a fig-guard, not a span",
+      "measured": {
+        "at": "2026-09-01T05:09:49Z",
+        "git": "6b2bec99c41+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "barrier.tenx_no_rating_mean": {
+      "value": 1604.5,
+      "fmt": "~10",
+      "text": "1,600",
+      "producer": "ablations.refit_barrier_figures",
+      "tier": "refit",
+      "note": "the same count at ten times the barrier weight, seed-averaged — the one cost of a heavier barrier the held-out likelihood cannot show, since the problems it touches ship a sentinel rather than a wrong number",
+      "measured": {
+        "at": "2026-09-01T05:09:49Z",
+        "git": "6b2bec99c41+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
     },
     "barrier.tenx_rating_span": {
-      "value": 24.927197185517436,
+      "value": 21.926539664853525,
       "fmt": ".1f",
-      "text": "24.9",
+      "text": "21.9",
       "producer": "ablations.refit_barrier_figures",
       "tier": "refit",
-      "note": "p0.1..p99.9 span of the derived rating at ten times the barrier weight — the compression the weight is swept against",
+      "note": "p0.1..p99.9 span of the derived rating at ten times the barrier weight — the compression the weight is swept against. A per-fit property, averaged over the panel's 2 seeds",
       "measured": {
-        "at": "2026-09-01T03:05:50Z",
-        "git": "aa809484f64",
+        "at": "2026-09-01T05:09:49Z",
+        "git": "6b2bec99c41+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "barrier.tenx_stop_cost_mnat": {
+      "value": -3.4200847148895264,
+      "fmt": ".0f",
+      "text": "-3",
+      "producer": "ablations.refit_barrier_figures",
+      "tier": "refit",
+      "note": "the same cost read at the FINAL epoch, averaged over the panel's 2 seeds",
+      "measured": {
+        "at": "2026-09-01T05:09:49Z",
+        "git": "6b2bec99c41+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "barrier.tenx_stop_tail_cost_mnat": {
+      "value": -7.701014380643883,
+      "fmt": ".0f",
+      "text": "-8",
+      "producer": "ablations.refit_barrier_figures",
+      "tier": "refit",
+      "note": "held-out cost of TEN TIMES the barrier weight over the last third of the budget, millinats, paired within a seed and then meaned, averaged over the panel's 2 seeds. §1.7 chooses the weight by held-out sweep and names ten times as the failure direction, so where that arm lands is part of the claim: negative means the heavier barrier fits BETTER than what ships",
+      "measured": {
+        "at": "2026-09-01T05:09:49Z",
+        "git": "6b2bec99c41+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -799,71 +967,141 @@
       }
     },
     "lr.net_slow_converge_epoch": {
-      "value": 1210,
-      "fmt": "d",
-      "text": "1210",
+      "value": 1975.0,
+      "fmt": ".0f",
+      "text": "1975",
       "producer": "ablations.refit_lr_figures",
       "tier": "refit",
-      "note": "the same epoch for the three-times-slower network",
+      "note": "the same epoch for the three-times-slower network, averaged over the panel's 2 seeds",
       "measured": {
-        "at": "2026-09-01T03:05:56Z",
-        "git": "aa809484f64+dirty",
+        "at": "2026-09-01T05:07:42Z",
+        "git": "6b2bec99c41+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
     },
     "lr.net_slow_converge_ratio": {
-      "value": 0.5,
+      "value": 0.8061224489795918,
       "fmt": ".1f",
-      "text": "0.5",
+      "text": "0.8",
       "producer": "ablations.refit_lr_figures",
       "tier": "refit",
-      "note": "how many times longer the slower network takes to reach its own plateau, at the same held-out margin",
+      "note": "how many times longer the slower network takes to reach its own plateau, at the same held-out margin — the second averaged epoch over the first, so above 1 means the slower network plateaus later",
       "measured": {
-        "at": "2026-09-01T03:05:56Z",
-        "git": "aa809484f64+dirty",
+        "at": "2026-09-01T05:07:42Z",
+        "git": "6b2bec99c41+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
     },
     "lr.net_slow_cost_mnat": {
-      "value": 12.583136558532715,
+      "value": 9.064868092536926,
       "fmt": ".2f",
-      "text": "12.58",
+      "text": "9.06",
       "producer": "ablations.refit_lr_figures",
       "tier": "refit",
-      "note": "held-out cost of a three-times-slower network at the shipped field rate, millinats, paired stop rows; signed, positive means the slower network is the worse fit. The claim is a tie",
+      "note": "the same cost of a three-times-slower network at the shipped field rate; signed, positive means the slower network is the worse fit. The claim is a tie, read at the last checkpoint both traces are finite — the final epoch for an arm that stayed finite, and the fit that would actually ship; PAIRED against the shipped arm of its own seed — one seed is one held-out draw, so the arms inside it hold aside the same stop rows — then meaned over the 2 seeds",
       "measured": {
-        "at": "2026-09-01T03:05:56Z",
-        "git": "aa809484f64+dirty",
+        "at": "2026-09-01T05:07:42Z",
+        "git": "6b2bec99c41+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "lr.net_slow_cost_sign_consistent": {
+      "value": 1,
+      "fmt": "d",
+      "text": "1",
+      "producer": "ablations.refit_lr_figures",
+      "tier": "refit",
+      "note": "1 when every seed puts this cost on the same side of zero on BOTH readings, 0 when the seeds disagree. An indicator for a `fig-guard: lr.net_slow_cost_sign_consistent == 1` beside any sentence naming the direction of that cost, never for a span",
+      "measured": {
+        "at": "2026-09-01T05:07:42Z",
+        "git": "6b2bec99c41+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "lr.net_slow_tail_cost_mnat": {
+      "value": 6.677851375966936,
+      "fmt": ".2f",
+      "text": "6.68",
+      "producer": "ablations.refit_lr_figures",
+      "tier": "refit",
+      "note": "held-out (stop-split) cost of a three-times-slower network at the shipped field rate; signed, positive means the slower network is the worse fit. The claim is a tie, millinats, over the last third of the budget — PAIRED against the shipped arm of its own seed — one seed is one held-out draw, so the arms inside it hold aside the same stop rows — then meaned over the 2 seeds. The headline reading: it is the level the arm settled at, which a final checkpoint alone samples only once",
+      "measured": {
+        "at": "2026-09-01T05:07:42Z",
+        "git": "6b2bec99c41+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
     },
     "lr.ratio10x_cost_mnat": {
-      "value": -2.1907687187194824,
+      "value": 0.29581785202026367,
       "fmt": ".1f",
-      "text": "-2.2",
+      "text": "0.3",
       "producer": "ablations.refit_lr_figures",
       "tier": "refit",
-      "note": "held-out cost at a ten-fold field/net ratio against the shipped ~33-fold, millinats, paired stop rows — the bottom of the saturating region",
+      "note": "the same cost at a ten-fold field/net ratio against the shipped ~33-fold — the bottom of the saturating region, read at the last checkpoint both traces are finite — the final epoch for an arm that stayed finite, and the fit that would actually ship; PAIRED against the shipped arm of its own seed — one seed is one held-out draw, so the arms inside it hold aside the same stop rows — then meaned over the 2 seeds",
       "measured": {
-        "at": "2026-09-01T03:05:56Z",
-        "git": "aa809484f64+dirty",
+        "at": "2026-09-01T05:07:42Z",
+        "git": "6b2bec99c41+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "lr.ratio10x_cost_sign_consistent": {
+      "value": 0,
+      "fmt": "d",
+      "text": "0",
+      "producer": "ablations.refit_lr_figures",
+      "tier": "refit",
+      "note": "1 when every seed puts this cost on the same side of zero on BOTH readings, 0 when the seeds disagree. An indicator for a `fig-guard: lr.ratio10x_cost_sign_consistent == 1` beside any sentence naming the direction of that cost, never for a span",
+      "measured": {
+        "at": "2026-09-01T05:07:42Z",
+        "git": "6b2bec99c41+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "lr.ratio10x_tail_cost_mnat": {
+      "value": -4.185479761350253,
+      "fmt": ".1f",
+      "text": "-4.2",
+      "producer": "ablations.refit_lr_figures",
+      "tier": "refit",
+      "note": "held-out (stop-split) cost at a ten-fold field/net ratio against the shipped ~33-fold — the bottom of the saturating region, millinats, over the last third of the budget — PAIRED against the shipped arm of its own seed — one seed is one held-out draw, so the arms inside it hold aside the same stop rows — then meaned over the 2 seeds. The headline reading: it is the level the arm settled at, which a final checkpoint alone samples only once",
+      "measured": {
+        "at": "2026-09-01T05:07:42Z",
+        "git": "6b2bec99c41+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
     },
     "lr.shared_rate_cost_mnat": {
-      "value": -4.559308290481567,
+      "value": -1.8222033977508545,
       "fmt": ".0f",
-      "text": "-5",
+      "text": "-2",
       "producer": "ablations.refit_lr_figures",
       "tier": "refit",
-      "note": "held-out (stop-split) cost of one shared rate against the shipped split, millinats, at the last checkpoint both traces are finite — PAIRED: every arm of this panel runs at the production seed and so holds aside the same stop rows",
+      "note": "the same cost of one shared rate against the shipped split, read at the last checkpoint both traces are finite — the final epoch for an arm that stayed finite, and the fit that would actually ship; PAIRED against the shipped arm of its own seed — one seed is one held-out draw, so the arms inside it hold aside the same stop rows — then meaned over the 2 seeds",
       "measured": {
-        "at": "2026-09-01T03:05:56Z",
-        "git": "aa809484f64+dirty",
+        "at": "2026-09-01T05:07:42Z",
+        "git": "6b2bec99c41+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "lr.shared_rate_cost_sign_consistent": {
+      "value": 0,
+      "fmt": "d",
+      "text": "0",
+      "producer": "ablations.refit_lr_figures",
+      "tier": "refit",
+      "note": "1 when every seed puts this cost on the same side of zero on BOTH readings, 0 when the seeds disagree. An indicator for a `fig-guard: lr.shared_rate_cost_sign_consistent == 1` beside any sentence naming the direction of that cost, never for a span",
+      "measured": {
+        "at": "2026-09-01T05:07:42Z",
+        "git": "6b2bec99c41+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -874,10 +1112,10 @@
       "text": "0",
       "producer": "ablations.refit_lr_figures",
       "tier": "refit",
-      "note": "the epoch at which the single-shared-rate arm first met that test; 0 means it never did",
+      "note": "the earliest epoch at which any seed's single-shared-rate arm first met that test; 0 means no seed did",
       "measured": {
-        "at": "2026-09-01T03:05:56Z",
-        "git": "aa809484f64+dirty",
+        "at": "2026-09-01T05:07:42Z",
+        "git": "6b2bec99c41+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -888,24 +1126,38 @@
       "text": "0",
       "producer": "ablations.refit_lr_figures",
       "tier": "refit",
-      "note": "1 when the single-shared-rate arm (field rate pulled onto the network's) diverged, 0 when it did not — non-finite, or 20 millinats above its own running best held-out score. An indicator for a fig-guard, not a span",
+      "note": "1 when the single-shared-rate arm (field rate pulled onto the network's) diverged at ANY seed, 0 when it did so at none — non-finite, or 20 millinats above its own running best held-out score. The claim is that one shared rate CAN blow up, so one seed doing it is the finding. An indicator for a fig-guard, not a span",
       "measured": {
-        "at": "2026-09-01T03:05:56Z",
-        "git": "aa809484f64+dirty",
+        "at": "2026-09-01T05:07:42Z",
+        "git": "6b2bec99c41+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "lr.shared_rate_tail_cost_mnat": {
+      "value": -4.719106277616902,
+      "fmt": ".0f",
+      "text": "-5",
+      "producer": "ablations.refit_lr_figures",
+      "tier": "refit",
+      "note": "held-out (stop-split) cost of one shared rate against the shipped split, millinats, over the last third of the budget — PAIRED against the shipped arm of its own seed — one seed is one held-out draw, so the arms inside it hold aside the same stop rows — then meaned over the 2 seeds. The headline reading: it is the level the arm settled at, which a final checkpoint alone samples only once",
+      "measured": {
+        "at": "2026-09-01T05:07:42Z",
+        "git": "6b2bec99c41+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
     },
     "lr.shipped_converge_epoch": {
-      "value": 2420,
-      "fmt": "d",
-      "text": "2420",
+      "value": 2450.0,
+      "fmt": ".0f",
+      "text": "2450",
       "producer": "ablations.refit_lr_figures",
       "tier": "refit",
-      "note": "first epoch from which the shipped arm's held-out score never again rises 1 millinat above its own final value — the band §1.8 says the fit settles into",
+      "note": "first epoch from which the shipped arm's held-out score never again rises above its own final value by more than its own closing spread — the band it settles into, each arm measured against the band it actually reaches. A per-fit property, averaged over the panel's 2 seeds",
       "measured": {
-        "at": "2026-09-01T03:05:56Z",
-        "git": "aa809484f64+dirty",
+        "at": "2026-09-01T05:07:42Z",
+        "git": "6b2bec99c41+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
