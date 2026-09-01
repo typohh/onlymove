@@ -1,10 +1,33 @@
 {
   "panel": "penalty",
-  "description": "methodology 1.5 — the rating-orthogonality penalty: the shipped per-tail form against the whole-axis form, against the penalty removed, against a free control carrying neither the penalty nor the teaching pull. The claims: a whole-axis penalty is a LINEAR statistic and cannot see a symmetric tail dependence, so that arm reports small whole-axis correlations while its axis ENDS — the only part a name is read off — stay rating-laden several-fold higher; scoring the two ends separately cuts the worst end to a fraction of that; with the penalty off the axes absorb the shipped per-problem quantities; and the free control spends an axis on a shipped parameter outright, the doc's signature being its correlation with SLOPE rather than with difficulty.",
+  "description": "methodology 1.5 \u2014 the rating-orthogonality penalty: the shipped per-tail form against the whole-axis form, against the penalty removed, against a free control carrying neither the penalty nor the teaching pull. The claims: a whole-axis penalty is a LINEAR statistic and cannot see a symmetric tail dependence, so that arm reports small whole-axis correlations while its axis ENDS \u2014 the only part a name is read off \u2014 stay rating-laden several-fold higher; scoring the two ends separately cuts the worst end to a fraction of that; with the penalty off the axes absorb the shipped per-problem quantities; and the free control spends an axis on a shipped parameter outright, the doc's signature being its correlation with SLOPE rather than with difficulty. EVERY ARM RUNS AT TWO SEEDS. The leak statistics are per-fit properties and the held-out contrast is paired within a seed, and both need a replicate for the same reason: the shipped configuration's own held-out score wanders wider across the closing third of a run than the contrast this panel is asked about, and a per-fit tail statistic has no error bar at all from one fit. Across seeds nothing is subtracted; within a seed every arm holds aside the same rows.",
   "arms": {
     "shipped": {},
-    "ortho_whole": {"ortho_mode": "whole"},
-    "ortho_off": {"ortho_mode": "off"},
-    "free_control": {"ortho_mode": "off", "teach_weight": 0.0}
+    "ortho_whole": {
+      "ortho_mode": "whole"
+    },
+    "ortho_off": {
+      "ortho_mode": "off"
+    },
+    "free_control": {
+      "ortho_mode": "off",
+      "teach_weight": 0.0
+    },
+    "shipped_s1": {
+      "seed": 1
+    },
+    "ortho_whole_s1": {
+      "ortho_mode": "whole",
+      "seed": 1
+    },
+    "ortho_off_s1": {
+      "ortho_mode": "off",
+      "seed": 1
+    },
+    "free_control_s1": {
+      "ortho_mode": "off",
+      "teach_weight": 0.0,
+      "seed": 1
+    }
   }
 }
