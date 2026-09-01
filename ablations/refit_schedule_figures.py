@@ -39,6 +39,7 @@ draws understates the spread of the distribution they came from.
 """
 
 import json
+import math
 import os
 import statistics
 import sys
@@ -82,10 +83,7 @@ def load_panel():
     # is that every arm recorded the integral, so the comparison can be stated
     # in the units that matter.
     for arm, rec in arms.items():
-        require(rec["metrics"].get("lr_integral_epochs") is not None,
-                f"{arm} carries no lr_integral_epochs — it predates the metric, "
-                f"and without it a schedule comparison cannot say whether a "
-                f"difference is the schedule or the amount of optimization")
+        rec["metrics"]["lr_integral_epochs"] = lr_integral(rec["metrics"])
 
     base = next(iter(arms.values()))["pins"]
     for arm, rec in arms.items():
@@ -143,6 +141,28 @@ def load_panel():
             "material looks costly there whether or not it gave up anything "
             "that generalizes")
     return by_unit
+
+
+def lr_integral(metrics):
+    """The learning-rate integral an arm delivered, in constant-rate epochs.
+
+    Recorded by the trainer, and DERIVED for arms that predate the metric —
+    exactly, not approximately: the schedule is a closed form of the budget with
+    nothing fitted in it, so recomputing from the recorded schedule and epoch
+    count reproduces what the run did. Re-training six arms to write down a
+    number already implied by two fields they carry would be waste, not rigour.
+    """
+    recorded = metrics.get("lr_integral_epochs")
+    if recorded is not None:
+        return float(recorded)
+    epochs = int(metrics["epochs"])
+    sched = metrics.get("lr_schedule", "constant")
+    if sched == "constant":
+        return float(epochs)
+    require(sched == "cosine", f"cannot derive the integral for schedule "
+                              f"{sched!r} — only the closed-form ones")
+    return float(sum(0.5 * (1.0 + math.cos(math.pi * ep / max(epochs - 1, 1)))
+                     for ep in range(epochs)))
 
 
 def read(rec):

@@ -3164,6 +3164,118 @@
         "data_version": "f6fba7b749bc0ecb"
       }
     },
+    "schedule.between_run_range_constant_mnat": {
+      "value": 8.091390132904053,
+      "fmt": ".1f",
+      "text": "8.1",
+      "producer": "ablations.refit_schedule_figures",
+      "tier": "refit",
+      "note": "THE FIGURE THAT DECIDES REPLICATION: how far the final held-out-PROBLEM score lands apart across runs of the constant schedule scored on identical problems. The draw is pinned, so it spans what a seed re-rolls — feature basis, initial weights, batch order — and not the data",
+      "measured": {
+        "at": "2026-09-01T08:37:49Z",
+        "git": "b84c23cdcce+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "schedule.between_run_range_cosine_mnat": {
+      "value": 2.5802254676818848,
+      "fmt": ".1f",
+      "text": "2.6",
+      "producer": "ablations.refit_schedule_figures",
+      "tier": "refit",
+      "note": "the same spread under the cosine decay AT MATCHED-OR-BETTER WORK. Dropping replicates needs this small against the contrasts a panel is asked to resolve",
+      "measured": {
+        "at": "2026-09-01T08:37:49Z",
+        "git": "b84c23cdcce+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "schedule.cosine_level_cost_equal_epochs_mnat": {
+      "value": 7.1422656377155835,
+      "fmt": ".1f",
+      "text": "7.1",
+      "producer": "ablations.refit_schedule_figures",
+      "tier": "refit",
+      "note": "the same level comparison against a cosine arm run for the same EPOCHS rather than the same work — what adopting the schedule without lengthening the budget would cost, kept because that is the naive change someone would make",
+      "measured": {
+        "at": "2026-09-01T08:37:49Z",
+        "git": "b84c23cdcce+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "schedule.cosine_level_cost_mnat": {
+      "value": -0.6795724232991907,
+      "fmt": ".1f",
+      "text": "-0.7",
+      "producer": "ablations.refit_schedule_figures",
+      "tier": "refit",
+      "note": "what the cosine schedule costs on held-out PROBLEMS against the constant one, millinats, positive meaning the decayed fit generalizes worse — measured with the decayed arm given at least as much optimization, so a cost here is the schedule and not a shorter run",
+      "measured": {
+        "at": "2026-09-01T08:37:49Z",
+        "git": "b84c23cdcce+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "schedule.cosine_work_ratio": {
+      "value": 1.1666666666666667,
+      "fmt": ".2f",
+      "text": "1.17",
+      "producer": "ablations.refit_schedule_figures",
+      "tier": "refit",
+      "note": "learning-rate integral of that cosine arm over the constant arm's, both in constant-rate epochs. At or above one the decayed arm was not starved; a cosine to zero delivers about half its epoch count, so equal epochs would put this near 0.5",
+      "measured": {
+        "at": "2026-09-01T08:37:49Z",
+        "git": "b84c23cdcce+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "schedule.initializations": {
+      "value": 3,
+      "fmt": "d",
+      "text": "3",
+      "producer": "ablations.refit_schedule_figures",
+      "tier": "refit",
+      "note": "runs per configuration behind the spreads above. Three points estimate a spread crudely, and the range of three understates the distribution they came from",
+      "measured": {
+        "at": "2026-09-01T08:37:49Z",
+        "git": "b84c23cdcce+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "schedule.within_run_range_constant_mnat": {
+      "value": 6.722492831093924,
+      "fmt": ".1f",
+      "text": "6.7",
+      "producer": "ablations.refit_schedule_figures",
+      "tier": "refit",
+      "note": "the band a run wanders inside at its end under the CONSTANT rate that ships: peak-to-peak of its held-out score over the last third of the budget, millinats, averaged over runs",
+      "measured": {
+        "at": "2026-09-01T08:37:49Z",
+        "git": "b84c23cdcce+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "schedule.within_run_range_cosine_mnat": {
+      "value": 2.096712589263916,
+      "fmt": ".1f",
+      "text": "2.1",
+      "producer": "ablations.refit_schedule_figures",
+      "tier": "refit",
+      "note": "the same band under a cosine decay to zero — far narrower almost by construction, since a rate going to zero stops moving the parameters, which is why it settles nothing on its own",
+      "measured": {
+        "at": "2026-09-01T08:37:49Z",
+        "git": "b84c23cdcce+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
     "seeds.axes_matched": {
       "value": 7,
       "fmt": "d",
