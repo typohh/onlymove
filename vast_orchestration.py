@@ -11,13 +11,19 @@ This wrapper:
   * runs the chosen step in a tmux session,
   * lets you tail the log, sync the produced data back, kill the run, destroy.
 
+`ablate` is the one command that runs no KataGo at all: it puts a refit-tier
+MIRT ablation panel (ablations.run_panel) on a rented card and pulls the arm
+records back as they land.
+
 Run without args for the command list.
 """
 
 import json
 import os
+import shlex
 import subprocess
 import sys
+import tempfile
 import time
 
 from utils.constants import ALL_BOARD_SIZES
@@ -127,6 +133,57 @@ STEP_INPUT_DIRS = {
 # install, so we add it unconditionally rather than branching by step.
 REMOTE_PIP_PACKAGES = ["sgfmill>=1.1.1", "numpy>=1.21.0", "scipy>=1.10.0"]
 
+# --- the refit-tier ablation panel (`ablate`) ------------------------------
+#
+# One arm of a panel IS pipeline.train_mirt.run() with a knob turned
+# (ablations.ablation_mirt), so the remote needs the fit's stack on top of the
+# minimal set above: torch for the trunk, pandas for the attempt frame, sklearn
+# for the joint PCA. Pinned to requirements.txt so the arms are fitted on the
+# stack the shipped fit is. scipy is already there and is reached at import time
+# — utils.rating.model_constants imports utils.rating.fit_rank_curves.
+#
+# The image carries a CUDA runtime but no torch; the PyPI wheel brings its own
+# CUDA libraries, so the host only has to satisfy the DRIVER floor cmd_add's
+# offer query already imposes.
+ABLATE_PIP_PACKAGES = ["torch~=2.7.1", "pandas~=2.3.1", "scikit-learn~=1.7.1"]
+
+# THE EXACT INPUT SET, traced through what that call reads rather than guessed:
+#   db/d1.sqlite                    the attempt log (features.load_first_time_attempts)
+#                                   and the arm record's db_max_id pin
+#   attempts/<size>/*.txt           the bot pass-rate block — the one wide block
+#                                   the PRODUCTION_BLOCKS layout carries
+#   activations/_signal_cache/      the correct-cell vectors the joint PCA is
+#     correct_{ids,vecs}_<size>     fitted over, and their id list
+#   axes/labels.json                the shipping decision K_AXES must match
+#   axes/motif_proxies.npz          the directions the axes are taught onto
+#   tsumegos/retired_ids.txt        the id-uniqueness check features.py runs
+#                                   before it will build a problem set at all
+#
+# THE PER-PROBLEM STORES ARE NOT SHIPPED. activations/<size>/ is already rolled
+# up into the signal cache. Of tsumegos/<size>/ this layout reads only the
+# LISTING — corpus_tids_by_size names the problem set off the .sgf filenames and
+# nothing here opens one — so what travels is a manifest of those names,
+# materialised remotely as empty stubs by _ablate_stub_corpus.
+ABLATE_INPUT_FILES = [
+    "db/d1.sqlite",
+    "axes/labels.json",
+    "axes/motif_proxies.npz",
+    "tsumegos/retired_ids.txt",
+] + [f"activations/_signal_cache/correct_{kind}_{size}.{ext}"
+     for size in ALL_BOARD_SIZES
+     for kind, ext in (("ids", "json"), ("vecs", "npy"))]
+ABLATE_INPUT_DIRS = [f"attempts/{size}" for size in ALL_BOARD_SIZES]
+
+# ablations/ is pushed by this step alone rather than joining LOCAL_UPLOAD_DIRS:
+# no other step imports it, and `update` must not start pushing it either — see
+# the dev_runs/ exclusion in _ablate_upload.
+ABLATE_CODE_DIRS = ["ablations"]
+ABLATE_RESULTS = os.path.join("ablations", "dev_runs")
+ABLATE_PANELS = os.path.join("ablations", "panels")
+ABLATE_LOG_PREFIX = "ablate"
+ABLATE_CONCURRENCY = 3
+ABLATE_POLL_SECS = 300
+
 # tmux session and log files use the prefix; multi-instance generate runs use
 # {prefix}_{i} so they don't collide.
 TMUX_SESSION_PREFIX = "pipeline"
@@ -174,6 +231,46 @@ MIN_INET_MBPS = 400
 # case this is here to exclude. `gpu_lanes` needs no separate test either — a
 # narrow link shows up in the measurement already.
 MAX_TFLOPS_PER_PCIE_GBPS = 4.5
+
+# The rental pair, stated here rather than inside cmd_add so `ablate --dry-run`
+# can PRINT what renting would issue without a second copy of it drifting from
+# what `add` actually sends. The reasoning behind each filter is at cmd_add.
+#
+# --limit is mandatory, not a tuning knob: the API returns 64 offers by default,
+# ranked by ITS score and not by ours, so without this cmd_add's sort picks the
+# best of an arbitrary truncation of the pool.
+OFFER_QUERY = ("rented=False rentable=True num_gpus=1 "
+               "cuda_max_good>=12.8 reliability>0.99 "
+               "cpu_cores_effective>=8 "
+               f"inet_down>={MIN_INET_MBPS} inet_up>={MIN_INET_MBPS}")
+OFFER_LIMIT = "1000"
+# A fully explicit registry tag, NOT a Vast template. Vast's own CUDA template
+# pins vastai/base-image at @vastai-automatic-tag, which the server resolves per
+# host from (compute capability, driver CUDA version) — a Vast-side lookup table
+# this repo does not control, and when it stopped resolving ("No compatible image
+# tag found" for every architecture and driver we could offer it) it refused every
+# create. An explicit tag consults no such table. Three properties make this the
+# right one, and any replacement has to keep all three:
+#  * a COMPLETE CUDA 12.8 runtime INCLUDING cuDNN — bots/katago_cuda12 links both,
+#    and setup_instance deliberately installs neither (see the cuBLAS/nvJitLink
+#    pairing failure documented there).
+#  * ubuntu24.04 — setup_instance's apt line names libzip4t64, which is the 24.04
+#    package; 22.04 calls it libzip4 and the install fails.
+#  * runtime, not devel — nothing is compiled on the box.
+#
+# --direct asks for a directly reachable SSH port on the host's public IP instead
+# of a hop through Vast's SSH proxy, which is what get_ssh_details prefers.
+# Without it the API reports no 22/tcp binding at all and the direct candidate
+# does not exist, so the preference is unreachable. It costs nothing in offer
+# selection — the filters above have never yet left an offer without direct ports
+# in the pool — and the proxy candidates stay in get_ssh_details as the fallback
+# if a host declines to map one.
+# Disk sized to the biggest footprint any box type carries — the image, the
+# torch stack or the KataGo models, the input caches, and output that is
+# rsynced off rather than accumulated — and Vast bills storage per GB-hour, so
+# the request stays close to what is actually used.
+CREATE_ARGS = ["--image", "nvidia/cuda:12.8.0-cudnn-runtime-ubuntu24.04",
+               "--disk", "32", "--ssh", "--direct"]
 
 
 # ---------------------------------------------------------------------------
@@ -420,7 +517,21 @@ def find_instance(target=None):
 # Code/data upload helpers
 # ---------------------------------------------------------------------------
 
-def upload_code(host, base_rsync, include_setup_only=False):
+def _run_or_show(cmd, dry=False, **kw):
+    """Execute `cmd`, or under `dry` print it and report nothing ran.
+
+    Returns the CompletedProcess, or None when the command was only printed —
+    callers read None as "assume it worked", which is what lets `ablate
+    --dry-run` walk the SAME path the real run takes instead of narrating a
+    second version of it.
+    """
+    if dry:
+        print("  $ " + " ".join(shlex.quote(str(c)) for c in cmd))
+        return None
+    return subprocess.run(cmd, **kw)
+
+
+def upload_code(host, base_rsync, include_setup_only=False, dry=False):
     """Push pipeline/, utils/, the katago binary, and (when include_setup_only)
     bots/analysis.cfg. Excludes __pycache__ and .pyc files.
 
@@ -435,10 +546,11 @@ def upload_code(host, base_rsync, include_setup_only=False):
         if not os.path.isdir(d):
             print(f"  Warning: {d}/ not found, skipping")
             continue
-        res = subprocess.run(
+        res = _run_or_show(
             base_rsync + excludes + [f"{d}/", f"root@{host}:{REMOTE_DIR}/{d}/"],
+            dry,
         )
-        if res.returncode != 0:
+        if res is not None and res.returncode != 0:
             print(f"  {d}/ upload failed.")
             return False
     for f in files:
@@ -448,12 +560,13 @@ def upload_code(host, base_rsync, include_setup_only=False):
         # Preserve subdir layout (e.g. bots/katago → /workspace/onlymove/bots/katago)
         remote_subdir = os.path.dirname(f)
         if remote_subdir:
-            res = subprocess.run(
+            res = _run_or_show(
                 base_rsync + [f, f"root@{host}:{REMOTE_DIR}/{remote_subdir}/"],
+                dry,
             )
         else:
-            res = subprocess.run(base_rsync + [f, f"root@{host}:{REMOTE_DIR}/"])
-        if res.returncode != 0:
+            res = _run_or_show(base_rsync + [f, f"root@{host}:{REMOTE_DIR}/"], dry)
+        if res is not None and res.returncode != 0:
             print(f"  {f} upload failed.")
             return False
     return True
@@ -791,16 +904,12 @@ def cmd_add():
     #    are independently reported and the up figure is the weaker one in the
     #    pool, which is the direction the results come back on.
     #
-    # --limit is mandatory, not a tuning knob: the API returns 64 offers by
-    # default, ranked by ITS score and not by ours, so without this the sort
-    # below picks the best of an arbitrary truncation of the pool.
-    query = ("rented=False rentable=True num_gpus=1 "
-             "cuda_max_good>=12.8 reliability>0.99 "
-             "cpu_cores_effective>=8 "
-             f"inet_down>={MIN_INET_MBPS} inet_up>={MIN_INET_MBPS}")
+    # The query itself, and the create arguments below, are OFFER_QUERY /
+    # CREATE_ARGS at the top of the file.
     print("Searching offers (single GPU, CUDA >= 12.8, reliability > 99%, "
           f">= 8 effective cores, >= {MIN_INET_MBPS} Mbps up/down)...")
-    offers = run_vast_cmd(["search", "offers", query, "--limit", "1000"])
+    offers = run_vast_cmd(["search", "offers", OFFER_QUERY,
+                           "--limit", OFFER_LIMIT])
     if not offers:
         print("No offers found.")
         return
@@ -859,33 +968,7 @@ def cmd_add():
     print(f"Creating instance ({best.get('gpu_name', '?')}, "
           f"${best['dph_total']:.3f}/hr, "
           f"{best['total_flops'] / best['dph_total']:.1f} TFLOPS/$)...")
-    # A fully explicit registry tag, NOT a Vast template. Vast's own CUDA
-    # template pins vastai/base-image at @vastai-automatic-tag, which the server
-    # resolves per host from (compute capability, driver CUDA version) — a
-    # Vast-side lookup table this repo does not control, and when it stopped
-    # resolving ("No compatible image tag found" for every architecture and
-    # driver we could offer it) it refused every create. An explicit tag
-    # consults no such table. Three properties make this the right one, and any
-    # replacement has to keep all three:
-    #  * a COMPLETE CUDA 12.8 runtime INCLUDING cuDNN — bots/katago_cuda12 links
-    #    both, and setup_instance deliberately installs neither (see the
-    #    cuBLAS/nvJitLink pairing failure documented there).
-    #  * ubuntu24.04 — setup_instance's apt line names libzip4t64, which is the
-    #    24.04 package; 22.04 calls it libzip4 and the install fails.
-    #  * runtime, not devel — nothing is compiled on the box.
-    #
-    # --direct asks for a directly reachable SSH port on the host's public IP
-    # instead of a hop through Vast's SSH proxy, which is what get_ssh_details
-    # prefers. Without it the API reports no 22/tcp binding at all and the
-    # direct candidate does not exist, so the preference is unreachable. It
-    # costs nothing in offer selection — the filters above have never yet left
-    # an offer without direct ports in the pool — and the proxy candidates stay
-    # in get_ssh_details as the fallback if a host declines to map one.
-    res = run_vast_cmd([
-        "create", "instance", str(best["id"]),
-        "--image", "nvidia/cuda:12.8.0-cudnn-runtime-ubuntu24.04",
-        "--disk", "64", "--ssh", "--direct",
-    ])
+    res = run_vast_cmd(["create", "instance", str(best["id"])] + CREATE_ARGS)
     if not isinstance(res, dict) or "new_contract" not in res:
         # run_vast_cmd returns None on empty CLI output; guard so we abort
         # cleanly instead of TypeError'ing on res["new_contract"].
@@ -903,7 +986,11 @@ def cmd_add():
                 break
         time.sleep(5)
 
-    setup_instance_with_retry(inst)
+    if not setup_instance_with_retry(inst):
+        return None
+    # The id, so a caller that rented the box can go on to use it. The CLI
+    # handler discards it.
+    return instance_id
 
 
 def cmd_setup(target):
@@ -1408,6 +1495,501 @@ def cmd_monitor(args):
 
 
 # ---------------------------------------------------------------------------
+# Refit-tier ablation panels
+# ---------------------------------------------------------------------------
+
+# Puts the corpus NAMES in place on the remote and nothing else. It refuses a
+# directory holding a file with bytes in it: this deletes what the manifest does
+# not list, and on a box that has generated or been sent a real corpus that would
+# destroy SGFs. It prunes rather than only adding because the problem set IS the
+# listing — a stub left behind after a local purge would enter the fit as a
+# problem with no activation row and abort it.
+_STUB_CORPUS_PY = """
+import os, sys
+d, m = sys.argv[1], sys.argv[2]
+os.makedirs(d, exist_ok=True)
+want = set(l.strip() for l in open(m) if l.strip())
+have = os.listdir(d)
+real = [f for f in have if os.path.getsize(os.path.join(d, f)) > 0]
+if real:
+    sys.exit("REFUSING: " + d + " holds " + str(len(real)) + " non-empty file(s)"
+             " - that is a real corpus, not the name stubs this step writes")
+for f in set(have) - want:
+    os.remove(os.path.join(d, f))
+for f in want - set(have):
+    open(os.path.join(d, f), "w").close()
+print("corpus names in place: " + d + " (" + str(len(want)) + ")")
+"""
+
+
+def _ablate_log(panel):
+    return f"{REMOTE_DIR}/{ABLATE_LOG_PREFIX}_{panel}.log"
+
+
+def _ablate_panel_arms(panel):
+    """Arm names from the local manifest, or None if there is no such panel.
+
+    Read locally and FIRST, so a mistyped panel name costs nothing — the check
+    happens before any instance is found, let alone rented.
+    """
+    path = os.path.join(ABLATE_PANELS, f"{panel}.json")
+    if not os.path.exists(path):
+        print(f"No panel manifest at {path}.")
+        avail = sorted(f[:-5] for f in os.listdir(ABLATE_PANELS)
+                       if f.endswith(".json")) if os.path.isdir(ABLATE_PANELS) else []
+        if avail:
+            print(f"  Available: {', '.join(avail)}")
+        return None
+    try:
+        return list(json.load(open(path))["arms"])
+    except (ValueError, KeyError) as e:
+        print(f"  {path} is not a usable manifest: {e}")
+        return None
+
+
+def _ablate_provision(base_ssh, dry):
+    """git plus the fit's python stack, on top of what setup already installed.
+
+    git is not decoration: ablations.ablation_mirt records the revision an arm
+    was fitted at by shelling out to it, and the arm aborts if it cannot.
+    """
+    apt_cmd = "bash -l -c 'apt-get update && apt-get install -y git'"
+    # Each spec double-quoted inside the single-quoted `bash -l -c` string, for
+    # the reason spelled out in setup_instance: unquoted, `~=2.7.1` is parsed by
+    # the inner shell and the bound silently disappears.
+    specs = " ".join(f'"{pkg}"' for pkg in ABLATE_PIP_PACKAGES)
+    pip_cmd = (f"bash -l -c 'python3 -m pip install --break-system-packages "
+               f"{specs}'")
+    for label, cmd in (("apt", apt_cmd), ("pip", pip_cmd)):
+        for attempt in range(3):
+            res = _run_or_show(base_ssh + [cmd], dry)
+            if res is None or res.returncode == 0:
+                break
+            print(f"  {label} install failed (attempt {attempt + 1}/3), retrying...")
+            time.sleep(5)
+        else:
+            print(f"ERROR: {label} install failed after 3 attempts.")
+            return False
+    return True
+
+
+def _ablate_check_torch(base_ssh, dry):
+    """Refuse to launch a panel onto a CPU. A fit that falls back to CPU does not
+    fail, it just never finishes, and the box bills the whole time."""
+    cmd = ("python3 -c 'import torch; "
+           "print(\"torch\", torch.__version__, \"cuda\", torch.cuda.is_available())'")
+    res = _run_or_show(base_ssh + [cmd], dry, capture_output=True, text=True,
+                       timeout=180)
+    if res is None:
+        return True
+    out = (res.stdout or "").strip()
+    print(f"  remote: {out or (res.stderr or '').strip()}")
+    if res.returncode != 0 or "cuda True" not in out:
+        print("ERROR: the remote has no CUDA-visible torch; not launching.")
+        return False
+    return True
+
+
+def _ablate_git_stamp(base_ssh, dry):
+    """Let `git rev-parse --short HEAD` answer inside the uploaded tree.
+
+    The upload is a snapshot of the local tree at HEAD with no .git beside it, and
+    an arm record pins the revision it was fitted at. A detached HEAD holding that
+    sha is what tells git which revision the snapshot IS; core.abbrev is set to the
+    local abbreviation length so the pin reads identically whichever machine ran
+    the arm.
+    """
+    root = os.path.dirname(os.path.abspath(__file__))
+
+    def git(*args):
+        return subprocess.run(["git"] + list(args), cwd=root, capture_output=True,
+                              text=True).stdout.strip()
+
+    head, short = git("rev-parse", "HEAD"), git("rev-parse", "--short", "HEAD")
+    if not head:
+        print("  no local git revision; arms would not be able to pin one.")
+        return False
+    if git("status", "--porcelain"):
+        print(f"  WARNING: the working tree is dirty. Arms will pin {short}, "
+              f"which is not what is being uploaded.")
+    cmd = (f"mkdir -p {REMOTE_DIR}/.git/objects {REMOTE_DIR}/.git/refs && "
+           f"printf '%s\\n' {head} > {REMOTE_DIR}/.git/HEAD && "
+           f"printf '[core]\\n\\tabbrev = %s\\n' {len(short)} "
+           f"> {REMOTE_DIR}/.git/config")
+    res = _run_or_show(base_ssh + [cmd], dry, capture_output=True)
+    if res is not None and res.returncode != 0:
+        print("  could not stamp the revision on the remote.")
+        return False
+    print(f"  arms will pin revision {short}")
+    return True
+
+
+def _ablate_stub_corpus(host, base_ssh, base_rsync, dry):
+    """Ship the corpus LISTING and materialise it as empty files.
+
+    features.corpus_tids_by_size is the fit's problem set and it is the .sgf
+    filenames in tsumegos/<size>/; the PRODUCTION_BLOCKS layout opens none of
+    them. So the names travel and the files are made on arrival, which keeps the
+    two per-problem stores off the wire entirely.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        for size in ALL_BOARD_SIZES:
+            local_corpus = os.path.join("tsumegos", str(size))
+            if not os.path.isdir(local_corpus):
+                print(f"  {local_corpus}/ not present locally; cannot list the corpus.")
+                return False
+            names = sorted(f for f in os.listdir(local_corpus) if f.endswith(".sgf"))
+            if not names:
+                print(f"  {local_corpus}/ holds no SGFs; refusing to ship an "
+                      f"empty problem set.")
+                return False
+            manifest = os.path.join(tmp, f"corpus_files_{size}.txt")
+            with open(manifest, "w") as fh:
+                fh.write("\n".join(names) + "\n")
+            remote_manifest = f"{REMOTE_DIR}/tsumegos/corpus_files_{size}.txt"
+            print(f"  tsumegos/{size}/: {len(names)} names")
+            res = _run_or_show(base_rsync + [manifest,
+                                             f"root@{host}:{remote_manifest}"],
+                               dry, timeout=600)
+            if res is not None and res.returncode != 0:
+                print(f"  corpus manifest upload failed for size {size}.")
+                return False
+            cmd = (f"python3 -c {shlex.quote(_STUB_CORPUS_PY)} "
+                   f"{REMOTE_DIR}/tsumegos/{size} {remote_manifest}")
+            res = _run_or_show(base_ssh + [cmd], dry, capture_output=True,
+                               text=True, timeout=900)
+            if res is not None:
+                print("  " + ((res.stdout or "") + (res.stderr or "")).strip())
+                if res.returncode != 0:
+                    return False
+    return True
+
+
+def _ablate_upload(host, base_ssh, base_rsync, dry):
+    """Code, then the exact input set, then the corpus listing. All idempotent, so
+    a re-invocation after a killed run just re-runs it.
+
+    dev_runs/ is excluded in this direction on purpose: the panel's arm records
+    are the REMOTE's resume state, and pushing a local copy up would let an arm
+    that ran somewhere else mask one this box still owes.
+    """
+    if not upload_code(host, base_rsync, dry=dry):
+        return False
+    excludes = ["--exclude", "__pycache__/", "--exclude", "*.pyc"]
+    for d in ABLATE_CODE_DIRS:
+        res = _run_or_show(
+            base_rsync + excludes + ["--exclude", "dev_runs/",
+                                     f"{d}/", f"root@{host}:{REMOTE_DIR}/{d}/"],
+            dry)
+        if res is not None and res.returncode != 0:
+            print(f"  {d}/ upload failed.")
+            return False
+
+    missing = [p for p in ABLATE_INPUT_FILES + ABLATE_INPUT_DIRS
+               if not os.path.exists(p)]
+    if missing:
+        print("  missing local inputs, nothing to fit against: "
+              + ", ".join(missing))
+        return False
+    # ONE rsync with --relative, so every input keeps its path under the remote
+    # root and rsync creates the parents itself. Additive, with no --delete: an
+    # input the local tree has SHED (a retired bot's attempt file, say) survives
+    # on a box that is being reused, and would put a column in this fit that the
+    # local one does not have. Panel comparability is unaffected — every arm on
+    # the box sees the same layout — but a cross-machine comparison is not one
+    # this step promises anyway.
+    print("  inputs: " + ", ".join(ABLATE_INPUT_FILES + ABLATE_INPUT_DIRS))
+    res = _run_or_show(
+        base_rsync + ["-R"] + ABLATE_INPUT_FILES + ABLATE_INPUT_DIRS
+        + [f"root@{host}:{REMOTE_DIR}/"],
+        dry, timeout=3600)
+    if res is not None and res.returncode != 0:
+        print(f"  input upload failed (rsync rc={res.returncode}).")
+        return False
+    return _ablate_stub_corpus(host, base_ssh, base_rsync, dry)
+
+
+def _ablate_running(base_ssh):
+    """Is a panel runner alive on the box? The bracket in the pattern keeps pgrep
+    from matching its own command line."""
+    try:
+        res = subprocess.run(
+            base_ssh + ["pgrep -f '[a]blations.run_panel' >/dev/null 2>&1 "
+                        "&& echo RUNNING || echo IDLE"],
+            capture_output=True, text=True, timeout=15,
+        )
+    except subprocess.TimeoutExpired:
+        return False
+    return "RUNNING" in (res.stdout or "")
+
+
+def _ablate_launch(base_ssh, panel, concurrency, smoke_epochs, dry):
+    """Start the panel detached, so the ssh session closing cannot take it down.
+
+    The log is truncated rather than appended: the poll loop decides the run is
+    over by finding run_panel's terminal line in it, and a previous run's line
+    left at the top would end this one before it started.
+    """
+    log = _ablate_log(panel)
+    extra = f" --smoke-epochs {int(smoke_epochs)}" if smoke_epochs else ""
+    # Backgrounded inside a SUBSHELL, not by putting `&` on the whole chain: a
+    # chain that failed at the truncate or the cd would otherwise fail in the
+    # background where nothing reads its status.
+    #
+    # THE CHECK IS A SECOND SSH, and it has to be. _ablate_running's pattern is
+    # bracketed so pgrep cannot match its own argv, but that says nothing about
+    # the shell it runs UNDER — and this command's argv carries the launch line,
+    # `ablations.run_panel` unbracketed and all. Asking here would match the
+    # shell doing the asking, and report LAUNCHED whatever happened.
+    cmd = (f": > {log} && cd {REMOTE_DIR} && "
+           f"(setsid nohup env PYTHONUNBUFFERED=1 "
+           f"python3 -u -m ablations.run_panel {panel} "
+           f"--concurrency {int(concurrency)}{extra} "
+           f">> {log} 2>&1 < /dev/null &)")
+    res = _run_or_show(base_ssh + [cmd], dry, capture_output=True, text=True,
+                       timeout=60)
+    if res is None:
+        _run_or_show(base_ssh + ["pgrep -f '[a]blations.run_panel' "
+                                 ">/dev/null 2>&1 && echo RUNNING || echo IDLE"],
+                     dry)
+        return True
+    if res.returncode != 0:
+        print(f"  launch command failed: "
+              f"{((res.stdout or '') + (res.stderr or '')).strip()[-400:]}")
+        return False
+    time.sleep(5)
+    if not _ablate_running(base_ssh):
+        # Not a failure by itself — a panel whose arms all have records finishes
+        # in under a second. Show the log and let the poll loop classify it: it
+        # pulls first, then reads run_panel's own terminal line.
+        tail = subprocess.run(base_ssh + [f"tail -n 40 {log} 2>/dev/null"],
+                              capture_output=True, text=True, timeout=30)
+        print(f"  runner already gone. Log so far:\n"
+              f"{(tail.stdout or '').strip()}")
+    return True
+
+
+def _ablate_poll(host, base_ssh, base_rsync, panel, arms, dry):
+    """Pull results back every cycle and stop on run_panel's terminal line.
+
+    The pull runs BEFORE the verdict is read, and every cycle rather than at the
+    end, so a host that disappears mid-panel costs at most the arm that was in
+    flight — an arm record is the resume unit on the remote too, so the next
+    invocation picks up exactly there.
+    """
+    local_dir = os.path.join(ABLATE_RESULTS, panel)
+    remote_dir = f"{REMOTE_DIR}/{ABLATE_RESULTS}/{panel}"
+    pull = base_rsync + [f"root@{host}:{remote_dir}/", local_dir + os.sep]
+    # run_panel ends with one of PANEL COMPLETE / PANEL INCOMPLETE, or with
+    # "panel complete - nothing to run" when every arm already had a record.
+    check = (f"tail -n 200 {_ablate_log(panel)} 2>/dev/null | "
+             f"grep -E 'PANEL COMPLETE|PANEL INCOMPLETE|^panel complete' "
+             f"| tail -1; echo '|||'; "
+             f"pgrep -f '[a]blations.run_panel' >/dev/null 2>&1 "
+             f"&& echo running || echo idle")
+    if dry:
+        print(f"Poll cycle, every {ABLATE_POLL_SECS}s until the log carries a "
+              f"verdict:")
+        _run_or_show(pull, True)
+        _run_or_show(base_ssh + [check], True)
+        return None
+
+    os.makedirs(local_dir, exist_ok=True)
+    while True:
+        try:
+            subprocess.run(pull, timeout=1800)
+        except subprocess.TimeoutExpired:
+            print("  results pull timed out; will retry next cycle.")
+        have = [a for a in arms
+                if os.path.exists(os.path.join(local_dir, f"{a}.json"))]
+        pending = [a for a in arms if a not in have]
+        print(f"[{time.strftime('%H:%M:%S')}] {panel}: "
+              f"records {', '.join(have) or 'none'} | "
+              f"pending {', '.join(pending) or 'none'}")
+
+        try:
+            res = subprocess.run(base_ssh + [check], capture_output=True,
+                                 text=True, timeout=30)
+            parts = [p.strip() for p in (res.stdout or "").split("|||")]
+        except subprocess.TimeoutExpired:
+            parts = []
+        parts += [""] * max(0, 2 - len(parts))
+        verdict, proc = parts[:2]
+        if verdict:
+            return verdict
+        if proc == "idle":
+            # No verdict and no runner: the launcher died. Say so rather than
+            # spinning — whatever it managed to write has just been pulled.
+            return "RUNNER GONE (no terminal line in the remote log)"
+        time.sleep(ABLATE_POLL_SECS)
+
+
+def _take_opt(args, name, default=None):
+    """Pop `--name value` out of `args`, returning the value."""
+    if name not in args:
+        return default
+    i = args.index(name)
+    if i + 1 >= len(args):
+        raise ValueError(f"{name} needs a value")
+    val = args[i + 1]
+    del args[i:i + 2]
+    return val
+
+
+def cmd_ablate(args):
+    """Run a refit-tier MIRT ablation panel on a rented card.
+
+    Usage: ablate <panel> [--instance ID] [--concurrency N] [--smoke-epochs N]
+                          [--keep] [--dry-run]
+
+    The panel is ablations/panels/<panel>.json; each arm is
+    pipeline.train_mirt.run() with one knob turned, so the box needs the fit's
+    inputs and none of the per-problem stores. Arms are independent, hence
+    --concurrency on one GPU. A re-invocation on the same box does NOT relaunch
+    while a panel is live — it attaches to the poll loop, and run_panel's own
+    skip-if-exists makes the ARM the resume unit if it is not.
+
+    `--instance` expects a box this tool set up (`add`, or `setup` on an
+    existing one): the base packages and the repo layout come from there, and
+    this step adds only what the fit needs on top.
+    """
+    args = list(args)
+    dry = "--dry-run" in args
+    if dry:
+        args.remove("--dry-run")
+    keep = "--keep" in args
+    if keep:
+        args.remove("--keep")
+    try:
+        target = _take_opt(args, "--instance")
+        concurrency = int(_take_opt(args, "--concurrency", ABLATE_CONCURRENCY))
+        smoke_epochs = _take_opt(args, "--smoke-epochs")
+        smoke_epochs = None if smoke_epochs is None else int(smoke_epochs)
+    except ValueError as e:
+        print(f"Bad arguments: {e}")
+        return
+    if len(args) != 1 or args[0].startswith("-"):
+        print("Usage: ablate <panel> [--instance ID] [--concurrency N] "
+              "[--smoke-epochs N] [--keep] [--dry-run]")
+        return
+    panel = args[0]
+
+    arms = _ablate_panel_arms(panel)
+    if arms is None:
+        return
+    print(f"Panel '{panel}': {len(arms)} arm(s) — {', '.join(arms)}")
+    if smoke_epochs:
+        print(f"  SMOKE: every arm capped at {smoke_epochs} epochs. The budget is "
+              f"recorded in each arm JSON and producers refuse to quote it.")
+
+    # --- find or rent -------------------------------------------------------
+    if dry:
+        inst_id = target or "<instance-id>"
+        host, port = "<host>", "<port>"
+        if target:
+            print(f"Would resolve the ssh route for instance {target} "
+                  f"(get_ssh_details).")
+        else:
+            print("Would take the one existing instance, or with none rent one "
+                  "exactly as `add` does:")
+            _run_or_show([VASTAI_BIN, "search", "offers", OFFER_QUERY,
+                          "--limit", OFFER_LIMIT, "--raw"], True)
+            _run_or_show([VASTAI_BIN, "create", "instance", "<best-TFLOPS/$>"]
+                         + CREATE_ARGS + ["--raw"], True)
+            print("  then setup_instance_with_retry (apt, pip, code, weights).")
+    else:
+        if target is None and not get_all_instances():
+            print("No instances; renting one. IT BILLS UNTIL YOU DESTROY IT.")
+            target = cmd_add()
+            if not target:
+                return
+        inst = find_instance(target)
+        if not inst:
+            return
+        inst_id = inst["id"]
+        host, port = get_ssh_details(inst)
+        if not host or not port:
+            print(f"Instance {inst_id} not reachable.")
+            return
+    base_ssh, base_rsync = get_ssh_cmds(host, port)
+
+    step = f"ablate:{panel}"
+    live = False
+    if not dry:
+        wait_for_ssh(host, port)
+        live = _ablate_running(base_ssh)
+        if live:
+            remote_step = get_instance_step(inst_id) or "?"
+            print(f"Instance {inst_id} is already running a panel (registered as "
+                  f"'{remote_step}'). Not relaunching; attaching to the results "
+                  f"pull.")
+        elif _is_step_running(base_ssh):
+            print(f"Instance {inst_id} is busy with another pipeline step. "
+                  f"Run 'stop' first.")
+            return
+
+    if not live:
+        print(f"Provisioning instance {inst_id} for '{step}'...")
+        if not _ablate_provision(base_ssh, dry):
+            return
+        print(f"Uploading code and inputs to instance {inst_id}...")
+        if not _ablate_upload(host, base_ssh, base_rsync, dry):
+            return
+        if not _ablate_git_stamp(base_ssh, dry):
+            return
+        if not _ablate_check_torch(base_ssh, dry):
+            return
+        print(f"Launching '{step}' (concurrency {concurrency}) on {inst_id}...")
+        if not _ablate_launch(base_ssh, panel, concurrency, smoke_epochs, dry):
+            return
+        _run_or_show(
+            base_ssh + [f"echo '{step}' > {REMOTE_DIR}/running_step && "
+                        f"date -Iseconds > {REMOTE_DIR}/running_started"],
+            dry, capture_output=True)
+        if not dry:
+            register_instance(inst_id, step=step,
+                              started=time.strftime("%Y-%m-%dT%H:%M:%S%z"))
+        print(f"  log: {_ablate_log(panel)}  (stream {inst_id} tails "
+              f"{LOG_FILENAME_PREFIX}_0.log, not this one)")
+
+    try:
+        verdict = _ablate_poll(host, base_ssh, base_rsync, panel, arms, dry)
+    except KeyboardInterrupt:
+        # The panel is detached, so this stops WATCHING and nothing else. Say so:
+        # the box is still fitting and still billing either way.
+        print(f"\nStopped watching. The panel is still running on {inst_id} — "
+              f"re-run `ablate {panel}` to resume the pull, or `stop {inst_id}` "
+              f"to end it.")
+        return
+    if dry:
+        print(f"On a verdict: clear running_step, report the arm records under "
+              f"{os.path.join(ABLATE_RESULTS, panel)}/, and "
+              + ("keep the instance (--keep)." if keep else
+                 f"print `python vast_orchestration.py shutdown {inst_id}`."))
+        return
+
+    local_dir = os.path.join(ABLATE_RESULTS, panel)
+    have = [a for a in arms
+            if os.path.exists(os.path.join(local_dir, f"{a}.json"))]
+    missing = [a for a in arms if a not in have]
+    print(f"\n{panel}: {verdict}")
+    print(f"  records in {local_dir}/: {', '.join(have) or 'none'}")
+    if missing:
+        print(f"  STILL MISSING: {', '.join(missing)} — re-run this command to "
+              f"resume; run_panel skips the arms that already have a record.")
+    subprocess.run(base_ssh + [f"rm -f {REMOTE_DIR}/running_step "
+                               f"{REMOTE_DIR}/running_started"],
+                   capture_output=True)
+    register_instance(inst_id, step=None, started=None)
+    if keep:
+        print(f"  instance {inst_id} kept (--keep) and still billing.")
+    else:
+        print(f"  instance {inst_id} is STILL RUNNING and still billing. "
+              f"Destroy it with:")
+        print(f"    python vast_orchestration.py shutdown {inst_id}")
+
+
+# ---------------------------------------------------------------------------
 # CLI dispatch
 # ---------------------------------------------------------------------------
 
@@ -1438,6 +2020,15 @@ COMMANDS = {
             "tune/generate/benchmark/losing_lines need a board size first, e.g. run generate 13",
         ],
         "handler": cmd_run,
+    },
+    "ablate": {
+        "usage": "ablate <panel> [opts]",
+        "help": [
+            "Run a refit-tier MIRT ablation panel (ablations/panels/<panel>.json)",
+            "on a rented card and pull the arm records back as they land.",
+            "[--instance ID] [--concurrency N] [--smoke-epochs N] [--keep] [--dry-run]",
+        ],
+        "handler": cmd_ablate,
     },
     "stop": {
         "usage": "stop [<id>]",
