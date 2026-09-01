@@ -99,8 +99,27 @@ MANIFEST = os.path.join(PROJECT_ROOT, "ablations", "panels", f"{PANEL}.json")
 # matched to the baseline of its own seed.
 CONFIGS = ("shipped", "barrier_off", "barrier_10x")
 BASELINE = CONFIGS[0]
-REPLICATE_SUFFIXES = ("", "_s1")
-ARMS = tuple(c + s for s in REPLICATE_SUFFIXES for c in CONFIGS)
+
+
+def replicate_suffixes(manifest):
+    """The seed suffixes the manifest actually declares, in seed order.
+
+    Read rather than hardcoded: a panel gains a replicate whenever two seeds
+    fail to settle something, and a producer pinned to a fixed list would abort
+    on the panel getting BETTER. Every configuration must carry every suffix —
+    an unbalanced panel would silently average different configurations over
+    different seeds."""
+    suffixes = sorted({arm[len(BASELINE):] for arm in manifest["arms"]
+                       if arm.startswith(BASELINE)})
+    require(suffixes, f"{MANIFEST} declares no {BASELINE} arm to key the "
+                      f"replicates off")
+    want = {c + suf for suf in suffixes for c in CONFIGS}
+    require(set(manifest["arms"]) == want,
+            f"{MANIFEST} declares {sorted(manifest['arms'])}, which is not "
+            f"every one of {sorted(CONFIGS)} at every one of {suffixes} — an "
+            f"unbalanced panel would average different configurations over "
+            f"different seeds")
+    return tuple(suffixes)
 
 # The last third of the budget: past the stretch where these fits still improve,
 # so a mean over it reads the level an arm settled at rather than whichever
@@ -115,12 +134,11 @@ def load_panel():
             f"no {MANIFEST} — the panel manifest is what the arm records are "
             f"checked against, so it cannot be read without it")
     manifest = json.load(open(MANIFEST))
-    require(set(manifest["arms"]) == set(ARMS),
-            f"{MANIFEST} declares arms {sorted(manifest['arms'])}, this "
-            f"producer reads {sorted(ARMS)}")
+    suffixes = replicate_suffixes(manifest)
+    arm_names = tuple(c + suf for suf in suffixes for c in CONFIGS)
 
     arms = {}
-    for arm in ARMS:
+    for arm in arm_names:
         path = os.path.join(PANEL_DIR, f"{arm}.json")
         require(os.path.exists(path),
                 f"no {path} — the barrier panel has not run at every seed. Run "
@@ -172,10 +190,10 @@ def load_panel():
             f"the panel was measured at attempt-log frontier {base['db_max_id']} "
             f"but the log now ends at {now} — the stop-row draw moved, the "
             f"paired comparison is void. Re-run the panel.")
-    return arms, seed_groups(arms)
+    return arms, seed_groups(arms, suffixes)
 
 
-def seed_groups(arms):
+def seed_groups(arms, suffixes):
     """The panel regrouped into replicates: one entry per seed, holding that
     seed's arm name for every configuration.
 
@@ -184,7 +202,7 @@ def seed_groups(arms):
     estimates of that delta under different rows and different inits, which is
     why they are only ever averaged and never subtracted."""
     groups = []
-    for suffix in REPLICATE_SUFFIXES:
+    for suffix in suffixes:
         members = {cfg: cfg + suffix for cfg in CONFIGS}
         seeds = {int(arms[a]["config"].get("seed", SEED))
                  for a in members.values()}
@@ -424,6 +442,15 @@ def figures():
                "the figure: this count is a property of a particular fit and "
                "not of the model, so it is re-read after a refit rather than "
                "carried"),
+        Figure("barrier.tenx_no_rating_sign_consistent",
+               1 if len({a > b for a, b in zip(
+                   m["dist"]["barrier_10x"]["no_rating"],
+                   m["dist"]["shipped"]["no_rating"])}) == 1 else 0, "d",
+               "1 when the heavier barrier moves the undefined-rating count the "
+               "same way at every seed, 0 when it does not. A 0 says this count "
+               "does not establish a cost for the heavier weight — the count is "
+               "unstable under BOTH weights, so a difference between two single "
+               "runs of them is not a difference between the weights"),
         Figure("barrier.tenx_no_rating_mean",
                statistics.fmean(m["dist"]["barrier_10x"]["no_rating"]), "~10",
                "the same count at ten times the barrier weight, seed-averaged "
