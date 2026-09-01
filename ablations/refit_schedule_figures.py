@@ -47,7 +47,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-from ablations._figures import Figure, require, panel_budget  # noqa: E402
+from ablations._figures import Figure, require  # noqa: E402
 from pipeline.train_mirt import EPOCHS  # noqa: E402
 from utils.paths import DB_SQLITE  # noqa: E402
 
@@ -77,11 +77,17 @@ def load_panel():
                 f"{arm} ran {rec['config']!r}, the manifest declares "
                 f"{manifest['arms'][arm]!r} — the record is not this arm")
         arms[arm] = rec
-    budget = panel_budget(arms)
+    # THIS PANEL CARRIES TWO BUDGETS ON PURPOSE, which is why it does not use
+    # the one-budget rule every other panel does: a decayed schedule compared at
+    # equal EPOCHS is compared at unequal WORK, and the arms that raise the
+    # budget exist precisely to remove that confound. What is required instead
+    # is that every arm recorded the integral, so the comparison can be stated
+    # in the units that matter.
     for arm, rec in arms.items():
-        require(rec["metrics"]["epochs"] == budget,
-                f"{arm} ran {rec['metrics']['epochs']} epochs against the "
-                f"panel's {budget} — one panel is one budget")
+        require(rec["metrics"].get("lr_integral_epochs") is not None,
+                f"{arm} carries no lr_integral_epochs — it predates the metric, "
+                f"and without it a schedule comparison cannot say whether a "
+                f"difference is the schedule or the amount of optimization")
 
     base = next(iter(arms.values()))["pins"]
     for arm, rec in arms.items():
@@ -157,68 +163,107 @@ def measure():
 
 
 def measure_unit(by_sched):
+    """One holdout unit, grouped by SCHEDULE AND BUDGET.
+
+    Three groups can appear: the constant arms, cosine arms at the constant's
+    own budget (matched EPOCHS, and so about half the work), and cosine arms at
+    a raised budget (matched or better WORK). They are kept apart because the
+    two cosine groups answer different questions and averaging them would answer
+    neither."""
     out = {}
-    for sched, group in by_sched.items():
+    const = by_sched["constant"]
+    require(const, "the panel has no constant-schedule arm to compare against")
+    const_budget = {rec["metrics"]["epochs"] for _, rec in const}
+    require(len(const_budget) == 1,
+            f"the constant arms ran at {sorted(const_budget)} epochs — the "
+            f"baseline every comparison here is taken against has to be one fit")
+    const_budget = const_budget.pop()
+
+    def summarize(group):
         reads = {arm: read(rec) for arm, rec in group}
         finals = [r["final"] for r in reads.values()]
-        out[sched] = {
-            "arms": sorted(reads),
-            "n": len(reads),
-            "within_sd": statistics.fmean(r["within_sd"] for r in reads.values()),
-            "within_range": statistics.fmean(r["within_range"]
-                                             for r in reads.values()),
-            "between_range": 1e3 * (max(finals) - min(finals)),
-            "level": statistics.fmean(finals),
-            "finals": finals,
-        }
-    out["level_cost"] = 1e3 * (out["cosine"]["level"] - out["constant"]["level"])
+        work = {round(rec["metrics"]["lr_integral_epochs"]) for _, rec in group}
+        require(len(work) == 1,
+                f"the arms {sorted(reads)} delivered different learning-rate "
+                f"integrals {sorted(work)} — they are not one configuration")
+        return {"arms": sorted(reads), "n": len(reads),
+                "epochs": {rec["metrics"]["epochs"] for _, rec in group}.pop(),
+                "work": work.pop(),
+                "within_sd": statistics.fmean(r["within_sd"]
+                                              for r in reads.values()),
+                "within_range": statistics.fmean(r["within_range"]
+                                                 for r in reads.values()),
+                "between_range": 1e3 * (max(finals) - min(finals)),
+                "level": statistics.fmean(finals)}
+
+    out["constant"] = summarize(const)
+    for arm, rec in by_sched["cosine"]:
+        label = ("cosine_epochs" if rec["metrics"]["epochs"] == const_budget
+                 else "cosine_work")
+        out.setdefault(label, []).append((arm, rec))
+    for label in ("cosine_epochs", "cosine_work"):
+        if label in out:
+            out[label] = summarize(out[label])
+            out[label]["level_cost"] = 1e3 * (out[label]["level"]
+                                              - out["constant"]["level"])
+            out[label]["work_ratio"] = (out[label]["work"]
+                                        / out["constant"]["work"])
     return out
 
 
 def figures():
     m = measure()
-    rowu, prob = m["row"], m["problem"]
+    prob, rowu = m["problem"], m["row"]
+    require("cosine_work" in prob,
+            "the panel carries no cosine arm at a raised budget on the problem "
+            "unit. Without one the level comparison is between a constant run "
+            "and a decayed run given about half the optimization, and a loss "
+            "cannot be attributed to the schedule")
+    work, epochs_matched = prob["cosine_work"], prob.get("cosine_epochs")
     return [
         Figure("schedule.within_run_range_constant_mnat",
                rowu["constant"]["within_range"], ".1f",
                "the band a run wanders inside at its end under the CONSTANT "
-               "rate that ships: peak-to-peak of its held-out score across the "
-               "last third of the budget, millinats, averaged over "
-               "initializations"),
+               "rate that ships: peak-to-peak of its held-out score over the "
+               "last third of the budget, millinats, averaged over runs"),
         Figure("schedule.within_run_range_cosine_mnat",
-               rowu["cosine"]["within_range"], ".1f",
-               "the same band under a cosine decay to zero. Expected to be far "
-               "narrower almost by construction — a rate going to zero stops "
-               "moving the parameters — which is why it settles nothing on its "
-               "own"),
+               rowu["cosine_epochs"]["within_range"], ".1f",
+               "the same band under a cosine decay to zero — far narrower "
+               "almost by construction, since a rate going to zero stops moving "
+               "the parameters, which is why it settles nothing on its own"),
         Figure("schedule.between_run_range_constant_mnat",
                prob["constant"]["between_range"], ".1f",
                "THE FIGURE THAT DECIDES REPLICATION: how far the final "
-               "held-out-PROBLEM score lands apart across initializations "
-               "scored on identical problems, under the constant rate. The draw "
-               "is pinned, so this is the fit moving and not the data"),
+               "held-out-PROBLEM score lands apart across runs of the constant "
+               "schedule scored on identical problems. The draw is pinned, so "
+               "it spans what a seed re-rolls — feature basis, initial weights, "
+               "batch order — and not the data"),
         Figure("schedule.between_run_range_cosine_mnat",
-               prob["cosine"]["between_range"], ".1f",
-               "the same spread under the cosine decay. Dropping replicates "
-               "needs this small against the contrasts a panel is asked to "
-               "resolve — a number to compare, not to read alone. It spans "
-               "everything a seed re-rolls: the feature basis, the initial "
-               "weights and the batch order"),
-        Figure("schedule.cosine_level_cost_mnat", prob["level_cost"], ".1f",
+               work["between_range"], ".1f",
+               "the same spread under the cosine decay AT MATCHED-OR-BETTER "
+               "WORK. Dropping replicates needs this small against the "
+               "contrasts a panel is asked to resolve"),
+        Figure("schedule.cosine_level_cost_mnat", work["level_cost"], ".1f",
                "what the cosine schedule costs on held-out PROBLEMS against the "
                "constant one, millinats, positive meaning the decayed fit "
-               "generalizes worse. Judged on problems and not on rows: a "
-               "held-out row shares its users and its problems with training, "
-               "so any decay looks costly there whether or not it gave up "
-               "anything that generalizes"),
-        Figure("schedule.cosine_level_cost_rows_mnat", rowu["level_cost"], ".1f",
-               "the same comparison on held-out ROWS, kept beside it because "
-               "the gap between the two is the point: it is what the fit was "
-               "still gaining on material it had already seen"),
+               "generalizes worse — measured with the decayed arm given at "
+               "least as much optimization, so a cost here is the schedule and "
+               "not a shorter run"),
+        Figure("schedule.cosine_work_ratio", work["work_ratio"], ".2f",
+               "learning-rate integral of that cosine arm over the constant "
+               "arm's, both in constant-rate epochs. At or above one the "
+               "decayed arm was not starved; a cosine to zero delivers about "
+               "half its epoch count, so equal epochs would put this near 0.5"),
+        Figure("schedule.cosine_level_cost_equal_epochs_mnat",
+               (epochs_matched or work)["level_cost"], ".1f",
+               "the same level comparison against a cosine arm run for the same "
+               "EPOCHS rather than the same work — what adopting the schedule "
+               "without lengthening the budget would cost, kept because that is "
+               "the naive change someone would make"),
         Figure("schedule.initializations", prob["constant"]["n"], "d",
-               "initializations per schedule behind the spreads above. Three "
-               "points estimate a spread crudely, and the range of three "
-               "understates the distribution they came from"),
+               "runs per configuration behind the spreads above. Three points "
+               "estimate a spread crudely, and the range of three understates "
+               "the distribution they came from"),
     ]
 
 
@@ -232,24 +277,30 @@ def main():
                 if unit == "row" else
                 "held-out PROBLEMS — the unit the level is judged on")
         print(f"\n=== {head} ===")
-        print(f"{'schedule':<12}{'within-run sd':>15}{'within-run p2p':>16}"
-              f"{'between-run p2p':>17}{'level (final)':>15}")
-        for sched in SCHEDULES:
-            g = d[sched]
-            print(f"{sched:<12}{g['within_sd']:>13.2f}  "
-                  f"{g['within_range']:>14.2f}  {g['between_range']:>15.2f}  "
-                  f"{g['level']:>14.5f}")
-        print(f"  cosine costs {d['level_cost']:+.2f} mnat on this unit")
+        print(f"{'configuration':<16}{'epochs':>8}{'work':>7}{'within p2p':>12}"
+              f"{'between p2p':>13}{'level':>11}{'vs constant':>13}")
+        for label in ("constant", "cosine_epochs", "cosine_work"):
+            g = d.get(label)
+            if g is None:
+                continue
+            cost = ("" if label == "constant"
+                    else f"{g['level_cost']:+.2f} mnat")
+            print(f"{label:<16}{g['epochs']:>8}{g['work']:>7}"
+                  f"{g['within_range']:>12.2f}{g['between_range']:>13.2f}"
+                  f"{g['level']:>11.5f}{cost:>13}")
+        print("  work = the learning-rate integral in constant-rate epochs; a "
+              "cosine to zero delivers\n  about half its epoch count, so equal "
+              "epochs is NOT equal optimization.")
 
-    if "problem" in m and "row" in m:
-        print("\nthe decision, on the unit that can tell generalizing from "
-              "fitting:")
-        prob = m["problem"]
-        print(f"  level      cosine {prob['level_cost']:+.2f} mnat "
-              f"(rows said {m['row']['level_cost']:+.2f})")
-        print(f"  between-run spread  constant "
+    prob = m.get("problem", {})
+    if "cosine_work" in prob:
+        w = prob["cosine_work"]
+        print(f"\nthe decision, on held-out problems with the decay given "
+              f"{w['work_ratio']:.2f}x the constant arm's work:")
+        print(f"  level              {w['level_cost']:+.2f} mnat")
+        print(f"  between-run spread constant "
               f"{prob['constant']['between_range']:.2f} -> cosine "
-              f"{prob['cosine']['between_range']:.2f} mnat")
+              f"{w['between_range']:.2f} mnat")
         print("  a decay that narrows one run's own band while leaving the "
               "spread BETWEEN runs\n  where it was has not made replication "
               "unnecessary; it has made each run tidier.")

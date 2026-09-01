@@ -651,6 +651,14 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
     print(f"\n=== joint fit | K={k_axes} | teach weight {teach_weight} "
           f"(constant) ===", flush=True)
 
+    # THE LEARNING-RATE INTEGRAL, in constant-rate epochs. A decayed run does
+    # less total optimization than its epoch count suggests — a cosine to zero
+    # averages half the base rate, so it delivers what half as many constant
+    # epochs would. Comparing two schedules at equal EPOCHS therefore compares
+    # them at unequal work, and against a fit still descending that reads as the
+    # schedule being worse when it was only shorter. Recorded so a panel can
+    # match on it.
+    lr_epochs = 0.0
     for ep in range(epochs):
         if lr_schedule == "cosine":
             # Standard cosine from the base rate to zero over the whole budget,
@@ -659,6 +667,9 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
             scale = 0.5 * (1.0 + float(np.cos(np.pi * ep / max(epochs - 1, 1))))
             for grp, base in zip(opt.param_groups, base_lrs):
                 grp["lr"] = base * scale
+            lr_epochs += scale
+        else:
+            lr_epochs += 1.0
         m.train(True)
         perm = tr[torch.randperm(n, device=device)]
         for i in range(0, n, batch):
@@ -981,6 +992,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         "epochs": int(epochs), "trace": trace,
         "k_axes": int(k_axes),
         "lr_schedule": str(lr_schedule),
+        "lr_integral_epochs": round(lr_epochs, 3),
         "split_seed": int(seed if split_seed is None else split_seed),
         "pca_seed": int(seed if pca_seed is None else pca_seed),
         "stop_bce_no_axes": bce_stop_no_axes,
