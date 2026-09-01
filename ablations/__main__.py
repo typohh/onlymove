@@ -49,6 +49,7 @@ PRODUCERS = (
     "refit_features_figures",
     "refit_blocks_figures",
     "refit_axis_count_figures",
+    "refit_regularization_figures",
 )
 
 
