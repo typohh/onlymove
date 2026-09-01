@@ -1888,7 +1888,12 @@ def cmd_queue(args):
     killed and nothing relaunched.
 
     `--sync-only` pushes the queue file and pulls results without touching the
-    runner, which is how a queue is reordered while it is running.
+    runner, which is how a queue is reordered while it is running — and how it
+    is POLLED: every invocation ends by expanding the queue through the
+    manifests and reporting which named arms still lack a record. Exit 0 means
+    QUEUE COMPLETE (every arm has a record — the drain signal a caller can act
+    on, e.g. by running `python -m ablations --tier refit`); exit 4 means arms
+    are still missing.
     """
     args = list(args)
     dry = "--dry-run" in args
@@ -1978,6 +1983,47 @@ def cmd_queue(args):
                  dry, capture_output=True)
     have = len(glob.glob(os.path.join(ABLATE_RESULTS, "*", "*.json")))
     print(f"  {have} arm record(s) under {ABLATE_RESULTS}/")
+
+    # THE DRAIN SIGNAL. Expand the queue through the manifests — the same
+    # reading the pool does — and say which named arms still lack a record,
+    # so a caller polling with --sync-only gets completeness as an exit code
+    # rather than inferring it from a record count that also counts archived
+    # regimes and panels the queue never named.
+    wanted = []
+    for raw in open(local_queue):
+        line = raw.split("#", 1)[0].strip()
+        if not line:
+            continue
+        panel, *arms = line.split()
+        manifest_path = os.path.join(root, "ablations", "panels",
+                                     f"{panel}.json")
+        if not os.path.exists(manifest_path):
+            print(f"  queue names panel {panel!r} with no manifest — not "
+                  f"counted toward completion")
+            continue
+        manifest_arms = json.load(open(manifest_path))["arms"]
+        for arm in (arms or list(manifest_arms)):
+            if arm not in manifest_arms:
+                print(f"  queue names {panel}/{arm} which the manifest does "
+                      f"not define — not counted toward completion")
+                continue
+            if (panel, arm) not in wanted:
+                wanted.append((panel, arm))
+    missing = [f"{p}/{a}" for p, a in wanted
+               if not os.path.exists(os.path.join(ABLATE_RESULTS, p,
+                                                  f"{a}.json"))]
+    if not wanted:
+        print("  the queue file names no arms — nothing to complete")
+        return 0
+    if missing:
+        shown = ", ".join(missing[:8]) + (" …" if len(missing) > 8 else "")
+        print(f"  queue: {len(wanted) - len(missing)}/{len(wanted)} arms have "
+              f"records; missing {len(missing)}: {shown}")
+        return 4
+    print(f"  QUEUE COMPLETE — all {len(wanted)} arms named by {ABLATE_QUEUE} "
+          f"have records. The pool idles until the queue file changes; the "
+          f"ledger is brought up to date separately "
+          f"(./.venv/bin/python3 -m ablations --tier refit).")
     return 0
 
 
