@@ -1926,12 +1926,19 @@ def cmd_queue(args):
         if not _ablate_check_torch(base_ssh, dry):
             return 1
 
-    # The queue file travels on its own every time, sync-only included: that is
-    # what makes a reorder a one-line push rather than a relaunch.
+    # The queue file AND the manifests travel every time, sync-only included.
+    # Both, because they are one control surface: a queue line names arms that
+    # only the manifest defines, so pushing the queue alone makes the pool warn
+    # that the arms do not exist — which is what it did the first time a budget
+    # was appended this way.
+    root = os.path.dirname(os.path.abspath(__file__))
     _run_or_show(base_rsync + [local_queue,
                                f"root@{host}:{REMOTE_DIR}/{ABLATE_QUEUE}"],
                  dry, capture_output=True)
-    print(f"  pushed {ABLATE_QUEUE}")
+    _run_or_show(base_rsync + [os.path.join(root, "ablations", "panels") + os.sep,
+                               f"root@{host}:{REMOTE_DIR}/ablations/panels/"],
+                 dry, capture_output=True)
+    print(f"  pushed {ABLATE_QUEUE} and the panel manifests")
 
     if not sync_only:
         log = f"{REMOTE_DIR}/{ABLATE_LOG_PREFIX}_queue.log"
