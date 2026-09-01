@@ -1,0 +1,10 @@
+{
+  "panel": "penalty",
+  "description": "methodology 1.5 — the rating-orthogonality penalty: the shipped per-tail form against the whole-axis form, against the penalty removed, against a free control carrying neither the penalty nor the teaching pull. The claims: a whole-axis penalty is a LINEAR statistic and cannot see a symmetric tail dependence, so that arm reports small whole-axis correlations while its axis ENDS — the only part a name is read off — stay rating-laden several-fold higher; scoring the two ends separately cuts the worst end to a fraction of that; with the penalty off the axes absorb the shipped per-problem quantities; and the free control spends an axis on a shipped parameter outright, the doc's signature being its correlation with SLOPE rather than with difficulty.",
+  "arms": {
+    "shipped": {},
+    "ortho_whole": {"ortho_mode": "whole"},
+    "ortho_off": {"ortho_mode": "off"},
+    "free_control": {"ortho_mode": "off", "teach_weight": 0.0}
+  }
+}

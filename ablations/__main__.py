@@ -42,6 +42,9 @@ PRODUCERS = (
     "axes_fit_figures",
     "cast_error_figures",
     "refit_barrier_figures",
+    "refit_lr_figures",
+    "refit_seeds_figures",
+    "refit_penalty_figures",
 )
 
 
