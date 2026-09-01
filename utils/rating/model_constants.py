@@ -6,9 +6,11 @@ fanout, the rank mapping, the population constants, packaging, and the feature
 loaders themselves. They live here rather than inside any one trainer so that a
 trainer can be replaced without every other stage following it.
 
-`PCA_DIM` = 128 is MEASURED-OPTIMAL and should not be swept again (2026-07-27):
-8/16/32/64/128/256 were each run end to end, 128 wins from both directions, and
-256 is refuted, carrying the memorization signature.
+`PCA_DIM` = 128 is MEASURED-OPTIMAL and should not be swept again: re-fitting at
+16/64/128/256 and scoring on held-out PROBLEMS, 128 wins from both directions at
+every seed. The memorization signature once quoted alongside that — the widest
+arm carrying the highest median slope — does NOT replicate across seeds, so the
+case rests on the held-out cost alone (`ablations/panels/features.json`).
 """
 
 import numpy as np

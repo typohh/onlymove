@@ -868,6 +868,230 @@
         "data_version": "f6fba7b749bc0ecb"
       }
     },
+    "features.pca128_holdout_bce": {
+      "value": 0.5050284490726962,
+      "fmt": ".4f",
+      "text": "0.5050",
+      "producer": "ablations.refit_features_figures",
+      "tier": "refit",
+      "note": "held-out-PROBLEM cross-entropy at a joint-PCA activation width of 128, nats per attempt, meaned over the last third of the budget and then averaged over the panel's 2 seeds. A level, not a comparison: the seeds hold aside different problems",
+      "measured": {
+        "at": "2026-09-01T05:12:46Z",
+        "git": "d29528638ab+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "features.pca128_slope_median": {
+      "value": 1.5194742679595947,
+      "fmt": ".2f",
+      "text": "1.52",
+      "producer": "ablations.refit_features_figures",
+      "tier": "refit",
+      "note": "median fitted per-problem slope at a width of 128, over every fitted problem, averaged over the panel's 2 seeds",
+      "measured": {
+        "at": "2026-09-01T05:12:46Z",
+        "git": "d29528638ab+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "features.pca128_wins_both_sides": {
+      "value": 1,
+      "fmt": "d",
+      "text": "1",
+      "producer": "ablations.refit_features_figures",
+      "tier": "refit",
+      "note": "1 when the shipped width scores better held out than BOTH its neighbours in the swept set (64 below, 256 above) at every seed, on the last-third reading — §1.3's 'wins from both sides' as one indicator",
+      "measured": {
+        "at": "2026-09-01T05:12:46Z",
+        "git": "d29528638ab+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "features.pca16_cost_mnat": {
+      "value": 11.415472420135409,
+      "fmt": ".1f",
+      "text": "11.4",
+      "producer": "ablations.refit_features_figures",
+      "tier": "refit",
+      "note": "held-out-problem cost of a width of 16 against the shipped 128, millinats over the last third of the budget, signed (positive = worse than the shipped width). PAIRED inside a seed — both arms hold aside the same problems — and then averaged over the panel's 2 seeds",
+      "measured": {
+        "at": "2026-09-01T05:12:46Z",
+        "git": "d29528638ab+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "features.pca16_cost_sign_consistent": {
+      "value": 1,
+      "fmt": "d",
+      "text": "1",
+      "producer": "ablations.refit_features_figures",
+      "tier": "refit",
+      "note": "1 when both seeds put the 16-against-128 contrast on the same side of zero on the last-third reading, 0 when they disagree — the two seeds being independent estimates of one paired delta. An indicator for a fig-guard beside a sentence naming that contrast's direction, not for a span",
+      "measured": {
+        "at": "2026-09-01T05:12:46Z",
+        "git": "d29528638ab+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "features.pca16_holdout_bce": {
+      "value": 0.5164439214928316,
+      "fmt": ".4f",
+      "text": "0.5164",
+      "producer": "ablations.refit_features_figures",
+      "tier": "refit",
+      "note": "held-out-PROBLEM cross-entropy at a joint-PCA activation width of 16, nats per attempt, meaned over the last third of the budget and then averaged over the panel's 2 seeds. A level, not a comparison: the seeds hold aside different problems",
+      "measured": {
+        "at": "2026-09-01T05:12:46Z",
+        "git": "d29528638ab+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "features.pca16_slope_median": {
+      "value": 1.4194095730781555,
+      "fmt": ".2f",
+      "text": "1.42",
+      "producer": "ablations.refit_features_figures",
+      "tier": "refit",
+      "note": "median fitted per-problem slope at a width of 16, over every fitted problem, averaged over the panel's 2 seeds",
+      "measured": {
+        "at": "2026-09-01T05:12:46Z",
+        "git": "d29528638ab+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "features.pca256_cost_mnat": {
+      "value": 4.40216064453125,
+      "fmt": ".1f",
+      "text": "4.4",
+      "producer": "ablations.refit_features_figures",
+      "tier": "refit",
+      "note": "held-out-problem cost of a width of 256 against the shipped 128, millinats over the last third of the budget, signed (positive = worse than the shipped width). PAIRED inside a seed — both arms hold aside the same problems — and then averaged over the panel's 2 seeds",
+      "measured": {
+        "at": "2026-09-01T05:12:46Z",
+        "git": "d29528638ab+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "features.pca256_cost_sign_consistent": {
+      "value": 1,
+      "fmt": "d",
+      "text": "1",
+      "producer": "ablations.refit_features_figures",
+      "tier": "refit",
+      "note": "1 when both seeds put the 256-against-128 contrast on the same side of zero on the last-third reading, 0 when they disagree — the two seeds being independent estimates of one paired delta. An indicator for a fig-guard beside a sentence naming that contrast's direction, not for a span",
+      "measured": {
+        "at": "2026-09-01T05:12:46Z",
+        "git": "d29528638ab+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "features.pca256_highest_slope": {
+      "value": 0,
+      "fmt": "d",
+      "text": "0",
+      "producer": "ablations.refit_features_figures",
+      "tier": "refit",
+      "note": "1 when the 256-wide arm carries the highest median slope of any arm at every seed — the memorization signature §1.3 names, as an indicator",
+      "measured": {
+        "at": "2026-09-01T05:12:46Z",
+        "git": "d29528638ab+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "features.pca256_holdout_bce": {
+      "value": 0.5094306097172274,
+      "fmt": ".4f",
+      "text": "0.5094",
+      "producer": "ablations.refit_features_figures",
+      "tier": "refit",
+      "note": "held-out-PROBLEM cross-entropy at a joint-PCA activation width of 256, nats per attempt, meaned over the last third of the budget and then averaged over the panel's 2 seeds. A level, not a comparison: the seeds hold aside different problems",
+      "measured": {
+        "at": "2026-09-01T05:12:46Z",
+        "git": "d29528638ab+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "features.pca256_slope_median": {
+      "value": 1.5300677418708801,
+      "fmt": ".2f",
+      "text": "1.53",
+      "producer": "ablations.refit_features_figures",
+      "tier": "refit",
+      "note": "median fitted per-problem slope at a width of 256, over every fitted problem, averaged over the panel's 2 seeds",
+      "measured": {
+        "at": "2026-09-01T05:12:46Z",
+        "git": "d29528638ab+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "features.pca64_cost_mnat": {
+      "value": 7.078307690006724,
+      "fmt": ".1f",
+      "text": "7.1",
+      "producer": "ablations.refit_features_figures",
+      "tier": "refit",
+      "note": "held-out-problem cost of a width of 64 against the shipped 128, millinats over the last third of the budget, signed (positive = worse than the shipped width). PAIRED inside a seed — both arms hold aside the same problems — and then averaged over the panel's 2 seeds",
+      "measured": {
+        "at": "2026-09-01T05:12:46Z",
+        "git": "d29528638ab+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "features.pca64_cost_sign_consistent": {
+      "value": 1,
+      "fmt": "d",
+      "text": "1",
+      "producer": "ablations.refit_features_figures",
+      "tier": "refit",
+      "note": "1 when both seeds put the 64-against-128 contrast on the same side of zero on the last-third reading, 0 when they disagree — the two seeds being independent estimates of one paired delta. An indicator for a fig-guard beside a sentence naming that contrast's direction, not for a span",
+      "measured": {
+        "at": "2026-09-01T05:12:46Z",
+        "git": "d29528638ab+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "features.pca64_holdout_bce": {
+      "value": 0.5121067567627029,
+      "fmt": ".4f",
+      "text": "0.5121",
+      "producer": "ablations.refit_features_figures",
+      "tier": "refit",
+      "note": "held-out-PROBLEM cross-entropy at a joint-PCA activation width of 64, nats per attempt, meaned over the last third of the budget and then averaged over the panel's 2 seeds. A level, not a comparison: the seeds hold aside different problems",
+      "measured": {
+        "at": "2026-09-01T05:12:46Z",
+        "git": "d29528638ab+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "features.pca64_slope_median": {
+      "value": 1.4816575050354004,
+      "fmt": ".2f",
+      "text": "1.48",
+      "producer": "ablations.refit_features_figures",
+      "tier": "refit",
+      "note": "median fitted per-problem slope at a width of 64, over every fitted problem, averaged over the panel's 2 seeds",
+      "measured": {
+        "at": "2026-09-01T05:12:46Z",
+        "git": "d29528638ab+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
     "history.rank_gap_career_excess": {
       "value": 0.0012008169660726598,
       "fmt": "%.1f",
