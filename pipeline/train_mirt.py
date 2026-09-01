@@ -269,11 +269,16 @@ class JointMIRT(nn.Module):
         self.register_buffer("g_rms", torch.ones(1, self.k_axes))
 
     def param_groups(self, lr_net=LR_NET, lr_field=LR_FIELD):
-        """SPLIT RATES. The network must train an order of magnitude slower than
-        the free per-user fields; under one shared rate this fit diverges late,
-        in eval mode, in every arrangement tried. The rating trainer gets away
-        with a single rate because its only per-user parameter is one ability
-        embedding; this model has that plus a K-dimensional axis position."""
+        """SPLIT RATES: the network trains an order of magnitude slower than the
+        free per-user fields.
+
+        The divergence this split was adopted against belonged to an earlier
+        arrangement of the model and does NOT reproduce on the shipping one —
+        measured, one shared rate stays finite and costs nothing that survives a
+        second seed. What the fit is sensitive to across the range tried is the
+        NETWORK's rate alone. So the split stands as the arrangement everything
+        else was tuned inside, not as a bound either rate has been shown to
+        need; the panel behind that is `ablations/panels/lr.json`."""
         net, field = [], []
         for name, prm in self.named_parameters():
             (field if name in FIELD_PARAMS else net).append(prm)

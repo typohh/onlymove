@@ -110,7 +110,7 @@ arm                  rating   combined   axis    verdict
 
 - **Trunk 128x64 is an interior optimum**, bracketed both sides. Wider costs 4x what narrower does — the overfitting gradient the LR sweep found, appearing in capacity too. The value was inherited unswept; it turns out right.
 - **`V_RIDGE` is not binding.** 0.05, 0.15 and 0.5 all score alike. It is not what limits the axes.
-- **`SHALLOW_W = 0` is refuted and the barrier is load-bearing.** Without it slopes collapse (median 0.94, 0.1th percentile 0.097) and derived ratings blow out to a range of [-225, +146], since rating = b + kappa(c)/a diverges as a falls. That is exactly the failure the barrier is written to stop.
+- **`SHALLOW_W = 0` is refuted and the barrier is load-bearing.** Without it slopes collapse (median 0.94, 0.1th percentile 0.097) and derived ratings blow out to a range of [-225, +146], since rating = b + kappa(c)/a diverges as a falls. That is exactly the failure the barrier is written to stop. **RE-MEASURED on the shipping configuration** by the `barrier` refit panel (`ablations/panels/barrier.json`, replicated across seeds): the conclusion holds and the magnitudes do not — the blow-out is one-sided and an order of magnitude smaller, the held-out cost is a quarter of what is recorded here, and the size of the blow-out is itself not reproducible between seeds. Ten times the weight is NOT the failure direction this document assumes: it fits better held out. The panel's figures are the current ones and are ledger-backed; the numbers above stand as this snapshot's record.
 - **The per-problem slope head earns its place** — one global slope costs 1.8 mnat. This REFUTES, in this model, the on-record claim that per-problem slope is largely assignment noise; that finding is from the two-stage production model.
 - **`BURN_IN_EPOCHS` stays at 300.** 450 looked like an architecture-shifted optimum at 0.5 mnat, but that is 1.2 sd against the measured seed noise. The bracket shape holds (600/750 degrade the rating for real); the claim that 450 beats 300 does not.
 - **The warm start is what makes coupling SAFE.** Under raw features, dropping it left the rating untouched and only cost the axes. Under the shared trunk it costs the rating 2.1 mnat here, because a badly-initialized axis map sends its gradients into the trunk the rating depends on — and takes 1360 epochs instead of 380. The two changes are complements, not independent knobs. **See the warm-start section below**: re-measured under the production protocol at patience 30, where the cold arm needs 2670-3200 epochs to stop improving, the rating gap does not survive — 1360 epochs was very likely still descending.
@@ -1462,7 +1462,7 @@ Each of these was run on 2026-08-13 and read off the broken axis estimator. The 
 | `V_MEAN_PENALTY` | 10.0 | strong. It is the only thing stopping an axis carrying population difficulty. |
 | `ORTHO_WEIGHT` | 0.5 | inherited from `residual_axes`. Its mutual half is load-bearing THERE; never checked here. |
 | `SHALLOW_TAU` | 0.1 | the barrier's threshold. Only its WEIGHT was swept (30 epochs, 0/0.3/1/3). |
-| `SHALLOW_W` | 0.3 | CLOSED — `0` IS refuted, in this document's own sweep section: slopes collapse (median 0.94, 0.1th percentile 0.097) and ratings blow out to [-225, +146], a 22 mnat loss, because rating = b + kappa(c)/a diverges as a falls. What remains open is the VALUE, swept at 30 epochs on a configuration since changed. |
+| `SHALLOW_W` | 0.3 | CLOSED at `0` — refuted in this document's own sweep section (slopes collapse, median 0.94 / 0.1th percentile 0.097; ratings blow out to [-225, +146]; 22 mnat) and again on the shipping configuration by the `barrier` refit panel, at much smaller magnitudes. **The VALUE is OPEN and now open in a specific direction**: that panel finds ten times this weight fits BETTER held out and does not compress the rating range, so the upper side of the bracket is undemonstrated. What rises with the weight is the count of problems whose floor passes the calibration probability, which the likelihood cannot see — that is the quantity to watch if it is raised. |
 | `GAUGE_MOM` | 0.01 | EMA rate for the difficulty gauge. |
 | `BATCH` | 65536 | |
 | `STOP_ROW_FRAC` | 0.03 | size of the stop carveout. |
@@ -1578,6 +1578,14 @@ Two design points that came out against expectation, both worth not re-deriving.
 ### The ablation that established it — MEASURED 2026-08-13
 
 At the swept optimum `3e-4 / 1e-2`, held-out users, holdout seed 0:
+
+> **The pair was RE-MEASURED on the shipping configuration** by the `lr` refit
+> panel (`ablations/panels/lr.json`, replicated across seeds). What it finds:
+> the field rate is not resolved anywhere between this 33x ratio and 1x, and one
+> shared rate does not diverge — so the divergence the split was adopted against
+> belongs to an earlier arrangement. The network's own rate is the sensitive one.
+> The optimum recorded here is not contradicted; what is contradicted is the
+> reason it was believed to be load-bearing on both sides.
 
 ```
                     rating            axis adds (mnat)
