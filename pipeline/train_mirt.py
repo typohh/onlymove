@@ -783,6 +783,35 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         bce_stop_no_axes = float(torch.nn.functional.binary_cross_entropy(
             p_noax, ty[i_stop]))
 
+        # WHAT A GLOBAL SLOPE MULTIPLIER WOULD BUY (1.10), swept here because
+        # the sweep is a rescoring of this fit rather than a fit of its own.
+        # The multiplier PIVOTS AT THE RATING, so the 80%-clear anchor is held
+        # and only the steepness around it moves — at s=1 the expression is
+        # algebraically the model's own, which is what makes the curve's
+        # minimum comparable to the shipped value.
+        #
+        # Scored on the same held-aside rows as everything else: those rows are
+        # out of the fit entirely, while the abilities they are scored with come
+        # from each user's OTHER attempts, which is the position the client is
+        # in when it predicts an attempt from a history. Reported, never applied.
+        g_s = m.user_axis(tu[i_stop])
+        _, _, _, gl_s = m.problem_params(tfeat[tp[i_stop]])
+        ax_s = (gl_s * g_s).sum(-1)
+        kap_s = torch.log(
+            ((CALIBRATION_P - c_s) / (1.0 - c_s - lam_s)).clamp(EPS, 1 - EPS)
+            / (1.0 - ((CALIBRATION_P - c_s) / (1.0 - c_s - lam_s)).clamp(
+                EPS, 1 - EPS)))
+        rat_s = b_s + kap_s / a_s.clamp(min=1e-6)
+        slope_sweep = []
+        for mult in [round(0.60 + 0.05 * i, 2) for i in range(17)]:
+            z = ((a_s * mult) * (th_s - rat_s) + kap_s + ax_s).clamp(-35, 35)
+            pz = (c_s + (1.0 - c_s - lam_s) * torch.sigmoid(z)).clamp(
+                EPS, 1 - EPS)
+            slope_sweep.append(
+                {"mult": mult,
+                 "stop_bce": float(torch.nn.functional.binary_cross_entropy(
+                     pz, ty[i_stop]))})
+
     # --- outputs
     m.train(False)
     with torch.no_grad():
@@ -912,6 +941,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         "epochs": int(epochs), "trace": trace,
         "k_axes": int(k_axes),
         "stop_bce_no_axes": bce_stop_no_axes,
+        "slope_scale_sweep": slope_sweep,
         "slope_pct": {str(p): float(np.percentile(a_np, p))
                       for p in (0.1, 1, 5, 50, 95, 99, 99.9)},
         "slope_at_floor_share": float(np.mean(a_np <= SLOPE_FLOOR * 1.01)),
