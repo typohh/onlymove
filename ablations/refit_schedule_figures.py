@@ -48,7 +48,6 @@ if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 from ablations._figures import Figure, require  # noqa: E402
-from pipeline.train_mirt import EPOCHS  # noqa: E402
 from utils.paths import DB_SQLITE  # noqa: E402
 
 import sqlite3  # noqa: E402
@@ -59,7 +58,6 @@ PANEL = "schedule"
 PANEL_DIR = os.path.join(PROJECT_ROOT, "ablations", "dev_runs", PANEL)
 MANIFEST = os.path.join(PROJECT_ROOT, "ablations", "panels", f"{PANEL}.json")
 SCHEDULES = ("constant", "cosine")
-TAIL_FROM_EPOCH = 2 * EPOCHS // 3
 
 
 def load_panel():
@@ -148,9 +146,18 @@ def load_panel():
 
 
 def read(rec):
+    """An arm's closing window and its final score.
+
+    THE WINDOW IS RELATIVE TO THE ARM'S OWN BUDGET. This panel deliberately runs
+    arms at two budgets, so a window fixed at the shipped budget's last third
+    would cover the last third of a 3000-epoch arm and most of a 7000-epoch one
+    — including the stretch where the longer arm was still descending, which
+    would report its descent as wander."""
     trace = rec["metrics"]["trace"]
-    tail = [r["stop_bce"] for r in trace if r["epoch"] >= TAIL_FROM_EPOCH]
-    require(len(tail) > 1, "an arm carries no tail window")
+    tail_from = 2 * rec["metrics"]["epochs"] // 3
+    tail = [r["stop_bce"] for r in trace if r["epoch"] >= tail_from]
+    require(len(tail) > 1,
+            f"an arm carries no tail window past epoch {tail_from}")
     return {"final": trace[-1]["stop_bce"],
             "tail_mean": statistics.fmean(tail),
             "within_sd": 1e3 * statistics.stdev(tail),
