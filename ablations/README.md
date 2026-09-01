@@ -96,6 +96,6 @@ Every panel above except `schedule` was measured under the constant-rate 3000-ep
 
 - §1.5 — the free-control correlations (−0.64 with slope) and the difficulty-only displacement (−0.04 → −0.43, +0.62). The penalty panel measures the first; the second needs an arm penalized on difficulty ALONE, which is a knob that does not exist yet.
 - §1.14 — the ortho-conflict pair (0.16 vs 4.41 / 4.21 millinats at correlations of 0.36 and 0.27). Not reachable by any panel: it compares two rule BANKS, and neither is the shipped one. Either the magnitudes come out of the document or a bank is reconstructed to measure them.
-- §1.10 — the slope-multiplier sweep and the empirical-Bayes per-problem variance component. Both are POST-HOC over a fitted checkpoint rather than refits, so they need no panel — the arms already on disk carry what they want.
+- §1.10 — the empirical-Bayes per-problem variance component: post-hoc over a fitted checkpoint, needs no panel. (The slope-multiplier sweep half is DONE — `refit_slope_scale_figures` reads the sweep the trainer records per arm: interior optimum, unity inside the seed spread, quoted in §1.10.)
 - §1.11 — the pivot walk-forward, which the document already flags as unmeasured on the shipping configuration.
 - §1.14 — the half-reliability figures, the axis-payoff bins and the teach-back agreements. All post-hoc over a fitted arm plus the attempt log.
