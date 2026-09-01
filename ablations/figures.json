@@ -3739,99 +3739,169 @@
       }
     },
     "stopping.patience_advantage_best_mnat": {
-      "value": -3.926306962966919,
+      "value": 0.035822391510009766,
       "fmt": ".1f",
-      "text": "-3.9",
+      "text": "0.0",
       "producer": "ablations.refit_stopping_figures",
       "tier": "refit",
       "note": "the rule's BEST case over every seed and setting tried — the most it could claim under its own criterion",
       "measured": {
-        "at": "2026-09-01T05:39:41Z",
-        "git": "c9264fe3432+dirty",
+        "at": "2026-09-01T06:33:59Z",
+        "git": "1e9f45029f5+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
     },
     "stopping.patience_advantage_mnat": {
-      "value": -14.779798686504364,
+      "value": -16.60676548878352,
       "fmt": ".1f",
-      "text": "-14.8",
+      "text": "-16.6",
       "producer": "ablations.refit_stopping_figures",
       "tier": "refit",
       "note": "millinats the selected epoch beats the FINAL epoch by on the held-aside rows, meaned over seeds and settings; SIGNED, so a negative value means the rule stops early and ships the worse fit. Flattering to the rule by construction: the selected epoch is a running minimum over the very rows the selection reads",
       "measured": {
-        "at": "2026-09-01T05:39:41Z",
-        "git": "c9264fe3432+dirty",
+        "at": "2026-09-01T06:33:59Z",
+        "git": "1e9f45029f5+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "stopping.patience_best_case_epoch": {
+      "value": 2990.0,
+      "fmt": "~10",
+      "text": "2,990",
+      "producer": "ablations.refit_stopping_figures",
+      "tier": "refit",
+      "note": "the epoch the rule stopped at in that best case. Read it beside the advantage: a rule can only match a budget it is competing with by declining to stop early, which is the budget's own answer arrived at expensively",
+      "measured": {
+        "at": "2026-09-01T06:33:59Z",
+        "git": "1e9f45029f5+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
     },
     "stopping.patience_ever_beats_final": {
-      "value": 0,
+      "value": 1,
       "fmt": "d",
-      "text": "0",
+      "text": "1",
       "producer": "ablations.refit_stopping_figures",
       "tier": "refit",
       "note": "1 if a patience rule beat the final epoch at any seed and any setting, 0 if it never did. An indicator for a fig-guard: 0 says the fixed budget is not merely lower-variance but better",
       "measured": {
-        "at": "2026-09-01T05:39:41Z",
-        "git": "c9264fe3432+dirty",
+        "at": "2026-09-01T06:33:59Z",
+        "git": "1e9f45029f5+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
     },
     "stopping.patience_setting_over_seed_ratio": {
-      "value": 3.264516129032258,
+      "value": 2.4186046511627906,
       "fmt": ".1f",
-      "text": "3.3",
+      "text": "2.4",
       "producer": "ablations.refit_stopping_figures",
       "tier": "refit",
       "note": "the first spread over the second: how many times more the chosen epoch answers to the rule's own tuning than to the fit it is reading. Above one means the setting dominates",
       "measured": {
-        "at": "2026-09-01T05:39:41Z",
-        "git": "c9264fe3432+dirty",
+        "at": "2026-09-01T06:33:59Z",
+        "git": "1e9f45029f5+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
     },
     "stopping.patience_spread_seeds": {
-      "value": 387.5,
+      "value": 752.5,
       "fmt": "~10",
-      "text": "390",
+      "text": "750",
       "producer": "ablations.refit_stopping_figures",
       "tier": "refit",
       "note": "how far it moves when only the SEED changes, at a fixed setting, averaged over the settings — the same spread taken the other way round, over the same numbers",
       "measured": {
-        "at": "2026-09-01T05:39:41Z",
-        "git": "c9264fe3432+dirty",
+        "at": "2026-09-01T06:33:59Z",
+        "git": "1e9f45029f5+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
     },
     "stopping.patience_spread_settings": {
-      "value": 1265.0,
+      "value": 1820.0,
       "fmt": "~10",
-      "text": "1,260",
+      "text": "1,820",
       "producer": "ablations.refit_stopping_figures",
       "tier": "refit",
       "note": "how far the epoch a patience rule selects moves when only the PATIENCE SETTING changes, averaged over seeds — the rule's answer as a property of its own tuning",
       "measured": {
-        "at": "2026-09-01T05:39:41Z",
-        "git": "c9264fe3432+dirty",
+        "at": "2026-09-01T06:33:59Z",
+        "git": "1e9f45029f5+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "stopping.prob_tail_detrended_sd_mnat": {
+      "value": 0.8304133547141342,
+      "fmt": ".1f",
+      "text": "0.8",
+      "producer": "ablations.refit_stopping_figures",
+      "tier": "refit",
+      "note": "and its detrended noise, on that unit",
+      "measured": {
+        "at": "2026-09-01T06:33:59Z",
+        "git": "1e9f45029f5+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "stopping.prob_tail_trend_mnat_per_500": {
+      "value": -1.3419677102202447,
+      "fmt": ".1f",
+      "text": "-1.3",
+      "producer": "ablations.refit_stopping_figures",
+      "tier": "refit",
+      "note": "the same slope on whole HELD-OUT PROBLEMS — the unit that can tell continued generalizing from continued fitting, and the criterion a budget belongs on. Flat here while the row split still descends is the ordinary shape of a budget that has arrived",
+      "measured": {
+        "at": "2026-09-01T06:33:59Z",
+        "git": "1e9f45029f5+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
     },
     "stopping.seeds": {
-      "value": 2,
+      "value": 3,
       "fmt": "d",
-      "text": "2",
+      "text": "3",
       "producer": "ablations.refit_stopping_figures",
       "tier": "refit",
       "note": "seeds of the shipped configuration whose recorded traces a patience rule is replayed on; runs of one seed are bitwise identical, so each seed counts once",
       "measured": {
-        "at": "2026-09-01T05:39:41Z",
-        "git": "c9264fe3432+dirty",
+        "at": "2026-09-01T06:33:59Z",
+        "git": "1e9f45029f5+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "stopping.tail_detrended_sd_mnat": {
+      "value": 1.58092516290079,
+      "fmt": ".1f",
+      "text": "1.6",
+      "producer": "ablations.refit_stopping_figures",
+      "tier": "refit",
+      "note": "what is left of that window's spread once the slope is removed: the run-to-run noise, against which the raw spread overstates the noise by whatever the trend contributes",
+      "measured": {
+        "at": "2026-09-01T06:33:59Z",
+        "git": "1e9f45029f5+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "stopping.tail_trend_mnat_per_500": {
+      "value": -4.991463707896306,
+      "fmt": ".1f",
+      "text": "-5.0",
+      "producer": "ablations.refit_stopping_figures",
+      "tier": "refit",
+      "note": "the SLOPE of the ROW-held-out score through the last third of the budget, millinats per 500 epochs, averaged over seeds. This is the trainer's convergence detector, whose rows share their users and problems with training — it keeps descending, which is why it is not what a budget is chosen on",
+      "measured": {
+        "at": "2026-09-01T06:33:59Z",
+        "git": "1e9f45029f5+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }

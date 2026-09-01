@@ -30,9 +30,12 @@ a different measurement.
 """
 
 import json
+import math
 import os
 import statistics
 import sys
+
+import numpy as np
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
@@ -40,6 +43,7 @@ if PROJECT_ROOT not in sys.path:
 
 from ablations._figures import Figure, require  # noqa: E402
 from pipeline.train_mirt import EPOCHS  # noqa: E402
+from utils.rating.model_constants import PCA_DIM  # noqa: E402
 
 TIER = "refit"
 
@@ -50,13 +54,24 @@ DEV_RUNS = os.path.join(PROJECT_ROOT, "ablations", "dev_runs")
 # setting would report one epoch and say nothing about what chose it.
 PATIENCES = (5, 10, 20, 50)
 
+# The window every spread here is read over: the last third of the budget.
+TAIL_FROM = 2 * EPOCHS // 3
 
-def shipped_arms():
-    """Full-budget runs of the shipped configuration, keyed by seed.
+
+def shipped_arms(unit="row"):
+    """Full-budget runs of the shipped configuration at one holdout unit, keyed
+    by seed.
 
     The shipped configuration is an empty config or one carrying nothing but a
-    seed. Several panels run it, and runs at one seed are bitwise identical, so
-    a seed contributes ONE trace however many panels produced it."""
+    seed and the unit. Several panels run it, and runs at one seed are bitwise
+    identical, so a seed contributes ONE trace however many panels produced it.
+
+    THE UNIT IS THE WHOLE POINT OF THE ARGUMENT BELOW. The row split shares its
+    users and its problems with training — a held-out row is one more attempt by
+    a user whose ability was fitted and on a problem whose parameters were — so
+    it keeps improving long after generalization to unseen problems has
+    arrived. It is a convergence detector and was never the criterion the budget
+    was chosen on."""
     by_seed = {}
     for panel in sorted(os.listdir(DEV_RUNS)) if os.path.isdir(DEV_RUNS) else []:
         panel_dir = os.path.join(DEV_RUNS, panel)
@@ -68,6 +83,13 @@ def shipped_arms():
             rec = json.load(open(os.path.join(panel_dir, entry)))
             cfg = dict(rec["config"])
             seed = cfg.pop("seed", 0)
+            if cfg.pop("stop_unit", "row") != unit:
+                continue
+            # The width-sweep panel writes the width explicitly on every arm,
+            # so its baseline arm carries one and IS the shipped configuration;
+            # any other width is a different fit and not a replicate of this one.
+            if cfg.pop("pca_dim", PCA_DIM) != PCA_DIM:
+                continue
             if cfg or rec["metrics"]["epochs"] != EPOCHS:
                 continue
             trace = rec["metrics"]["trace"]
@@ -94,6 +116,23 @@ def patience_epoch(trace, patience):
     return best_epoch, best
 
 
+def tail_shape(by_seed):
+    """(slope per 500 epochs, detrended sd), both in millinats, averaged over
+    the runs given. Fitting a line through the closing window separates a fit
+    still descending from noise around a settled one — a spread read as noise
+    while the run is still improving is not noise."""
+    trend, detrended = [], []
+    for trace in by_seed.values():
+        pts = [(r["epoch"], r["stop_bce"]) for r in trace
+               if r["epoch"] >= TAIL_FROM]
+        x = np.array([e for e, _ in pts], float)
+        y = np.array([v for _, v in pts], float)
+        slope, intercept = np.polyfit(x, y, 1)
+        trend.append(1e3 * slope * 500.0)
+        detrended.append(1e3 * float(np.std(y - (intercept + slope * x), ddof=1)))
+    return statistics.fmean(trend), statistics.fmean(detrended)
+
+
 def measure():
     by_seed = shipped_arms()
     require(len(by_seed) >= 2,
@@ -103,12 +142,15 @@ def measure():
 
     chosen = {}          # (seed, patience) -> epoch
     gains = []
+    best_case = (-math.inf, None)   # (advantage, epoch it stopped at)
     for seed, trace in by_seed.items():
         final = trace[-1]["stop_bce"]
         for pat in PATIENCES:
             epoch, best = patience_epoch(trace, pat)
             chosen[(seed, pat)] = epoch
             gains.append(1e3 * (final - best))
+            if gains[-1] > best_case[0]:
+                best_case = (gains[-1], epoch)
 
     # How much of the movement is the SETTING and how much is the fit: the same
     # spread taken the two ways round, over the same numbers.
@@ -118,12 +160,30 @@ def measure():
     across_seeds = [max(chosen[(s, p)] for s in by_seed)
                     - min(chosen[(s, p)] for s in by_seed)
                     for p in PATIENCES]
+    # IS THE CLOSING THIRD SETTLED, AND ON WHICH SIGNAL? Read on both units the
+    # panels supply. The row split is what the trainer watches and what a
+    # patience rule would stop on; whole held-out problems are what a budget
+    # should actually be chosen on, since only that unit can tell continued
+    # fitting apart from continued generalizing.
+    trend, detrended = tail_shape(by_seed)
+    prob = shipped_arms("problem")
+    require(prob,
+            "no shipped-configuration arm holds out whole PROBLEMS — without "
+            "one the closing trend can only be read on the row split, which "
+            "shares its users and problems with training and cannot say "
+            "whether a longer budget would generalize better")
+    prob_trend, prob_detrended = tail_shape(prob)
+
     return {"seeds": len(by_seed), "settings": len(PATIENCES),
+            "trend_per_500": trend, "detrended_sd": detrended,
+            "prob_seeds": len(prob), "prob_trend_per_500": prob_trend,
+            "prob_detrended_sd": prob_detrended,
             "chosen": chosen,
             "spread_settings": statistics.fmean(across_settings),
             "spread_seeds": statistics.fmean(across_seeds),
             "advantage_mnat": statistics.fmean(gains),
             "advantage_best_mnat": max(gains),
+            "advantage_best_epoch": best_case[1],
             "ever_beats": 1 if max(gains) > 0 else 0}
 
 
@@ -142,6 +202,26 @@ def figures():
                "how far it moves when only the SEED changes, at a fixed "
                "setting, averaged over the settings — the same spread taken the "
                "other way round, over the same numbers"),
+        Figure("stopping.tail_trend_mnat_per_500", m["trend_per_500"], ".1f",
+               "the SLOPE of the ROW-held-out score through the last third of "
+               "the budget, millinats per 500 epochs, averaged over seeds. This "
+               "is the trainer's convergence detector, whose rows share their "
+               "users and problems with training — it keeps descending, which "
+               "is why it is not what a budget is chosen on"),
+        Figure("stopping.tail_detrended_sd_mnat", m["detrended_sd"], ".1f",
+               "what is left of that window's spread once the slope is removed: "
+               "the run-to-run noise, against which the raw spread overstates "
+               "the noise by whatever the trend contributes"),
+        Figure("stopping.prob_tail_trend_mnat_per_500",
+               m["prob_trend_per_500"], ".1f",
+               "the same slope on whole HELD-OUT PROBLEMS — the unit that can "
+               "tell continued generalizing from continued fitting, and the "
+               "criterion a budget belongs on. Flat here while the row split "
+               "still descends is the ordinary shape of a budget that has "
+               "arrived"),
+        Figure("stopping.prob_tail_detrended_sd_mnat",
+               m["prob_detrended_sd"], ".1f",
+               "and its detrended noise, on that unit"),
         Figure("stopping.patience_setting_over_seed_ratio",
                m["spread_settings"] / max(m["spread_seeds"], 1e-9), ".1f",
                "the first spread over the second: how many times more the "
@@ -157,6 +237,12 @@ def figures():
                m["advantage_best_mnat"], ".1f",
                "the rule's BEST case over every seed and setting tried — the "
                "most it could claim under its own criterion"),
+        Figure("stopping.patience_best_case_epoch",
+               float(m["advantage_best_epoch"]), "~10",
+               "the epoch the rule stopped at in that best case. Read it beside "
+               "the advantage: a rule can only match a budget it is competing "
+               "with by declining to stop early, which is the budget's own "
+               "answer arrived at expensively"),
         Figure("stopping.patience_ever_beats_final", m["ever_beats"], "d",
                "1 if a patience rule beat the final epoch at any seed and any "
                "setting, 0 if it never did. An indicator for a fig-guard: 0 "
