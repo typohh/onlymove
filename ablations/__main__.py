@@ -41,6 +41,7 @@ PRODUCERS = (
     "motif_null_figures",
     "axes_fit_figures",
     "cast_error_figures",
+    "refit_barrier_figures",
 )
 
 

@@ -1,0 +1,9 @@
+{
+  "panel": "barrier",
+  "description": "methodology 1.7 — the divergence barrier: the shipped fit against the barrier removed and the barrier at ten times its weight. The claims: without it slopes collapse onto the clamp and derived ratings blow out over hundreds of units at a >20 mnat held-out cost; at 10x the rating range compresses toward nothing.",
+  "arms": {
+    "shipped": {},
+    "barrier_off": {"shallow_w": 0.0},
+    "barrier_10x": {"shallow_w": 3.0}
+  }
+}

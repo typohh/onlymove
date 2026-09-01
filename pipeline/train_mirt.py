@@ -477,7 +477,7 @@ def load_bank(key_idx):
     return tgt, ok, spec
 
 
-def report_bank_identity(g_np, tgt, ok, prob_idx):
+def report_bank_identity(g_np, tgt, ok, prob_idx, k_axes=K_AXES):
     """How far each shipped axis moved off the bank — the check that says whether
     `axes/labels.json` still describes what it is attached to.
 
@@ -507,22 +507,38 @@ def report_bank_identity(g_np, tgt, ok, prob_idx):
     print(f"  BANK IDENTITY over {len(sel)} attempted+banked problems "
           f"(tail-weighted agreement at z >= {TAIL_HINGE}, 0 = independent):",
           flush=True)
-    for k in range(K_AXES):
+    rows = []
+    for k in range(k_axes):
         x, y = g_np[sel, k], tgt[sel, k]
         pos = hinged_r(x, y)
         neg = hinged_r(-x, -y)
         bulk = float(np.corrcoef(x, y)[0, 1])
         print(f"    axis {k}: +tail {pos:6.3f}  -tail {neg:6.3f}"
               f"   (bulk r {bulk:+.3f})", flush=True)
+        rows.append({"axis": k, "pos_tail": float(pos), "neg_tail": float(neg),
+                     "bulk_r": bulk})
+    return rows
 
 
-def main():
+def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
+        v_ridge=V_RIDGE, ortho_rating=ORTHO_RATING, shallow_tau=SHALLOW_TAU,
+        shallow_w=SHALLOW_W, shallow_samples=SHALLOW_SAMPLES,
+        teach_weight=TEACH_WEIGHT, stop_row_frac=STOP_ROW_FRAC,
+        out_dir=OUT_DIR, axes_dir=AXES_DIR):
+    """The shipped fit, callable. Every keyword defaults to the production
+    constant above, so `run()` IS the production run — `main()` passes nothing,
+    keeping the trainer flag-free — and `ablations.ablation_mirt` is the only
+    caller that passes anything else, always with `out_dir`/`axes_dir`
+    redirected away from `ratings/` and `axes/`. The per_cell retirement acts on
+    `axes_dir` itself, so a redirected run cannot touch the production store.
+    Returns a metrics dict (row counts, the convergence trace, the output
+    distributions, the bank-identity report) for the ablation ledger."""
     import pandas as pd
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     t0 = time.time()
 
     feat, keys, key_idx, input_dim = load_joint_mirt_features(
-        SIZES, PCA_DIM, SEED, blocks=PRODUCTION_BLOCKS)
+        SIZES, PCA_DIM, seed, blocks=PRODUCTION_BLOCKS)
     fdim = feat.shape[1]
     print(f"loaded in {time.time() - t0:.0f}s: {len(keys)} problems, "
           f"feat {fdim} (dropout region {input_dim})", flush=True)
@@ -558,8 +574,8 @@ def main():
     # model does not learn from, so it is small. Stopping on TRAINING loss alone
     # would pick the wrong epoch — held-out quality peaks hundreds of epochs
     # before the training loss flattens.
-    rng = np.random.default_rng(SEED)
-    is_stop = rng.random(len(df)) < STOP_ROW_FRAC
+    rng = np.random.default_rng(seed)
+    is_stop = rng.random(len(df)) < stop_row_frac
     tr = torch.tensor(np.where(~is_stop)[0], device=device)
     i_stop = torch.tensor(np.where(is_stop)[0], device=device)
     print(f"  stop signal: {int(is_stop.sum())} rows held aside", flush=True)
@@ -568,21 +584,22 @@ def main():
     t_tgt = torch.tensor(bank_tgt, dtype=torch.float32, device=device)
     t_ok = torch.tensor(bank_ok, device=device)
     print(f"  axis bank: {int(bank_ok.sum())}/{len(keys)} problems carry banked "
-          f"directions, taught at a constant weight of {TEACH_WEIGHT}",
+          f"directions, taught at a constant weight of {teach_weight}",
           flush=True)
 
-    m = JointMIRT(fdim, n_users, input_dim, SEED).to(device)
+    m = JointMIRT(fdim, n_users, input_dim, seed).to(device)
     opt = torch.optim.Adam(m.param_groups())
-    o_tau = float(np.log(np.expm1(SHALLOW_TAU)))
+    o_tau = float(np.log(np.expm1(shallow_tau)))
     n = len(tr)
-    print(f"\n=== joint fit | K={K_AXES} | teach weight {TEACH_WEIGHT} "
+    trace = []
+    print(f"\n=== joint fit | K={K_AXES} | teach weight {teach_weight} "
           f"(constant) ===", flush=True)
 
-    for ep in range(EPOCHS):
+    for ep in range(epochs):
         m.train(True)
         perm = tr[torch.randperm(n, device=device)]
-        for i in range(0, n, BATCH):
-            bi = perm[i:i + BATCH]
+        for i in range(0, n, batch):
+            bi = perm[i:i + batch]
             pred, gh, rsf = m(tu[bi], tfeat[tp[bi]])
             pred = pred.clamp(EPS, 1 - EPS)
             loss = torch.nn.functional.binary_cross_entropy(
@@ -601,7 +618,7 @@ def main():
             # be: the gradient along it is analytically zero, and it stays at
             # ~0.002-0.009 over a full run against a per-axis spread an order of
             # magnitude larger.
-            loss = loss + V_RIDGE * (m.user_axis(tu[bi]) ** 2).sum() / len(bi)
+            loss = loss + v_ridge * (m.user_axis(tu[bi]) ** 2).sum() / len(bi)
             # DECORRELATE THE AXES FROM DIFFICULTY. Nothing else does: centring
             # v (user_axis) removes only the POPULATION mean, which blocks an
             # axis acting as a global difficulty shift but not one tracking
@@ -651,7 +668,7 @@ def main():
                 W = _tail_w(torch, _sg * gh, TAIL_HINGE)
                 W = W - W.mean(dim=0, keepdim=True)
                 W = W / (W.norm(dim=0, keepdim=True) + 1e-9)
-                loss = loss + ORTHO_RATING * (W.T @ tz).pow(2).sum()
+                loss = loss + ortho_rating * (W.T @ tz).pow(2).sum()
             # TEACHING, ON THE ATTEMPT STREAM, reusing the gh this batch already
             # produced — no second forward and no second sampling distribution.
             #
@@ -680,17 +697,17 @@ def main():
                 # divides by g_rms, so any residual scale is removed before
                 # anything reads a loading, and v absorbs the rest.
                 gz = (gh - gh.mean(0)) / (gh.std(0) + 1e-6)
-                loss = loss + TEACH_WEIGHT * (
+                loss = loss + teach_weight * (
                     (gz[mk] - t_tgt[tp[bi]][mk]) ** 2).mean()
             m.train(False)          # the barrier reads corpus rows, dropout off
-            si = torch.randint(len(tfeat), (SHALLOW_SAMPLES,), device=device)
+            si = torch.randint(len(tfeat), (shallow_samples,), device=device)
             short = torch.nn.functional.softplus(
                 o_tau - m.slope_logit(tfeat[si])).pow(2).mean()
-            loss = loss + SHALLOW_W * short
+            loss = loss + shallow_w * short
             m.train(True)
             opt.zero_grad(); loss.backward(); opt.step()
 
-        if (ep + 1) % CHECK_EVERY == 0:
+        if (ep + 1) % check_every == 0:
             m.train(False)
             with torch.no_grad():
                 pr, _, _ = m(tu, tfeat[tp])
@@ -699,8 +716,10 @@ def main():
                     pr[tr], ty[tr]))
                 bce_st = float(torch.nn.functional.binary_cross_entropy(
                     pr[i_stop], ty[i_stop]))
-            print(f"  epoch {ep + 1:4d}/{EPOCHS}  train {bce_tr:.4f}  "
+            print(f"  epoch {ep + 1:4d}/{epochs}  train {bce_tr:.4f}  "
                   f"stop {bce_st:.4f}", flush=True)
+            trace.append({"epoch": ep + 1, "train_bce": bce_tr,
+                          "stop_bce": bce_st})
 
     # --- outputs
     m.train(False)
@@ -729,13 +748,13 @@ def main():
           f"{np.percentile(a_np, [1, 50, 99]).round(3)} | at floor "
           f"{np.mean(a_np <= SLOPE_FLOOR * 1.01):.2%} | rating p[1,50,99] "
           f"{np.percentile(rating, [1, 50, 99]).round(2)}", flush=True)
-    report_bank_identity(g_np, bank_tgt, bank_ok, prob_idx)
+    identity = report_bank_identity(g_np, bank_tgt, bank_ok, prob_idx)
 
-    os.makedirs(OUT_DIR, exist_ok=True)
+    os.makedirs(out_dir, exist_ok=True)
     for s in SIZES:
         sel = [i for i, (sz, _) in enumerate(keys) if sz == s]
         tids = [keys[i][1] for i in sel]
-        sdir = os.path.join(OUT_DIR, str(s))
+        sdir = os.path.join(out_dir, str(s))
         os.makedirs(sdir, exist_ok=True)
         for name, arr in (("tsumego_ratings.csv", rating), ("tsumego_slopes.csv", a_np),
                           ("tsumego_floors.csv", c_np)):
@@ -749,16 +768,16 @@ def main():
     natt = pd.Series(user_idx).value_counts()
     pd.DataFrame({"profile": list(users.categories), "theta": theta,
                   "n_attempts": [int(natt.get(i, 0)) for i in range(n_users)]}
-                 ).to_csv(os.path.join(OUT_DIR, "user_theta.csv"), index=False)
-    with open(os.path.join(OUT_DIR, "rating_constants.json"), "w") as f:
+                 ).to_csv(os.path.join(out_dir, "user_theta.csv"), index=False)
+    with open(os.path.join(out_dir, "rating_constants.json"), "w") as f:
         json.dump({"fat_finger_rate": round(lam, 4), "slope_scale": 1.0,
                    "scale_fit": "none_shipped_as_fitted"}, f, indent=2)
 
-    os.makedirs(AXES_DIR, exist_ok=True)
+    os.makedirs(axes_dir, exist_ok=True)
     rows = {"tsumego_id": [k[1] for k in keys], "size": [k[0] for k in keys]}
     for k in range(K_AXES):
         rows[f"embed_{k}"] = g_np[:, k].round(5)
-    pd.DataFrame(rows).to_csv(os.path.join(AXES_DIR, "per_problem.csv"),
+    pd.DataFrame(rows).to_csv(os.path.join(axes_dir, "per_problem.csv"),
                               index=False)
     # The content hash the PWA's embedding-invalidation gate rides: it must move
     # when and only when the projection would give different vectors. So it is
@@ -788,7 +807,7 @@ def main():
     # would move the stamp on an addition that changed nothing about this fit,
     # and identity is exactly what the stamp exists to pin.
     bh = hashlib.sha256("\n".join(bank_spec).encode()).hexdigest()[:16]
-    np.savez_compressed(os.path.join(AXES_DIR, "axes.npz"),
+    np.savez_compressed(os.path.join(axes_dir, "axes.npz"),
                         W=m.g_lin.weight.detach().cpu().numpy(),
                         k=np.array(K_AXES),
                         trunk_width=np.array(m.g_lin.weight.shape[1]),
@@ -801,7 +820,7 @@ def main():
                 "g_lin": m.g_lin.state_dict(),
                 "b_mu": m.b_mu, "b_sd": m.b_sd,
                 "g_rms": m.g_rms.cpu()},
-               os.path.join(OUT_DIR, "mirt_model.pt"))
+               os.path.join(out_dir, "mirt_model.pt"))
     print(f"  wrote axes/per_problem.csv + axes.npz (K={K_AXES}, "
           f"embedding_version {ev}, bank {bh})", flush=True)
 
@@ -811,9 +830,9 @@ def main():
     # ship a shard whose two embedding sources disagree, which no client check
     # can catch because both files are individually well-formed. Moving it aside
     # makes packaging fail loudly instead.
-    pc = os.path.join(AXES_DIR, "per_cell")
+    pc = os.path.join(axes_dir, "per_cell")
     if os.path.isdir(pc):
-        stale = os.path.join(AXES_DIR, f"per_cell.stale-{int(time.time())}")
+        stale = os.path.join(axes_dir, f"per_cell.stale-{int(time.time())}")
         os.rename(pc, stale)
         print(f"  RETIRED the previous per_cell/ -> {os.path.basename(stale)}. "
               f"It was projected through the axis map this fit replaces, so "
@@ -821,7 +840,28 @@ def main():
               f"fits. Packaging needs a per-cell pass against THIS model before "
               f"it can run; delete the stale directory once that exists.",
               flush=True)
-    print(f"done in {time.time() - t0:.0f}s", flush=True)
+    elapsed = time.time() - t0
+    print(f"done in {elapsed:.0f}s", flush=True)
+    return {
+        "rows": int(len(df)), "users": int(n_users),
+        "base_rate": float(y.mean()), "stop_rows": int(is_stop.sum()),
+        "bank_taught": int(bank_ok.sum()), "bank_spec": list(bank_spec),
+        "lambda": lam, "elapsed_s": round(elapsed, 1),
+        "epochs": int(epochs), "trace": trace,
+        "slope_pct": {str(p): float(np.percentile(a_np, p))
+                      for p in (0.1, 1, 5, 50, 95, 99, 99.9)},
+        "slope_at_floor_share": float(np.mean(a_np <= SLOPE_FLOOR * 1.01)),
+        "rating_pct": {str(p): float(np.percentile(rating, p))
+                       for p in (0.1, 1, 5, 50, 95, 99, 99.9)},
+        "rating_min": float(rating.min()), "rating_max": float(rating.max()),
+        "floor_pct": {str(p): float(np.percentile(c_np, p))
+                      for p in (50, 99, 99.9)},
+        "identity": identity, "embedding_version": ev,
+    }
+
+
+def main():
+    run()
 
 
 if __name__ == "__main__":
