@@ -81,6 +81,29 @@ def require(condition, message):
         raise AblationError(message)
 
 
+def panel_budget(records):
+    """The epoch budget a panel's arms share, or a hard failure if they differ.
+
+    Producers used to pin this to the trainer's current `EPOCHS`, which breaks
+    the moment that constant moves: every arm already on disk becomes
+    unquotable, including panels whose internal contrast is untouched by the
+    change — and a panel's arms are only ever compared to EACH OTHER. So what is
+    required is that one panel ran at one budget.
+
+    A SMOKE ARM IS STILL REFUSED, by a different check that is already there:
+    every producer requires an arm's recorded config to equal its manifest
+    entry, and `run_panel --smoke-epochs` writes its override into the config.
+    A budget a manifest DECLARES is a deliberate arm — that is what a
+    budget-sweep panel is made of — and is allowed here.
+    """
+    budgets = {r["metrics"]["epochs"] for r in records.values()}
+    require(len(budgets) == 1,
+            f"the panel's arms ran at {sorted(budgets)} epochs — a contrast "
+            f"between arms stopped at different budgets is a contrast between "
+            f"the budgets as much as between the arms")
+    return budgets.pop()
+
+
 @dataclass(frozen=True)
 class Figure:
     """One measured number. `fmt` is a display format (see `render`); `note` is a

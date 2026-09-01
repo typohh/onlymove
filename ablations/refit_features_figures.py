@@ -90,7 +90,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-from ablations._figures import Figure, require  # noqa: E402
+from ablations._figures import Figure, require, panel_budget  # noqa: E402
 from pipeline.train_mirt import EPOCHS  # noqa: E402
 from utils.paths import DB_SQLITE  # noqa: E402
 from utils.rating.model_constants import PCA_DIM, PRODUCTION_BLOCKS  # noqa: E402
@@ -161,11 +161,12 @@ def load_panel():
         with open(path) as f:
             arms[key] = json.load(f)
 
+    budget = panel_budget(arms)
     for key, r in arms.items():
         arm, (width, seed) = ARMS[key], key
-        require(r["metrics"]["epochs"] == EPOCHS,
-                f"{arm} ran {r['metrics']['epochs']} epochs, not the production "
-                f"budget of {EPOCHS} — a smoke arm is not quotable")
+        require(r["metrics"]["epochs"] == budget,
+                f"{arm} ran {r['metrics']['epochs']} epochs against the panel's "
+                f"{budget} — one panel is one budget")
         require(r["metrics"]["trace"]
                 and r["metrics"]["trace"][-1]["epoch"] == EPOCHS,
                 f"{arm}'s convergence trace does not reach its budget")
