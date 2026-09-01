@@ -3332,6 +3332,300 @@
         "data_version": "f6fba7b749bc0ecb"
       }
     },
+    "regularization.both_off_cost_final_mnat": {
+      "value": 392.5114870071411,
+      "fmt": ".2f",
+      "text": "392.51",
+      "producer": "ablations.refit_regularization_figures",
+      "tier": "refit",
+      "note": "the same paired cost of removing dropout at both sites, read at the final epoch alone, where one checkpoint is one draw from the settled trace's own wander, averaged over the panel's 2 seeds",
+      "measured": {
+        "at": "2026-09-01T10:47:59Z",
+        "git": "df749025285",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "regularization.both_off_cost_mnat": {
+      "value": 407.8700589661551,
+      "fmt": ".2f",
+      "text": "407.87",
+      "producer": "ablations.refit_regularization_figures",
+      "tier": "refit",
+      "note": "the held-out-PROBLEM cost of removing dropout at both sites, against the shipped fit, in millinats over the last third of the budget and signed (positive = worse than shipped). PAIRED inside a seed — both arms hold aside the same problems — and then averaged over the panel's 2 seeds",
+      "measured": {
+        "at": "2026-09-01T10:47:59Z",
+        "git": "df749025285",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "regularization.both_off_cost_sign_consistent": {
+      "value": 1,
+      "fmt": "d",
+      "text": "1",
+      "producer": "ablations.refit_regularization_figures",
+      "tier": "refit",
+      "note": "1 when both seeds put the cost of removing dropout at both sites on the same side of zero on the last-third reading, 0 when they disagree — the two seeds being independent estimates of one paired delta. An indicator for a fig-guard beside a sentence naming that contrast's direction, not for a span",
+      "measured": {
+        "at": "2026-09-01T10:47:59Z",
+        "git": "df749025285",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "regularization.decay_both_off_cost_final_mnat": {
+      "value": 456.3095271587372,
+      "fmt": ".2f",
+      "text": "456.31",
+      "producer": "ablations.refit_regularization_figures",
+      "tier": "refit",
+      "note": "the same paired cost of weight decay in place of both dropouts, read at the final epoch alone, where one checkpoint is one draw from the settled trace's own wander, averaged over the panel's 2 seeds",
+      "measured": {
+        "at": "2026-09-01T10:47:59Z",
+        "git": "df749025285",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "regularization.decay_both_off_cost_mnat": {
+      "value": 421.60242677915215,
+      "fmt": ".2f",
+      "text": "421.60",
+      "producer": "ablations.refit_regularization_figures",
+      "tier": "refit",
+      "note": "the held-out-PROBLEM cost of weight decay in place of both dropouts, against the shipped fit, in millinats over the last third of the budget and signed (positive = worse than shipped). PAIRED inside a seed — both arms hold aside the same problems — and then averaged over the panel's 2 seeds",
+      "measured": {
+        "at": "2026-09-01T10:47:59Z",
+        "git": "df749025285",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "regularization.decay_both_off_cost_sign_consistent": {
+      "value": 1,
+      "fmt": "d",
+      "text": "1",
+      "producer": "ablations.refit_regularization_figures",
+      "tier": "refit",
+      "note": "1 when both seeds put the cost of weight decay in place of both dropouts on the same side of zero on the last-third reading, 0 when they disagree — the two seeds being independent estimates of one paired delta. An indicator for a fig-guard beside a sentence naming that contrast's direction, not for a span",
+      "measured": {
+        "at": "2026-09-01T10:47:59Z",
+        "git": "df749025285",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "regularization.decay_cost_final_mnat": {
+      "value": -6.307274103164673,
+      "fmt": ".2f",
+      "text": "-6.31",
+      "producer": "ablations.refit_regularization_figures",
+      "tier": "refit",
+      "note": "the same paired cost of adding weight decay with both dropouts intact, read at the final epoch alone, where one checkpoint is one draw from the settled trace's own wander, averaged over the panel's 2 seeds",
+      "measured": {
+        "at": "2026-09-01T10:47:59Z",
+        "git": "df749025285",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "regularization.decay_cost_mnat": {
+      "value": -6.1625029781076925,
+      "fmt": ".2f",
+      "text": "-6.16",
+      "producer": "ablations.refit_regularization_figures",
+      "tier": "refit",
+      "note": "the held-out-PROBLEM cost of adding weight decay with both dropouts intact, against the shipped fit, in millinats over the last third of the budget and signed (positive = worse than shipped). PAIRED inside a seed — both arms hold aside the same problems — and then averaged over the panel's 2 seeds",
+      "measured": {
+        "at": "2026-09-01T10:47:59Z",
+        "git": "df749025285",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "regularization.decay_cost_sign_consistent": {
+      "value": 1,
+      "fmt": "d",
+      "text": "1",
+      "producer": "ablations.refit_regularization_figures",
+      "tier": "refit",
+      "note": "1 when both seeds put the cost of adding weight decay with both dropouts intact on the same side of zero on the last-third reading, 0 when they disagree — the two seeds being independent estimates of one paired delta. An indicator for a fig-guard beside a sentence naming that contrast's direction, not for a span",
+      "measured": {
+        "at": "2026-09-01T10:47:59Z",
+        "git": "df749025285",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "regularization.decay_no_substitute": {
+      "value": 0,
+      "fmt": "d",
+      "text": "0",
+      "producer": "ablations.refit_regularization_figures",
+      "tier": "refit",
+      "note": "§1.5'S CLAIM as an indicator: 1 when weight decay does not substitute for dropout — the arm carrying decay with both dropouts off is NO BETTER held out than the arm carrying nothing at all, its cost against the shipped fit being at least the 'both_off' arm's, at every seed. 0 means decay recovered part of what dropout was doing at some seed. The claim is one-sided: it says decay buys back none of that cost, not that decay is itself harmful",
+      "measured": {
+        "at": "2026-09-01T10:47:59Z",
+        "git": "df749025285",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "regularization.decay_substitution_gap_mnat": {
+      "value": 13.73236781299704,
+      "fmt": ".2f",
+      "text": "13.73",
+      "producer": "ablations.refit_regularization_figures",
+      "tier": "refit",
+      "note": "the within-seed paired difference between the 'decay_both_off' arm and the 'both_off' arm, millinats on the last-third reading, averaged over the panel's 2 seeds. Positive means weight decay left a dropout-free fit WORSE than no regularization at all; around zero that it changed nothing; negative that it recovered some of what dropout was doing",
+      "measured": {
+        "at": "2026-09-01T10:47:59Z",
+        "git": "df749025285",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "regularization.input_off_cost_final_mnat": {
+      "value": 22.949546575546265,
+      "fmt": ".2f",
+      "text": "22.95",
+      "producer": "ablations.refit_regularization_figures",
+      "tier": "refit",
+      "note": "the same paired cost of removing the feature region's column dropout, read at the final epoch alone, where one checkpoint is one draw from the settled trace's own wander, averaged over the panel's 2 seeds",
+      "measured": {
+        "at": "2026-09-01T10:47:59Z",
+        "git": "df749025285",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "regularization.input_off_cost_mnat": {
+      "value": 20.352315194535954,
+      "fmt": ".2f",
+      "text": "20.35",
+      "producer": "ablations.refit_regularization_figures",
+      "tier": "refit",
+      "note": "the held-out-PROBLEM cost of removing the feature region's column dropout, against the shipped fit, in millinats over the last third of the budget and signed (positive = worse than shipped). PAIRED inside a seed — both arms hold aside the same problems — and then averaged over the panel's 2 seeds",
+      "measured": {
+        "at": "2026-09-01T10:47:59Z",
+        "git": "df749025285",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "regularization.input_off_cost_sign_consistent": {
+      "value": 1,
+      "fmt": "d",
+      "text": "1",
+      "producer": "ablations.refit_regularization_figures",
+      "tier": "refit",
+      "note": "1 when both seeds put the cost of removing the feature region's column dropout on the same side of zero on the last-third reading, 0 when they disagree — the two seeds being independent estimates of one paired delta. An indicator for a fig-guard beside a sentence naming that contrast's direction, not for a span",
+      "measured": {
+        "at": "2026-09-01T10:47:59Z",
+        "git": "df749025285",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "regularization.shipped_wander_range_mnat": {
+      "value": 6.225466728210449,
+      "fmt": ".2f",
+      "text": "6.23",
+      "producer": "ablations.refit_regularization_figures",
+      "tier": "refit",
+      "note": "the resolution floor every contrast here is read against: the shipped arm's own peak-to-peak held-out spread across the last third of ITS OWN run, millinats, averaged over the panel's 2 seeds. One configuration at one seed, so it is wander and nothing else",
+      "measured": {
+        "at": "2026-09-01T10:47:59Z",
+        "git": "df749025285",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "regularization.superadditive_every_seed": {
+      "value": 1,
+      "fmt": "d",
+      "text": "1",
+      "producer": "ablations.refit_regularization_figures",
+      "tier": "refit",
+      "note": "1 when that excess over additivity is positive at EVERY seed, 0 otherwise — never an average, which one seed could carry alone. The indicator §1.5's 'strongly super-additive' rests on; a fig-guard's figure, not a span's",
+      "measured": {
+        "at": "2026-09-01T10:47:59Z",
+        "git": "df749025285",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "regularization.superadditive_excess_final_mnat": {
+      "value": 354.4233739376068,
+      "fmt": ".2f",
+      "text": "354.42",
+      "producer": "ablations.refit_regularization_figures",
+      "tier": "refit",
+      "note": "the same excess over additivity read at the final epoch alone — `regularization.superadditive_excess_mnat` on one checkpoint instead of the last third, and therefore carrying the settled trace's full wander",
+      "measured": {
+        "at": "2026-09-01T10:47:59Z",
+        "git": "df749025285",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "regularization.superadditive_excess_mnat": {
+      "value": 373.14229200382044,
+      "fmt": ".2f",
+      "text": "373.14",
+      "producer": "ablations.refit_regularization_figures",
+      "tier": "refit",
+      "note": "THE EXCESS OVER ADDITIVITY, in millinats, and not a total: the held-out cost of removing dropout at BOTH sites MINUS the sum of the costs of removing it at each site alone, every term a within-seed paired cost against the shipped fit on the last-third reading, the excess formed inside a seed and then averaged over the panel's 2 seeds. Positive means the two removals compound (§1.5's super-additivity), zero that they merely add, negative that they overlap",
+      "measured": {
+        "at": "2026-09-01T10:47:59Z",
+        "git": "df749025285",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "regularization.trunk_off_cost_final_mnat": {
+      "value": 15.138566493988037,
+      "fmt": ".2f",
+      "text": "15.14",
+      "producer": "ablations.refit_regularization_figures",
+      "tier": "refit",
+      "note": "the same paired cost of removing the trunk's dropout, read at the final epoch alone, where one checkpoint is one draw from the settled trace's own wander, averaged over the panel's 2 seeds",
+      "measured": {
+        "at": "2026-09-01T10:47:59Z",
+        "git": "df749025285",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "regularization.trunk_off_cost_mnat": {
+      "value": 14.375451767798697,
+      "fmt": ".2f",
+      "text": "14.38",
+      "producer": "ablations.refit_regularization_figures",
+      "tier": "refit",
+      "note": "the held-out-PROBLEM cost of removing the trunk's dropout, against the shipped fit, in millinats over the last third of the budget and signed (positive = worse than shipped). PAIRED inside a seed — both arms hold aside the same problems — and then averaged over the panel's 2 seeds",
+      "measured": {
+        "at": "2026-09-01T10:47:59Z",
+        "git": "df749025285",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "regularization.trunk_off_cost_sign_consistent": {
+      "value": 1,
+      "fmt": "d",
+      "text": "1",
+      "producer": "ablations.refit_regularization_figures",
+      "tier": "refit",
+      "note": "1 when both seeds put the cost of removing the trunk's dropout on the same side of zero on the last-third reading, 0 when they disagree — the two seeds being independent estimates of one paired delta. An indicator for a fig-guard beside a sentence naming that contrast's direction, not for a span",
+      "measured": {
+        "at": "2026-09-01T10:47:59Z",
+        "git": "df749025285",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
     "schedule.between_run_range_constant_mnat": {
       "value": 8.091390132904053,
       "fmt": ".1f",
