@@ -45,6 +45,7 @@ PRODUCERS = (
     "refit_lr_figures",
     "refit_seeds_figures",
     "refit_penalty_figures",
+    "refit_determinism_figures",
 )
 
 

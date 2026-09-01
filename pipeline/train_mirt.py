@@ -526,6 +526,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         shallow_tau=SHALLOW_TAU,
         shallow_w=SHALLOW_W, shallow_samples=SHALLOW_SAMPLES,
         teach_weight=TEACH_WEIGHT, stop_row_frac=STOP_ROW_FRAC,
+        pca_dim=PCA_DIM, blocks=PRODUCTION_BLOCKS, stop_unit="row",
         out_dir=OUT_DIR, axes_dir=AXES_DIR):
     """The shipped fit, callable. Every keyword defaults to the production
     constant above, so `run()` IS the production run — `main()` passes nothing,
@@ -540,7 +541,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
     t0 = time.time()
 
     feat, keys, key_idx, input_dim = load_joint_mirt_features(
-        SIZES, PCA_DIM, seed, blocks=PRODUCTION_BLOCKS)
+        SIZES, pca_dim, seed, blocks=blocks)
     fdim = feat.shape[1]
     print(f"loaded in {time.time() - t0:.0f}s: {len(keys)} problems, "
           f"feat {fdim} (dropout region {input_dim})", flush=True)
@@ -577,7 +578,18 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
     # would pick the wrong epoch — held-out quality peaks hundreds of epochs
     # before the training loss flattens.
     rng = np.random.default_rng(seed)
-    is_stop = rng.random(len(df)) < stop_row_frac
+    if stop_unit == "problem":
+        # Held-out PROBLEMS rather than held-out rows: every row of a chosen
+        # problem is set aside together, so its parameters come from the trunk
+        # alone and the score reads generalization to unseen problems. Only an
+        # amortized model can be asked this — free per-item parameters would
+        # leave a held-out problem undefined rather than merely unfitted. It is
+        # what a claim about the FEATURE side has to be scored on; the row split
+        # below, which ships, is a convergence detector and leaves every problem
+        # partly trained.
+        is_stop = (rng.random(len(keys)) < stop_row_frac)[prob_idx]
+    else:
+        is_stop = rng.random(len(df)) < stop_row_frac
     tr = torch.tensor(np.where(~is_stop)[0], device=device)
     i_stop = torch.tensor(np.where(is_stop)[0], device=device)
     print(f"  stop signal: {int(is_stop.sum())} rows held aside", flush=True)

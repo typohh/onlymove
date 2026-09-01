@@ -1,9 +1,12 @@
 {
   "panel": "barrier",
-  "description": "methodology 1.7 — the divergence barrier: the shipped fit against the barrier removed and the barrier at ten times its weight. The claims: without it slopes collapse onto the clamp and derived ratings blow out over hundreds of units at a >20 mnat held-out cost; at 10x the rating range compresses toward nothing.",
+  "description": "methodology 1.7 — the divergence barrier: the shipped fit against the barrier removed and the barrier at ten times its weight. The claims: without it slopes collapse onto the clamp and derived ratings blow out over hundreds of units at a >20 mnat held-out cost; at 10x the rating range compresses toward nothing. EVERY ARM RUNS AT TWO SEEDS. The shipped configuration's own held-out trace wanders over ten millinats across the last third of its budget, which is wider than the contrasts this panel is asked about, so a single arm per configuration cannot resolve them: within one seed the arms hold aside the same stop rows and the delta is paired, and the two seeds are two independent paired estimates whose agreement in SIGN is what the producer quotes a contrast on.",
   "arms": {
     "shipped": {},
     "barrier_off": {"shallow_w": 0.0},
-    "barrier_10x": {"shallow_w": 3.0}
+    "barrier_10x": {"shallow_w": 3.0},
+    "shipped_s1": {"seed": 1},
+    "barrier_off_s1": {"shallow_w": 0.0, "seed": 1},
+    "barrier_10x_s1": {"shallow_w": 3.0, "seed": 1}
   }
 }

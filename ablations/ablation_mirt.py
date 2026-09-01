@@ -12,8 +12,11 @@ production run at the same snapshot).
 
 KNOBS ARE CURATED, one flag per quantity a refit-tier claim in
 `docs/methodology.md` turns on, added cluster by cluster as their producers are
-written — never a general override surface. v1 carries the barrier cluster
-(§1.7) plus the seed.
+written — never a general override surface. Present clusters: the seed and the
+budget, the slope barrier (§1.7), the learning-rate split (§1.8), the
+orthogonality penalty and the taught pull (§1.5, §1.14), and the feature layout
+(§1.3: the activation width, which blocks the trunk sees, and whether the
+held-aside fraction is drawn over rows or over whole problems).
 
 An arm writes:
 
@@ -64,12 +67,18 @@ def _sha16(path):
     return h.hexdigest()[:16]
 
 
-def snapshot_pins():
+def snapshot_pins(cfg=None):
     """What an arm was measured against. A producer compares these across the
     arms of a panel and against the current tree: a `fetch_database` between
     arms changes the attempt log and the stop-row draw, which voids every
     paired comparison — the same rule `docs/mirt_benchmark.md` states for its
-    own tables."""
+    own tables.
+
+    The feature-layout pins carry the arm's EFFECTIVE values, not the tree's
+    constants, so an arm that sweeps one of them is pinned to what it ran with.
+    A producer for such a panel is then the thing that decides which pin is
+    allowed to differ across its arms — the default of requiring them all equal
+    stays right for every panel that sweeps something else."""
     con = sqlite3.connect(f"file:{DB_SQLITE}?mode=ro", uri=True)
     try:
         db_max_id = int(con.execute(
@@ -80,13 +89,15 @@ def snapshot_pins():
                          cwd=PROJECT_ROOT, capture_output=True, text=True,
                          check=True).stdout.strip()
     import torch
+    cfg = cfg or {}
     return {
         "db_max_id": db_max_id,
         "git": git,
         "labels_sha": _sha16(os.path.join(PROJECT_ROOT, "axes", "labels.json")),
         "proxies_sha": _sha16(os.path.join(PROJECT_ROOT, "axes",
                                            "motif_proxies.npz")),
-        "blocks": PRODUCTION_BLOCKS, "pca_dim": int(PCA_DIM),
+        "blocks": str(cfg.get("blocks", PRODUCTION_BLOCKS)),
+        "pca_dim": int(cfg.get("pca_dim", PCA_DIM)),
         "k_axes": int(K_AXES),
         "torch": torch.__version__,
         "gpu": (torch.cuda.get_device_name(0)
@@ -105,7 +116,7 @@ def run_arm(panel, arm, cfg, force=False):
             f"mean that, or use a new arm name.")
     os.makedirs(arm_dir, exist_ok=True)
 
-    pins = snapshot_pins()
+    pins = snapshot_pins(cfg)
     metrics = train_mirt.run(out_dir=os.path.join(arm_dir, "ratings"),
                              axes_dir=os.path.join(arm_dir, "axes"), **cfg)
     record = {"panel": panel, "arm": arm, "config": cfg,
@@ -155,11 +166,26 @@ def main(argv=None):
     ap.add_argument("--teach-weight", type=float, default=None,
                     help="the pull toward the taught rule columns (production "
                          f"{train_mirt.TEACH_WEIGHT}); 0 frees the basis")
+    # --- the feature cluster (methodology §1.3) ---
+    ap.add_argument("--pca-dim", type=int, default=None,
+                    help="joint-PCA activation width (production "
+                         f"{PCA_DIM})")
+    ap.add_argument("--blocks", default=None,
+                    help="which per-problem blocks the trunk sees, as "
+                         f"utils.rating.features names them (production "
+                         f"{PRODUCTION_BLOCKS!r}; 'all' adds the "
+                         f"answer-derived blocks)")
+    ap.add_argument("--stop-unit", choices=("row", "problem"), default=None,
+                    help="what the held-aside fraction is drawn over. 'row' "
+                         "ships and is a convergence detector; 'problem' holds "
+                         "whole problems out, which is what a claim about the "
+                         "FEATURE side has to be scored on")
     args = ap.parse_args(argv)
 
     cfg = {}
     for flag in ("seed", "epochs", "shallow_w", "shallow_tau", "lr_net",
-                 "lr_field", "ortho_rating", "ortho_mode", "teach_weight"):
+                 "lr_field", "ortho_rating", "ortho_mode", "teach_weight",
+                 "pca_dim", "blocks", "stop_unit"):
         v = getattr(args, flag)
         if v is not None:
             cfg[flag] = v

@@ -1,10 +1,14 @@
 {
   "panel": "lr",
-  "description": "methodology 1.8 / 3.5 — the learning-rate split. Production trains the shared network at 3e-4 and the free per-user fields at 1e-2, a ratio of about 33x. The claims: the split is MANDATORY, because one shared rate diverges late and in evaluation mode; what the grid measures is the RATIO rather than either value, monotone and saturating near 30x, with below 10x losing 2.5-5 mnat; and past saturation the remaining choice is the network's own rate, where 1e-4 and the shipped 3e-4 tie on the fit while the shipped rate reaches that fit in half the epochs. Every arm runs at the production seed, so all four hold aside the SAME stop rows and every cross-arm held-out delta is paired.",
+  "description": "methodology 1.8 / 3.5 — the learning-rate split. Production trains the shared network at 3e-4 and the free per-user fields at 1e-2, a ratio of about 33x. The claims: the split is MANDATORY, because one shared rate diverges late and in evaluation mode; what the grid measures is the RATIO rather than either value, monotone and saturating near 30x, with below 10x losing 2.5-5 mnat; and past saturation the remaining choice is the network's own rate, where 1e-4 and the shipped 3e-4 tie on the fit while the shipped rate reaches that fit in half the epochs. EVERY ARM RUNS AT TWO SEEDS. Within one seed all arms hold aside the SAME stop rows, so each cross-arm held-out delta is paired; the second seed is an independent repeat of that paired delta, and it is there because the shipped configuration's own trace wanders wider than the contrasts asked about, so one arm per configuration resolves none of them.",
   "arms": {
     "shipped": {},
     "ratio1x": {"lr_field": 0.0003},
     "ratio10x": {"lr_field": 0.003},
-    "net_slow": {"lr_net": 0.0001}
+    "net_slow": {"lr_net": 0.0001},
+    "shipped_s1": {"seed": 1},
+    "ratio1x_s1": {"lr_field": 0.0003, "seed": 1},
+    "ratio10x_s1": {"lr_field": 0.003, "seed": 1},
+    "net_slow_s1": {"lr_net": 0.0001, "seed": 1}
   }
 }

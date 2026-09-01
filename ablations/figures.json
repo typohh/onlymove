@@ -140,6 +140,76 @@
         "data_version": "f6fba7b749bc0ecb"
       }
     },
+    "barrier.off_rating_high": {
+      "value": 143.78345288797283,
+      "fmt": ".0f",
+      "text": "144",
+      "producer": "ablations.refit_barrier_figures",
+      "tier": "refit",
+      "note": "…and the 99.9th percentile, the high side",
+      "measured": {
+        "at": "2026-09-01T03:05:50Z",
+        "git": "aa809484f64",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "barrier.off_rating_low": {
+      "value": -4.81705043369832,
+      "fmt": ".0f",
+      "text": "-5",
+      "producer": "ablations.refit_barrier_figures",
+      "tier": "refit",
+      "note": "0.1th percentile of the derived rating with the slope barrier removed — the low side of the blow-out",
+      "measured": {
+        "at": "2026-09-01T03:05:50Z",
+        "git": "aa809484f64",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "barrier.off_slope_at_floor_pct": {
+      "value": 0.005456697949315758,
+      "fmt": "%.0f",
+      "text": "1",
+      "producer": "ablations.refit_barrier_figures",
+      "tier": "refit",
+      "note": "share of slopes on the clamp with the barrier removed",
+      "measured": {
+        "at": "2026-09-01T03:05:50Z",
+        "git": "aa809484f64",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "barrier.off_stop_cost_mnat": {
+      "value": 5.644857883453369,
+      "fmt": ".0f",
+      "text": "6",
+      "producer": "ablations.refit_barrier_figures",
+      "tier": "refit",
+      "note": "held-out (stop-split) cost of removing the barrier, millinats, paired rows against the shipped arm",
+      "measured": {
+        "at": "2026-09-01T03:05:50Z",
+        "git": "aa809484f64",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "barrier.tenx_rating_span": {
+      "value": 24.927197185517436,
+      "fmt": ".1f",
+      "text": "24.9",
+      "producer": "ablations.refit_barrier_figures",
+      "tier": "refit",
+      "note": "p0.1..p99.9 span of the derived rating at ten times the barrier weight — the compression the weight is swept against",
+      "measured": {
+        "at": "2026-09-01T03:05:50Z",
+        "git": "aa809484f64",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
     "cast.contrast_finer_one_in": {
       "value": 114.21438553131532,
       "fmt": "~10",
@@ -490,6 +560,90 @@
         "data_version": "f6fba7b749bc0ecb"
       }
     },
+    "determinism.repeat_files_compared": {
+      "value": 11,
+      "fmt": "d",
+      "text": "11",
+      "producer": "ablations.refit_determinism_figures",
+      "tier": "refit",
+      "note": "output files compared across all repeats — the size of the check behind the zero above",
+      "measured": {
+        "at": "2026-09-01T03:16:17Z",
+        "git": "aa809484f64+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "determinism.repeat_files_differing": {
+      "value": 0,
+      "fmt": "d",
+      "text": "0",
+      "producer": "ablations.refit_determinism_figures",
+      "tier": "refit",
+      "note": "the same over EVERY output a run writes, the model checkpoint and the axis artifacts included",
+      "measured": {
+        "at": "2026-09-01T03:16:17Z",
+        "git": "aa809484f64+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "determinism.repeat_pairs": {
+      "value": 1,
+      "fmt": "d",
+      "text": "1",
+      "producer": "ablations.refit_determinism_figures",
+      "tier": "refit",
+      "note": "independent repeats found among the refit panels' arms — pairs of separate processes that ran one configuration on one machine at one revision",
+      "measured": {
+        "at": "2026-09-01T03:16:17Z",
+        "git": "aa809484f64+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "determinism.repeat_problem_files_differing": {
+      "value": 0,
+      "fmt": "d",
+      "text": "0",
+      "producer": "ablations.refit_determinism_figures",
+      "tier": "refit",
+      "note": "per-problem output files that differ between the two runs of a repeat. §1.8's bitwise claim is this being zero, which is what a fig-guard holds it to, not a number worth quoting",
+      "measured": {
+        "at": "2026-09-01T03:16:17Z",
+        "git": "aa809484f64+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "determinism.repeat_problems": {
+      "value": 220463.0,
+      "fmt": "~1000",
+      "text": "220,000",
+      "producer": "ablations.refit_determinism_figures",
+      "tier": "refit",
+      "note": "problems whose full parameter row was compared in each repeat",
+      "measured": {
+        "at": "2026-09-01T03:16:17Z",
+        "git": "aa809484f64+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "determinism.repeat_traces_identical": {
+      "value": 1,
+      "fmt": "d",
+      "text": "1",
+      "producer": "ablations.refit_determinism_figures",
+      "tier": "refit",
+      "note": "1 when every repeat's held-out convergence trace matches value for value, 0 otherwise — the training path itself repeating, not only what it wrote",
+      "measured": {
+        "at": "2026-09-01T03:16:17Z",
+        "git": "aa809484f64+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
     "draw.info_argmax_enrichment": {
       "value": 2.874427042022845,
       "fmt": ".1f",
@@ -640,6 +794,118 @@
       "measured": {
         "at": "2026-08-31T21:32:09Z",
         "git": "da7c25dfaff+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "lr.net_slow_converge_epoch": {
+      "value": 1210,
+      "fmt": "d",
+      "text": "1210",
+      "producer": "ablations.refit_lr_figures",
+      "tier": "refit",
+      "note": "the same epoch for the three-times-slower network",
+      "measured": {
+        "at": "2026-09-01T03:05:56Z",
+        "git": "aa809484f64+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "lr.net_slow_converge_ratio": {
+      "value": 0.5,
+      "fmt": ".1f",
+      "text": "0.5",
+      "producer": "ablations.refit_lr_figures",
+      "tier": "refit",
+      "note": "how many times longer the slower network takes to reach its own plateau, at the same held-out margin",
+      "measured": {
+        "at": "2026-09-01T03:05:56Z",
+        "git": "aa809484f64+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "lr.net_slow_cost_mnat": {
+      "value": 12.583136558532715,
+      "fmt": ".2f",
+      "text": "12.58",
+      "producer": "ablations.refit_lr_figures",
+      "tier": "refit",
+      "note": "held-out cost of a three-times-slower network at the shipped field rate, millinats, paired stop rows; signed, positive means the slower network is the worse fit. The claim is a tie",
+      "measured": {
+        "at": "2026-09-01T03:05:56Z",
+        "git": "aa809484f64+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "lr.ratio10x_cost_mnat": {
+      "value": -2.1907687187194824,
+      "fmt": ".1f",
+      "text": "-2.2",
+      "producer": "ablations.refit_lr_figures",
+      "tier": "refit",
+      "note": "held-out cost at a ten-fold field/net ratio against the shipped ~33-fold, millinats, paired stop rows — the bottom of the saturating region",
+      "measured": {
+        "at": "2026-09-01T03:05:56Z",
+        "git": "aa809484f64+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "lr.shared_rate_cost_mnat": {
+      "value": -4.559308290481567,
+      "fmt": ".0f",
+      "text": "-5",
+      "producer": "ablations.refit_lr_figures",
+      "tier": "refit",
+      "note": "held-out (stop-split) cost of one shared rate against the shipped split, millinats, at the last checkpoint both traces are finite — PAIRED: every arm of this panel runs at the production seed and so holds aside the same stop rows",
+      "measured": {
+        "at": "2026-09-01T03:05:56Z",
+        "git": "aa809484f64+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "lr.shared_rate_diverge_epoch": {
+      "value": 0,
+      "fmt": "d",
+      "text": "0",
+      "producer": "ablations.refit_lr_figures",
+      "tier": "refit",
+      "note": "the epoch at which the single-shared-rate arm first met that test; 0 means it never did",
+      "measured": {
+        "at": "2026-09-01T03:05:56Z",
+        "git": "aa809484f64+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "lr.shared_rate_diverged": {
+      "value": 0,
+      "fmt": "d",
+      "text": "0",
+      "producer": "ablations.refit_lr_figures",
+      "tier": "refit",
+      "note": "1 when the single-shared-rate arm (field rate pulled onto the network's) diverged, 0 when it did not — non-finite, or 20 millinats above its own running best held-out score. An indicator for a fig-guard, not a span",
+      "measured": {
+        "at": "2026-09-01T03:05:56Z",
+        "git": "aa809484f64+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "lr.shipped_converge_epoch": {
+      "value": 2420,
+      "fmt": "d",
+      "text": "2420",
+      "producer": "ablations.refit_lr_figures",
+      "tier": "refit",
+      "note": "first epoch from which the shipped arm's held-out score never again rises 1 millinat above its own final value — the band §1.8 says the fit settles into",
+      "measured": {
+        "at": "2026-09-01T03:05:56Z",
+        "git": "aa809484f64+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
