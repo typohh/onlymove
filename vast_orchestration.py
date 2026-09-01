@@ -1959,9 +1959,21 @@ def cmd_ablate(args):
         live = _ablate_running(base_ssh)
         if live:
             remote_step = get_instance_step(inst_id) or "?"
-            print(f"Instance {inst_id} is already running a panel (registered as "
-                  f"'{remote_step}'). Not relaunching; attaching to the results "
-                  f"pull.")
+            # ATTACHING IS ONLY RIGHT FOR THE PANEL THAT IS ACTUALLY RUNNING.
+            # Attaching to a different one polls ITS log, which still holds the
+            # terminal line of whenever it last ran — so the run returns
+            # instantly, reports that stale verdict as this invocation's, and
+            # the arms it was asked for are never trained. A resumed panel is
+            # exactly the case where that log is populated and wrong.
+            if remote_step != step:
+                print(f"Instance {inst_id} is running '{remote_step}', not "
+                      f"'{step}'. Refusing to attach: this panel's log still "
+                      f"holds its LAST run's verdict, and polling it would "
+                      f"report that as this run's answer. Wait for the running "
+                      f"panel, or `stop {inst_id}` to end it.")
+                return 1
+            print(f"Instance {inst_id} is already running this panel. Not "
+                  f"relaunching; attaching to the results pull.")
         elif _is_step_running(base_ssh):
             print(f"Instance {inst_id} is busy with another pipeline step. "
                   f"Run 'stop' first.")
