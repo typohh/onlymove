@@ -16,7 +16,9 @@ written — never a general override surface. Present clusters: the seed and the
 budget, the slope barrier (§1.7), the learning-rate split (§1.8), the
 orthogonality penalty and the taught pull (§1.5, §1.14), and the feature layout
 (§1.3: the activation width, which blocks the trunk sees, and whether the
-held-aside fraction is drawn over rows or over whole problems).
+held-aside fraction is drawn over rows or over whole problems), the axis count
+(§1.14), and the two dropout sites with the weight decay §1.5 rejects as their
+substitute.
 
 An arm writes:
 
@@ -181,6 +183,18 @@ def main(argv=None):
                          f"components of axes/labels.json, so a sweep varies "
                          f"only the count. A count above what labels.json lists "
                          f"halts, since there is no rule to teach the extra axis")
+    ap.add_argument("--dropout", type=float, default=None,
+                    help="the TRUNK's dropout rate (production "
+                         f"{train_mirt.DROPOUT}); 0 removes it")
+    ap.add_argument("--input-dropout", type=float, default=None,
+                    help="COLUMN dropout over the wide input region "
+                         f"(production {train_mirt.INPUT_DROPOUT}); 0 removes "
+                         f"it. Separate from the trunk's because 1.5 holds the "
+                         f"two sites to suppress different failure modes")
+    ap.add_argument("--weight-decay", type=float, default=None,
+                    help="Adam weight decay (production 0 — none ships); the "
+                         "knob exists to re-measure whether a norm penalty "
+                         "substitutes for dropout")
     ap.add_argument("--stop-unit", choices=("row", "problem"), default=None,
                     help="what the held-aside fraction is drawn over. 'row' "
                          "ships and is a convergence detector; 'problem' holds "
@@ -191,7 +205,8 @@ def main(argv=None):
     cfg = {}
     for flag in ("seed", "epochs", "shallow_w", "shallow_tau", "lr_net",
                  "lr_field", "ortho_rating", "ortho_mode", "teach_weight",
-                 "pca_dim", "blocks", "stop_unit", "k_axes"):
+                 "pca_dim", "blocks", "stop_unit", "k_axes",
+                 "dropout", "input_dropout", "weight_decay"):
         v = getattr(args, flag)
         if v is not None:
             cfg[flag] = v

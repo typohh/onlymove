@@ -121,7 +121,8 @@ if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 from utils.rating.model_constants import (  # noqa: E402
-    CALIBRATION_P, EPS, GAUGE_MOM, INPUT_DROPOUT, LAPSE_CAP, LAPSE_INIT,
+    CALIBRATION_P, DROPOUT, EPS, GAUGE_MOM, INPUT_DROPOUT, LAPSE_CAP,
+    LAPSE_INIT,
     K_AXES, PCA_DIM, PRODUCTION_BLOCKS, SEED, SIZES, SLOPE_FLOOR,
     clear_logit_vec)
 from utils.rating.features import (  # noqa: E402
@@ -230,16 +231,21 @@ class JointMIRT(nn.Module):
     corpus has no attempts at all, so free per-item parameters cannot price it.
     """
 
-    def __init__(self, fdim, n_users, input_dim, seed, k_axes=K_AXES):
+    def __init__(self, fdim, n_users, input_dim, seed, k_axes=K_AXES,
+                 dropout=DROPOUT, input_dropout=INPUT_DROPOUT):
         super().__init__()
         self.k_axes = int(k_axes)
+        # The two dropout sites are separate parameters because they suppress
+        # different failure modes and are reasoned about separately (1.5); the
+        # trunk's is passed on, the input region's is read by _drop below.
+        self.input_dropout = float(input_dropout)
         torch.manual_seed(seed)
         self.input_dim = int(input_dim)
 
         # theta before the trunk so the RNG draw order is fixed. nn.Embedding
         # initializes to N(0, 1) itself, so there is nothing to re-draw.
         self.theta = nn.Embedding(n_users, 1)
-        self.trunk, d = build_trunk(fdim)
+        self.trunk, d = build_trunk(fdim, dropout=dropout)
         self.head = nn.Linear(d, 3)                     # difficulty, slope, floor
         # The axis map, on the TRUNK's representation. Same linear map, different
         # input: it adds no capacity (fewer parameters than reading the 212
@@ -301,10 +307,11 @@ class JointMIRT(nn.Module):
         board-size indicator sits past that region, since it identifies the board
         rather than the problem, so a new wide block belongs INSIDE input_dim and
         is then masked automatically."""
-        if not self.training or INPUT_DROPOUT <= 0.0 or self.input_dim <= 0:
+        if (not self.training or self.input_dropout <= 0.0
+                or self.input_dim <= 0):
             return feat
         keep = (torch.rand(len(feat), self.input_dim, device=feat.device)
-                >= INPUT_DROPOUT).float() / (1.0 - INPUT_DROPOUT)
+                >= self.input_dropout).float() / (1.0 - self.input_dropout)
         return torch.cat([feat[:, :self.input_dim] * keep,
                           feat[:, self.input_dim:]], dim=1)
 
@@ -530,7 +537,8 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         shallow_w=SHALLOW_W, shallow_samples=SHALLOW_SAMPLES,
         teach_weight=TEACH_WEIGHT, stop_row_frac=STOP_ROW_FRAC,
         pca_dim=PCA_DIM, blocks=PRODUCTION_BLOCKS, stop_unit="row",
-        k_axes=K_AXES, out_dir=OUT_DIR, axes_dir=AXES_DIR):
+        k_axes=K_AXES, dropout=DROPOUT, input_dropout=INPUT_DROPOUT,
+        weight_decay=0.0, out_dir=OUT_DIR, axes_dir=AXES_DIR):
     """The shipped fit, callable. Every keyword defaults to the production
     constant above, so `run()` IS the production run — `main()` passes nothing,
     keeping the trainer flag-free — and `ablations.ablation_mirt` is the only
@@ -604,8 +612,13 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
           f"directions, taught at a constant weight of {teach_weight}",
           flush=True)
 
-    m = JointMIRT(fdim, n_users, input_dim, seed, k_axes).to(device)
-    opt = torch.optim.Adam(m.param_groups(lr_net, lr_field))
+    m = JointMIRT(fdim, n_users, input_dim, seed, k_axes,
+                  dropout=dropout, input_dropout=input_dropout).to(device)
+    # Adam with no decay is what ships; the decay knob exists so 1.5's claim
+    # that a norm penalty does not substitute for dropout can be re-measured,
+    # and at 0 this is the same optimizer it always was.
+    opt = torch.optim.Adam(m.param_groups(lr_net, lr_field),
+                           weight_decay=weight_decay)
     o_tau = float(np.log(np.expm1(shallow_tau)))
     n = len(tr)
     trace = []
