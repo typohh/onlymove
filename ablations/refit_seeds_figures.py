@@ -399,11 +399,15 @@ def main():
           f"min {m['taught_min']:.2f}")
     print(f"  the pull is worth {m['gap']:+.2f} in mean cross-seed agreement")
     print()
-    print("  no held-out delta is quotable from this panel: the arms run at "
-          "different seeds,")
-    print(f"  so they hold aside different stop {m['unit_noun']} and the "
-          f"comparison would "
-          "be unpaired.")
+    print(f"  what teaching costs, PAIRED within a seed (taught minus untaught "
+          f"on the same held-aside {m['unit_noun']}), millinats:")
+    for sd, c in enumerate(m["cost_per_seed"]):
+        print(f"    seed {sd}: {c:+.2f} on the tail reading")
+    print(f"    mean {m['cost_tail']:+.2f} tail, {m['cost_final']:+.2f} final; "
+          f"sign consistent across seeds: "
+          f"{'yes' if m['cost_consistent'] else 'NO'}")
+    print(f"  no cross-seed delta is quotable: arms at different seeds hold "
+          f"aside different {m['unit_noun']}.")
 
 
 if __name__ == "__main__":
