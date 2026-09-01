@@ -694,12 +694,19 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
             # 0.105. The whole-axis figure rises slightly under this and that is
             # expected — it is no longer the statistic being optimised, and it was
             # never the one that mattered.
-            if ortho_mode == "per_tail":
+            if ortho_mode in ("per_tail", "rating_only"):
+                # `rating_only` keeps the per-tail form and narrows the TARGET
+                # to the rating column alone (rsf is stacked rating, slope,
+                # floor). It is the comparison arm for 1.5's claim that closing
+                # the rating channel by itself only displaces the leak, each
+                # axis then finding a different shipped quantity to absorb —
+                # which is the whole reason the penalty names all three.
+                tgt = tz if ortho_mode == "per_tail" else tz[:, :1]
                 for _sg in (1.0, -1.0):
                     W = _tail_w(torch, _sg * gh, TAIL_HINGE)
                     W = W - W.mean(dim=0, keepdim=True)
                     W = W / (W.norm(dim=0, keepdim=True) + 1e-9)
-                    loss = loss + ortho_rating * (W.T @ tz).pow(2).sum()
+                    loss = loss + ortho_rating * (W.T @ tgt).pow(2).sum()
             elif ortho_mode == "whole":
                 # The whole-axis form, kept ONLY as a comparison arm: a linear
                 # statistic that a symmetric tail dependence satisfies at zero,

@@ -161,10 +161,14 @@ def main(argv=None):
     ap.add_argument("--ortho-rating", type=float, default=None,
                     help="the rating-orthogonality weight (production "
                          f"{train_mirt.ORTHO_RATING}); 0 disables it")
-    ap.add_argument("--ortho-mode", choices=("per_tail", "whole", "off"),
+    ap.add_argument("--ortho-mode",
+                    choices=("per_tail", "whole", "off", "rating_only"),
                     default=None,
-                    help="per_tail is what ships; whole is the linear-statistic "
-                         "comparison arm; off removes the term")
+                    help="per_tail is what ships; whole is the "
+                         "linear-statistic comparison arm; rating_only keeps "
+                         "the per-tail form but narrows the target to the "
+                         "rating alone, which is the displacement arm; off "
+                         "removes the term")
     ap.add_argument("--teach-weight", type=float, default=None,
                     help="the pull toward the taught rule columns (production "
                          f"{train_mirt.TEACH_WEIGHT}); 0 frees the basis")
