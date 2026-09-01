@@ -17,3 +17,4 @@ penalty
 blocks
 regularization
 axis_count
+regularization decay_net_s0 decay_net_s1

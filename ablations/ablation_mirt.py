@@ -209,6 +209,12 @@ def main(argv=None):
                     help="Adam weight decay (production 0 — none ships); the "
                          "knob exists to re-measure whether a norm penalty "
                          "substitutes for dropout")
+    ap.add_argument("--weight-decay-fields", type=float, default=None,
+                    help="weight decay for the FREE PER-USER FIELDS alone "
+                         "(default: follow --weight-decay). 0 with a nonzero "
+                         "--weight-decay decays the network only, separating "
+                         "a regularization gain from the ability-ridge "
+                         "re-gauging that decaying the fields causes")
     ap.add_argument("--lr-schedule", choices=("constant", "cosine"),
                     default=None,
                     help=f"{train_mirt.LR_SCHEDULE} ships: cosine decays both "
@@ -239,6 +245,7 @@ def main(argv=None):
                  "lr_field", "ortho_rating", "ortho_mode", "teach_weight",
                  "pca_dim", "blocks", "stop_unit", "k_axes",
                  "dropout", "input_dropout", "weight_decay",
+                 "weight_decay_fields",
                  "lr_schedule", "split_seed", "pca_seed"):
         v = getattr(args, flag)
         if v is not None:

@@ -552,7 +552,8 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         pca_dim=PCA_DIM, blocks=PRODUCTION_BLOCKS, stop_unit="row",
         split_seed=None, pca_seed=None, lr_schedule=LR_SCHEDULE,
         k_axes=K_AXES, dropout=DROPOUT, input_dropout=INPUT_DROPOUT,
-        weight_decay=0.0, out_dir=OUT_DIR, axes_dir=AXES_DIR):
+        weight_decay=0.0, weight_decay_fields=None,
+        out_dir=OUT_DIR, axes_dir=AXES_DIR):
     """The shipped fit, callable. Every keyword defaults to the production
     constant above, so `run()` IS the production run — `main()` passes nothing,
     keeping the trainer flag-free — and `ablations.ablation_mirt` is the only
@@ -643,8 +644,17 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
     # Adam with no decay is what ships; the decay knob exists so 1.5's claim
     # that a norm penalty does not substitute for dropout can be re-measured,
     # and at 0 this is the same optimizer it always was.
-    opt = torch.optim.Adam(m.param_groups(lr_net, lr_field),
-                           weight_decay=weight_decay)
+    # Weight decay is set PER GROUP. Adam's single argument reaches the free
+    # per-user fields too — an L2 on ability, which the shipped design leaves
+    # unpenalized, and which re-gauges the whole fit (abilities shrink, slopes
+    # inflate to compensate). `weight_decay_fields` exists so an ablation can
+    # decay the network alone; None means the fields follow `weight_decay`,
+    # which is what Adam's own argument would have done.
+    groups = m.param_groups(lr_net, lr_field)
+    groups[0]["weight_decay"] = weight_decay
+    groups[1]["weight_decay"] = (weight_decay if weight_decay_fields is None
+                                 else weight_decay_fields)
+    opt = torch.optim.Adam(groups)
     o_tau = float(np.log(np.expm1(shallow_tau)))
     # THE COSINE DECAY SHIPS; `constant` is the comparison arm and leaves every
     # step at the base rate. A constant rate keeps taking full-size steps long
