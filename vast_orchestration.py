@@ -154,6 +154,10 @@ ABLATE_PIP_PACKAGES = ["torch~=2.7.1", "pandas~=2.3.1", "scikit-learn~=1.7.1"]
 #                                   the PRODUCTION_BLOCKS layout carries
 #   activations/_signal_cache/      the correct-cell vectors the joint PCA is
 #     correct_{ids,vecs}_<size>     fitted over, and their id list
+#   activations/_signal_cache/      move evals, game phase and ownership swing:
+#     move_evals_<size>, game_phase   NOT trunk inputs in the shipped layout, but
+#     _<size>, ownership_swing        the comparison arm of a block-layout panel
+#                                   is exactly the fit that reads them
 #   axes/labels.json                the shipping decision K_AXES must match
 #   axes/motif_proxies.npz          the directions the axes are taught onto
 #   tsumegos/retired_ids.txt        the id-uniqueness check features.py runs
@@ -171,7 +175,17 @@ ABLATE_INPUT_FILES = [
     "tsumegos/retired_ids.txt",
 ] + [f"activations/_signal_cache/correct_{kind}_{size}.{ext}"
      for size in ALL_BOARD_SIZES
-     for kind, ext in (("ids", "json"), ("vecs", "npy"))]
+     for kind, ext in (("ids", "json"), ("vecs", "npy"))] + [
+    # The ANSWER-DERIVED blocks, which the shipped layout does not carry and a
+    # panel sweeping the block layout does. They travel because the failure
+    # without them is remote and late — the arm loads its features, aborts, and
+    # the panel comes home with a hole in exactly the comparison it was run for.
+    "activations/_signal_cache/move_evals_9.npz",
+    "activations/_signal_cache/move_evals_13.npz",
+    "activations/_signal_cache/game_phase_9.json",
+    "activations/_signal_cache/game_phase_13.json",
+    "activations/_signal_cache/ownership_swing.csv",
+]
 ABLATE_INPUT_DIRS = [f"attempts/{size}" for size in ALL_BOARD_SIZES]
 
 # ablations/ is pushed by this step alone rather than joining LOCAL_UPLOAD_DIRS:
