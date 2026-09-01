@@ -1,6 +1,6 @@
 {
   "panel": "schedule",
-  "description": "Does a cosine learning-rate decay make a run's result consistent enough that replicates stop being necessary? A constant rate takes full-size steps long after the fit has arrived, which is what a run wandering inside a wide band at its end looks like, so decaying to zero should narrow that band almost by construction. The question this panel actually has to answer is the SECOND one: whether the RESULT is more consistent between runs, which is what decides whether a comparison still needs more than one seed. THE HELD-ASIDE DRAW IS PINNED ACROSS EVERY ARM (split_seed 0) while the initialization seed varies, because a seed normally moves both and the difference between two runs' scores would otherwise mix a different fit with different rows scored \u2014 the arms here are scored on exactly the same rows, so what separates them is the fit alone. Three initializations per schedule. A narrower within-run band is not on its own a reason to drop replicates: it is the between-run spread of the final result that a paired contrast is read against, and a schedule that buys consistency by settling into a worse fit has bought nothing, so the level is reported beside the spreads. THE PANEL RUNS BOTH HOLDOUT UNITS, and the problem arms are the ones the LEVEL has to be judged on. A held-out ROW is one more attempt by a user whose ability was fitted and on a problem whose parameters were, so that score keeps improving for as long as the fit keeps sharpening on material it has already seen \u2014 and a schedule that decays to zero stops exactly that. Judged on rows alone, any decay therefore looks costly whether or not it gave up anything that generalizes. Whole held-out problems are the unit that can tell those apart, so the row arms speak to the within-run band and the problem arms decide whether the decay costs accuracy. A SEED RE-ROLLS THREE THINGS AT ONCE \u2014 the randomized joint-PCA feature basis, the network's initial weights and the minibatch order \u2014 so a spread between arms differing in the seed does not say which of them caused it. Four further arms split that: two vary the seed with the feature basis PINNED (initialization and batch order alone), two vary only the basis with the seed pinned. Read against the common arm, they decompose the spread the schedule question is about, and a large basis share would point at a variance fix that has nothing to do with the learning rate. THE SCHEDULES ARE ALSO COMPARED AT MATCHED WORK, not only at matched epochs. A cosine to zero averages half the base rate, so over one budget it delivers the learning-rate integral of half as many constant epochs \u2014 and against a fit still descending, a decayed arm judged at equal EPOCHS is being judged while starved of optimization rather than on its schedule. The `cosine_work` arms run a budget whose integral is comfortably ABOVE the constant arms', so a loss there cannot be explained by insufficient training. The panel therefore carries arms at two budgets deliberately, and the producer reports the integral each arm actually delivered rather than assuming equal epochs mean equal work.",
+  "description": "Does a cosine learning-rate decay make a run's result consistent enough that replicates stop being necessary? A constant rate takes full-size steps long after the fit has arrived, which is what a run wandering inside a wide band at its end looks like, so decaying to zero should narrow that band almost by construction. The question this panel actually has to answer is the SECOND one: whether the RESULT is more consistent between runs, which is what decides whether a comparison still needs more than one seed. THE HELD-ASIDE DRAW IS PINNED ACROSS EVERY ARM (split_seed 0) while the initialization seed varies, because a seed normally moves both and the difference between two runs' scores would otherwise mix a different fit with different rows scored \u2014 the arms here are scored on exactly the same rows, so what separates them is the fit alone. Three initializations per schedule. A narrower within-run band is not on its own a reason to drop replicates: it is the between-run spread of the final result that a paired contrast is read against, and a schedule that buys consistency by settling into a worse fit has bought nothing, so the level is reported beside the spreads. THE PANEL RUNS BOTH HOLDOUT UNITS, and the problem arms are the ones the LEVEL has to be judged on. A held-out ROW is one more attempt by a user whose ability was fitted and on a problem whose parameters were, so that score keeps improving for as long as the fit keeps sharpening on material it has already seen \u2014 and a schedule that decays to zero stops exactly that. Judged on rows alone, any decay therefore looks costly whether or not it gave up anything that generalizes. Whole held-out problems are the unit that can tell those apart, so the row arms speak to the within-run band and the problem arms decide whether the decay costs accuracy. A SEED RE-ROLLS THREE THINGS AT ONCE \u2014 the randomized joint-PCA feature basis, the network's initial weights and the minibatch order \u2014 so a spread between arms differing in the seed does not say which of them caused it. Four further arms split that: two vary the seed with the feature basis PINNED (initialization and batch order alone), two vary only the basis with the seed pinned. Read against the common arm, they decompose the spread the schedule question is about, and a large basis share would point at a variance fix that has nothing to do with the learning rate. THE SCHEDULES ARE ALSO COMPARED AT MATCHED WORK, not only at matched epochs. A cosine to zero averages half the base rate, so over one budget it delivers the learning-rate integral of half as many constant epochs \u2014 and against a fit still descending, a decayed arm judged at equal EPOCHS is being judged while starved of optimization rather than on its schedule. The `cosine_work` arms run a budget whose integral is comfortably ABOVE the constant arms', so a loss there cannot be explained by insufficient training. The panel therefore carries arms at two budgets deliberately, and the producer reports the integral each arm actually delivered rather than assuming equal epochs mean equal work. THE COSINE BUDGET IS THEN SWEPT, because the budget that proves the schedule is not necessarily the cheapest one that keeps it: an epoch costs the same whatever the rate, so a decayed run long enough to match the constant arm's optimization takes over twice its wall clock, and how much of that is needed is a separate measurement. A shorter cosine run is NOT a prefix of a longer one \u2014 the schedule stretches to the budget \u2014 so each point needs its own arms.",
   "arms": {
     "const_i0": {
       "split_seed": 0
@@ -94,6 +94,46 @@
       "stop_unit": "problem",
       "lr_schedule": "cosine",
       "epochs": 7000,
+      "seed": 2
+    },
+    "cosine_b5000_prob_i0": {
+      "split_seed": 0,
+      "stop_unit": "problem",
+      "lr_schedule": "cosine",
+      "epochs": 5000
+    },
+    "cosine_b5000_prob_i1": {
+      "split_seed": 0,
+      "stop_unit": "problem",
+      "lr_schedule": "cosine",
+      "epochs": 5000,
+      "seed": 1
+    },
+    "cosine_b5000_prob_i2": {
+      "split_seed": 0,
+      "stop_unit": "problem",
+      "lr_schedule": "cosine",
+      "epochs": 5000,
+      "seed": 2
+    },
+    "cosine_b6000_prob_i0": {
+      "split_seed": 0,
+      "stop_unit": "problem",
+      "lr_schedule": "cosine",
+      "epochs": 6000
+    },
+    "cosine_b6000_prob_i1": {
+      "split_seed": 0,
+      "stop_unit": "problem",
+      "lr_schedule": "cosine",
+      "epochs": 6000,
+      "seed": 1
+    },
+    "cosine_b6000_prob_i2": {
+      "split_seed": 0,
+      "stop_unit": "problem",
+      "lr_schedule": "cosine",
+      "epochs": 6000,
       "seed": 2
     }
   }
