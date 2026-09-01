@@ -230,8 +230,9 @@ class JointMIRT(nn.Module):
     corpus has no attempts at all, so free per-item parameters cannot price it.
     """
 
-    def __init__(self, fdim, n_users, input_dim, seed):
+    def __init__(self, fdim, n_users, input_dim, seed, k_axes=K_AXES):
         super().__init__()
+        self.k_axes = int(k_axes)
         torch.manual_seed(seed)
         self.input_dim = int(input_dim)
 
@@ -245,8 +246,8 @@ class JointMIRT(nn.Module):
         # features) and the axis objective reaches the trunk, so the trunk learns
         # what the AXES need and not only what the rating needs. Detaching would
         # make this feature reuse rather than a joint fit.
-        self.g_lin = nn.Linear(d, K_AXES, bias=False)
-        self.v = nn.Parameter(torch.zeros(n_users, K_AXES))
+        self.g_lin = nn.Linear(d, self.k_axes, bias=False)
+        self.v = nn.Parameter(torch.zeros(n_users, self.k_axes))
         li = float(np.clip(LAPSE_INIT / LAPSE_CAP, EPS, 1.0 - EPS))
         self.lapse_raw = nn.Parameter(
             torch.tensor(float(np.log(li / (1.0 - li)))))
@@ -259,7 +260,7 @@ class JointMIRT(nn.Module):
         # belonging to a different network.
         self.register_buffer("b_mu", torch.zeros(()))
         self.register_buffer("b_sd", torch.ones(()))
-        self.register_buffer("g_rms", torch.ones(1, K_AXES))
+        self.register_buffer("g_rms", torch.ones(1, self.k_axes))
 
     def param_groups(self, lr_net=LR_NET, lr_field=LR_FIELD):
         """SPLIT RATES. The network must train an order of magnitude slower than
@@ -396,7 +397,7 @@ def _tail_w(torch, g, at):
     return torch.where(z >= at, z, at * torch.exp((zc - at) / at))
 
 
-def load_bank(key_idx):
+def load_bank(key_idx, k_axes=K_AXES):
     """The proxy directions this fit's axes are taught onto, one row per problem of
     `key_idx` in that order, plus a mask of which rows are supplied.
 
@@ -432,13 +433,15 @@ def load_bank(key_idx):
                 f"`python -m pipeline.build_motif_proxies`.")
     meta = json.load(open(LABELS))
     spec = [str(x) for x in meta.get("components", [])]
-    if len(spec) < K_AXES:
+    if len(spec) < k_axes:
         raise SystemExit(
             f"axes/labels.json lists {len(spec)} components, this fit ships "
-            f"K_AXES={K_AXES}. `components` is the shipping decision: one entry "
+            f"K_AXES={k_axes}. `components` is the shipping decision: one entry "
             f"per axis, each a rule name or `\"A/B\"` to put two rules on one "
             f"axis's two tails.")
-    spec = spec[:K_AXES]
+    # NESTED BY CONSTRUCTION: a smaller count keeps the first k rules and drops
+    # the rest, so a sweep over the count varies only the count.
+    spec = spec[:k_axes]
 
     z = np.load(MOTIF_PROXIES, allow_pickle=False)
     rules = [str(x) for x in z["rules"]]
@@ -453,7 +456,7 @@ def load_bank(key_idx):
             f"Available: {rules}. Rebuild with pipeline.build_motif_proxies, or "
             f"correct `components`.")
 
-    tgt = np.zeros((len(key_idx), K_AXES), np.float64)
+    tgt = np.zeros((len(key_idx), k_axes), np.float64)
     ok = np.zeros(len(key_idx), bool)
     src = np.full((len(key_idx), len(rules)), np.nan)
     for (sz, t), j in key_idx.items():
@@ -527,7 +530,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         shallow_w=SHALLOW_W, shallow_samples=SHALLOW_SAMPLES,
         teach_weight=TEACH_WEIGHT, stop_row_frac=STOP_ROW_FRAC,
         pca_dim=PCA_DIM, blocks=PRODUCTION_BLOCKS, stop_unit="row",
-        out_dir=OUT_DIR, axes_dir=AXES_DIR):
+        k_axes=K_AXES, out_dir=OUT_DIR, axes_dir=AXES_DIR):
     """The shipped fit, callable. Every keyword defaults to the production
     constant above, so `run()` IS the production run — `main()` passes nothing,
     keeping the trainer flag-free — and `ablations.ablation_mirt` is the only
@@ -594,19 +597,19 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
     i_stop = torch.tensor(np.where(is_stop)[0], device=device)
     print(f"  stop signal: {int(is_stop.sum())} rows held aside", flush=True)
 
-    bank_tgt, bank_ok, bank_spec = load_bank(key_idx)
+    bank_tgt, bank_ok, bank_spec = load_bank(key_idx, k_axes)
     t_tgt = torch.tensor(bank_tgt, dtype=torch.float32, device=device)
     t_ok = torch.tensor(bank_ok, device=device)
     print(f"  axis bank: {int(bank_ok.sum())}/{len(keys)} problems carry banked "
           f"directions, taught at a constant weight of {teach_weight}",
           flush=True)
 
-    m = JointMIRT(fdim, n_users, input_dim, seed).to(device)
+    m = JointMIRT(fdim, n_users, input_dim, seed, k_axes).to(device)
     opt = torch.optim.Adam(m.param_groups(lr_net, lr_field))
     o_tau = float(np.log(np.expm1(shallow_tau)))
     n = len(tr)
     trace = []
-    print(f"\n=== joint fit | K={K_AXES} | teach weight {teach_weight} "
+    print(f"\n=== joint fit | K={k_axes} | teach weight {teach_weight} "
           f"(constant) ===", flush=True)
 
     for ep in range(epochs):
@@ -745,6 +748,28 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
             trace.append({"epoch": ep + 1, "train_bce": bce_tr,
                           "stop_bce": bce_st})
 
+    # WHAT THE AXES ADD, on the held-aside rows, measured before the gauge is
+    # pinned so both halves come from the state the last trace entry describes.
+    # Zeroing the axis term rather than refitting without it is deliberate: the
+    # question is what the axis channel contributes to THIS fit's predictions,
+    # and a separate K=0 fit would answer a different one, its rating having
+    # absorbed whatever the axes were carrying.
+    #
+    # Reported and never optimized. The increment rises with the axis count
+    # whether or not the model predicts better, since more axes mechanically
+    # absorb more residual, so it is a diagnostic beside the combined score and
+    # never a criterion for choosing the count.
+    m.train(False)
+    with torch.no_grad():
+        b_s, a_s, c_s, _ = m.problem_params(tfeat[tp[i_stop]])
+        th_s = m.theta(tu[i_stop]).squeeze(-1)
+        lam_s = m.lapse()
+        z_s = (a_s * (th_s - b_s)).clamp(-35, 35)
+        p_noax = (c_s + (1.0 - c_s - lam_s) * torch.sigmoid(z_s)).clamp(
+            EPS, 1 - EPS)
+        bce_stop_no_axes = float(torch.nn.functional.binary_cross_entropy(
+            p_noax, ty[i_stop]))
+
     # --- outputs
     m.train(False)
     with torch.no_grad():
@@ -772,7 +797,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
           f"{np.percentile(a_np, [1, 50, 99]).round(3)} | at floor "
           f"{np.mean(a_np <= SLOPE_FLOOR * 1.01):.2%} | rating p[1,50,99] "
           f"{np.percentile(rating, [1, 50, 99]).round(2)}", flush=True)
-    identity = report_bank_identity(g_np, bank_tgt, bank_ok, prob_idx)
+    identity = report_bank_identity(g_np, bank_tgt, bank_ok, prob_idx, k_axes)
 
     os.makedirs(out_dir, exist_ok=True)
     for s in SIZES:
@@ -799,7 +824,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
 
     os.makedirs(axes_dir, exist_ok=True)
     rows = {"tsumego_id": [k[1] for k in keys], "size": [k[0] for k in keys]}
-    for k in range(K_AXES):
+    for k in range(k_axes):
         rows[f"embed_{k}"] = g_np[:, k].round(5)
     pd.DataFrame(rows).to_csv(os.path.join(axes_dir, "per_problem.csv"),
                               index=False)
@@ -833,7 +858,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
     bh = hashlib.sha256("\n".join(bank_spec).encode()).hexdigest()[:16]
     np.savez_compressed(os.path.join(axes_dir, "axes.npz"),
                         W=m.g_lin.weight.detach().cpu().numpy(),
-                        k=np.array(K_AXES),
+                        k=np.array(k_axes),
                         trunk_width=np.array(m.g_lin.weight.shape[1]),
                         g_rms=m.g_rms.cpu().numpy().ravel(),
                         axis_bank=np.array(bh),
@@ -845,7 +870,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
                 "b_mu": m.b_mu, "b_sd": m.b_sd,
                 "g_rms": m.g_rms.cpu()},
                os.path.join(out_dir, "mirt_model.pt"))
-    print(f"  wrote axes/per_problem.csv + axes.npz (K={K_AXES}, "
+    print(f"  wrote axes/per_problem.csv + axes.npz (K={k_axes}, "
           f"embedding_version {ev}, bank {bh})", flush=True)
 
     # RETIRE ANY per_cell/ FROM THE PREVIOUS AXIS MAP. package_for_pwa reads the
@@ -872,6 +897,8 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         "bank_taught": int(bank_ok.sum()), "bank_spec": list(bank_spec),
         "lambda": lam, "elapsed_s": round(elapsed, 1),
         "epochs": int(epochs), "trace": trace,
+        "k_axes": int(k_axes),
+        "stop_bce_no_axes": bce_stop_no_axes,
         "slope_pct": {str(p): float(np.percentile(a_np, p))
                       for p in (0.1, 1, 5, 50, 95, 99, 99.9)},
         "slope_at_floor_share": float(np.mean(a_np <= SLOPE_FLOOR * 1.01)),

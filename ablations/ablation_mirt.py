@@ -98,7 +98,7 @@ def snapshot_pins(cfg=None):
                                            "motif_proxies.npz")),
         "blocks": str(cfg.get("blocks", PRODUCTION_BLOCKS)),
         "pca_dim": int(cfg.get("pca_dim", PCA_DIM)),
-        "k_axes": int(K_AXES),
+        "k_axes": int(cfg.get("k_axes", K_AXES)),
         "torch": torch.__version__,
         "gpu": (torch.cuda.get_device_name(0)
                 if torch.cuda.is_available() else "cpu"),
@@ -175,6 +175,12 @@ def main(argv=None):
                          f"utils.rating.features names them (production "
                          f"{PRODUCTION_BLOCKS!r}; 'all' adds the "
                          f"answer-derived blocks)")
+    ap.add_argument("--k-axes", type=int, default=None,
+                    help=f"how many axes the fit carries (production {K_AXES}). "
+                         f"The bank is NESTED: a smaller count keeps the first k "
+                         f"components of axes/labels.json, so a sweep varies "
+                         f"only the count. A count above what labels.json lists "
+                         f"halts, since there is no rule to teach the extra axis")
     ap.add_argument("--stop-unit", choices=("row", "problem"), default=None,
                     help="what the held-aside fraction is drawn over. 'row' "
                          "ships and is a convergence detector; 'problem' holds "
@@ -185,7 +191,7 @@ def main(argv=None):
     cfg = {}
     for flag in ("seed", "epochs", "shallow_w", "shallow_tau", "lr_net",
                  "lr_field", "ortho_rating", "ortho_mode", "teach_weight",
-                 "pca_dim", "blocks", "stop_unit"):
+                 "pca_dim", "blocks", "stop_unit", "k_axes"):
         v = getattr(args, flag)
         if v is not None:
             cfg[flag] = v
