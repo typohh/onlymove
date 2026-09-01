@@ -52,6 +52,7 @@ PRODUCERS = (
     "refit_regularization_figures",
     "refit_slope_scale_figures",
     "refit_stopping_figures",
+    "refit_schedule_figures",
 )
 
 
