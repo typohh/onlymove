@@ -199,6 +199,15 @@ def main(argv=None):
                     help="Adam weight decay (production 0 — none ships); the "
                          "knob exists to re-measure whether a norm penalty "
                          "substitutes for dropout")
+    ap.add_argument("--lr-schedule", choices=("constant", "cosine"),
+                    default=None,
+                    help="constant is what ships; cosine decays both rates to "
+                         "zero over the budget, holding their ratio fixed")
+    ap.add_argument("--split-seed", type=int, default=None,
+                    help="seed for the HELD-ASIDE DRAW alone (default: the one "
+                         "seed). Pinning it across arms while --seed varies "
+                         "holds the scored rows fixed and leaves the "
+                         "initialization as the only thing moving")
     ap.add_argument("--stop-unit", choices=("row", "problem"), default=None,
                     help="what the held-aside fraction is drawn over. 'row' "
                          "ships and is a convergence detector; 'problem' holds "
@@ -210,7 +219,8 @@ def main(argv=None):
     for flag in ("seed", "epochs", "shallow_w", "shallow_tau", "lr_net",
                  "lr_field", "ortho_rating", "ortho_mode", "teach_weight",
                  "pca_dim", "blocks", "stop_unit", "k_axes",
-                 "dropout", "input_dropout", "weight_decay"):
+                 "dropout", "input_dropout", "weight_decay",
+                 "lr_schedule", "split_seed"):
         v = getattr(args, flag)
         if v is not None:
             cfg[flag] = v

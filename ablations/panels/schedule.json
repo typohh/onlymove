@@ -1,0 +1,12 @@
+{
+  "panel": "schedule",
+  "description": "Does a cosine learning-rate decay make a run's result consistent enough that replicates stop being necessary? A constant rate takes full-size steps long after the fit has arrived, which is what a run wandering inside a wide band at its end looks like, so decaying to zero should narrow that band almost by construction. The question this panel actually has to answer is the SECOND one: whether the RESULT is more consistent between runs, which is what decides whether a comparison still needs more than one seed. THE HELD-ASIDE DRAW IS PINNED ACROSS EVERY ARM (split_seed 0) while the initialization seed varies, because a seed normally moves both and the difference between two runs' scores would otherwise mix a different fit with different rows scored — the arms here are scored on exactly the same rows, so what separates them is the fit alone. Three initializations per schedule. A narrower within-run band is not on its own a reason to drop replicates: it is the between-run spread of the final result that a paired contrast is read against, and a schedule that buys consistency by settling into a worse fit has bought nothing, so the level is reported beside the spreads.",
+  "arms": {
+    "const_i0": {"split_seed": 0},
+    "const_i1": {"seed": 1, "split_seed": 0},
+    "const_i2": {"seed": 2, "split_seed": 0},
+    "cosine_i0": {"lr_schedule": "cosine", "split_seed": 0},
+    "cosine_i1": {"lr_schedule": "cosine", "seed": 1, "split_seed": 0},
+    "cosine_i2": {"lr_schedule": "cosine", "seed": 2, "split_seed": 0}
+  }
+}

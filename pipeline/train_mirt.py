@@ -542,6 +542,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         shallow_w=SHALLOW_W, shallow_samples=SHALLOW_SAMPLES,
         teach_weight=TEACH_WEIGHT, stop_row_frac=STOP_ROW_FRAC,
         pca_dim=PCA_DIM, blocks=PRODUCTION_BLOCKS, stop_unit="row",
+        split_seed=None, lr_schedule="constant",
         k_axes=K_AXES, dropout=DROPOUT, input_dropout=INPUT_DROPOUT,
         weight_decay=0.0, out_dir=OUT_DIR, axes_dir=AXES_DIR):
     """The shipped fit, callable. Every keyword defaults to the production
@@ -593,7 +594,13 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
     # model does not learn from, so it is small. Stopping on TRAINING loss alone
     # would pick the wrong epoch — held-out quality peaks hundreds of epochs
     # before the training loss flattens.
-    rng = np.random.default_rng(seed)
+    # THE HELD-ASIDE DRAW AND THE INITIALIZATION ARE SEPARABLE. One seed drives
+    # both by default, which is right for production but conflates two things in
+    # a comparison: two runs at different seeds differ in the fit AND in the rows
+    # the fit is scored on, so the difference between their scores is not a
+    # property of the fit alone. Pinning `split_seed` across arms holds the rows
+    # fixed and leaves the initialization as the only thing moving.
+    rng = np.random.default_rng(seed if split_seed is None else split_seed)
     if stop_unit == "problem":
         # Held-out PROBLEMS rather than held-out rows: every row of a chosen
         # problem is set aside together, so its parameters come from the trunk
@@ -625,12 +632,27 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
     opt = torch.optim.Adam(m.param_groups(lr_net, lr_field),
                            weight_decay=weight_decay)
     o_tau = float(np.log(np.expm1(shallow_tau)))
+    # A COSINE DECAY IS THE ALTERNATIVE TO A CONSTANT RATE, and what it is being
+    # asked is whether the settled band narrows: a constant rate keeps taking
+    # full-size steps long after the fit has arrived, which is what a run
+    # wandering inside a wide band at its end looks like. `constant` is what
+    # ships and leaves every step exactly as it was.
+    if lr_schedule not in ("constant", "cosine"):
+        raise ValueError(f"unknown lr_schedule {lr_schedule!r}")
+    base_lrs = [g["lr"] for g in opt.param_groups]
     n = len(tr)
     trace = []
     print(f"\n=== joint fit | K={k_axes} | teach weight {teach_weight} "
           f"(constant) ===", flush=True)
 
     for ep in range(epochs):
+        if lr_schedule == "cosine":
+            # Standard cosine from the base rate to zero over the whole budget,
+            # applied to BOTH groups so their ratio — the thing 1.8 measures —
+            # is held fixed all the way down.
+            scale = 0.5 * (1.0 + float(np.cos(np.pi * ep / max(epochs - 1, 1))))
+            for grp, base in zip(opt.param_groups, base_lrs):
+                grp["lr"] = base * scale
         m.train(True)
         perm = tr[torch.randperm(n, device=device)]
         for i in range(0, n, batch):
@@ -952,6 +974,8 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         "lambda": lam, "elapsed_s": round(elapsed, 1),
         "epochs": int(epochs), "trace": trace,
         "k_axes": int(k_axes),
+        "lr_schedule": str(lr_schedule),
+        "split_seed": int(seed if split_seed is None else split_seed),
         "stop_bce_no_axes": bce_stop_no_axes,
         "slope_scale_sweep": slope_sweep,
         "slope_pct": {str(p): float(np.percentile(a_np, p))
