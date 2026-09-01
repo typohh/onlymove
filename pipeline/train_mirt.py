@@ -261,7 +261,7 @@ class JointMIRT(nn.Module):
         self.register_buffer("b_sd", torch.ones(()))
         self.register_buffer("g_rms", torch.ones(1, K_AXES))
 
-    def param_groups(self):
+    def param_groups(self, lr_net=LR_NET, lr_field=LR_FIELD):
         """SPLIT RATES. The network must train an order of magnitude slower than
         the free per-user fields; under one shared rate this fit diverges late,
         in eval mode, in every arrangement tried. The rating trainer gets away
@@ -270,8 +270,8 @@ class JointMIRT(nn.Module):
         net, field = [], []
         for name, prm in self.named_parameters():
             (field if name in FIELD_PARAMS else net).append(prm)
-        return [{"params": net, "lr": LR_NET},
-                {"params": field, "lr": LR_FIELD}]
+        return [{"params": net, "lr": lr_net},
+                {"params": field, "lr": lr_field}]
 
     def lapse(self):
         return LAPSE_CAP * torch.sigmoid(self.lapse_raw)
@@ -521,7 +521,9 @@ def report_bank_identity(g_np, tgt, ok, prob_idx, k_axes=K_AXES):
 
 
 def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
-        v_ridge=V_RIDGE, ortho_rating=ORTHO_RATING, shallow_tau=SHALLOW_TAU,
+        lr_net=LR_NET, lr_field=LR_FIELD,
+        v_ridge=V_RIDGE, ortho_rating=ORTHO_RATING, ortho_mode="per_tail",
+        shallow_tau=SHALLOW_TAU,
         shallow_w=SHALLOW_W, shallow_samples=SHALLOW_SAMPLES,
         teach_weight=TEACH_WEIGHT, stop_row_frac=STOP_ROW_FRAC,
         out_dir=OUT_DIR, axes_dir=AXES_DIR):
@@ -588,7 +590,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
           flush=True)
 
     m = JointMIRT(fdim, n_users, input_dim, seed).to(device)
-    opt = torch.optim.Adam(m.param_groups())
+    opt = torch.optim.Adam(m.param_groups(lr_net, lr_field))
     o_tau = float(np.log(np.expm1(shallow_tau)))
     n = len(tr)
     trace = []
@@ -664,11 +666,21 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
             # 0.105. The whole-axis figure rises slightly under this and that is
             # expected — it is no longer the statistic being optimised, and it was
             # never the one that mattered.
-            for _sg in (1.0, -1.0):
-                W = _tail_w(torch, _sg * gh, TAIL_HINGE)
-                W = W - W.mean(dim=0, keepdim=True)
+            if ortho_mode == "per_tail":
+                for _sg in (1.0, -1.0):
+                    W = _tail_w(torch, _sg * gh, TAIL_HINGE)
+                    W = W - W.mean(dim=0, keepdim=True)
+                    W = W / (W.norm(dim=0, keepdim=True) + 1e-9)
+                    loss = loss + ortho_rating * (W.T @ tz).pow(2).sum()
+            elif ortho_mode == "whole":
+                # The whole-axis form, kept ONLY as a comparison arm: a linear
+                # statistic that a symmetric tail dependence satisfies at zero,
+                # which is the failure the per-tail form above exists to close.
+                W = gh - gh.mean(dim=0, keepdim=True)
                 W = W / (W.norm(dim=0, keepdim=True) + 1e-9)
                 loss = loss + ortho_rating * (W.T @ tz).pow(2).sum()
+            elif ortho_mode != "off":
+                raise ValueError(f"unknown ortho_mode {ortho_mode!r}")
             # TEACHING, ON THE ATTEMPT STREAM, reusing the gh this batch already
             # produced — no second forward and no second sampling distribution.
             #

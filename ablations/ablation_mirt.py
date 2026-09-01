@@ -138,14 +138,31 @@ def main(argv=None):
     ap.add_argument("--shallow-tau", type=float, default=None,
                     help="the barrier's pre-softplus threshold (production "
                          f"{train_mirt.SHALLOW_TAU})")
+    # --- the learning-rate cluster (methodology §1.8) ---
+    ap.add_argument("--lr-net", type=float, default=None,
+                    help=f"the network's rate (production {train_mirt.LR_NET})")
+    ap.add_argument("--lr-field", type=float, default=None,
+                    help="the free per-user fields' rate (production "
+                         f"{train_mirt.LR_FIELD})")
+    # --- the penalty/identity clusters (methodology §1.5, §1.14) ---
+    ap.add_argument("--ortho-rating", type=float, default=None,
+                    help="the rating-orthogonality weight (production "
+                         f"{train_mirt.ORTHO_RATING}); 0 disables it")
+    ap.add_argument("--ortho-mode", choices=("per_tail", "whole", "off"),
+                    default=None,
+                    help="per_tail is what ships; whole is the linear-statistic "
+                         "comparison arm; off removes the term")
+    ap.add_argument("--teach-weight", type=float, default=None,
+                    help="the pull toward the taught rule columns (production "
+                         f"{train_mirt.TEACH_WEIGHT}); 0 frees the basis")
     args = ap.parse_args(argv)
 
     cfg = {}
-    for flag, kw in (("seed", "seed"), ("epochs", "epochs"),
-                     ("shallow_w", "shallow_w"), ("shallow_tau", "shallow_tau")):
+    for flag in ("seed", "epochs", "shallow_w", "shallow_tau", "lr_net",
+                 "lr_field", "ortho_rating", "ortho_mode", "teach_weight"):
         v = getattr(args, flag)
         if v is not None:
-            cfg[kw] = v
+            cfg[flag] = v
     run_arm(args.panel, args.arm, cfg, force=args.force)
 
 
