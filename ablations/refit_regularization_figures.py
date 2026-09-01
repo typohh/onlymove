@@ -181,6 +181,13 @@ REG_KNOBS = {
     "trunk_off": {"dropout": 0.0},
     "both_off": {"dropout": 0.0, "input_dropout": 0.0},
     "decay": {"weight_decay": WEIGHT_DECAY},
+    # The decay arm's gain needs ATTRIBUTING before it can be a candidate:
+    # Adam's weight_decay reaches the free per-user fields too — an L2 on
+    # ability the shipped design leaves unpenalized, which re-gauges the fit
+    # (abilities shrink, slopes inflate to compensate). This arm decays the
+    # NETWORK alone, fields exempt, so its contrast against `decay` says
+    # whether the gain is regularization or the ridge's re-gauging.
+    "decay_net": {"weight_decay": WEIGHT_DECAY, "weight_decay_fields": 0.0},
     "decay_both_off": {"dropout": 0.0, "input_dropout": 0.0,
                        "weight_decay": WEIGHT_DECAY},
 }
@@ -208,6 +215,8 @@ CONFIG_NOTE = {
     "trunk_off": "the trunk's dropout removed, the feature region's kept",
     "both_off": "dropout removed at BOTH sites",
     "decay": "weight decay added with both dropouts intact",
+    "decay_net": "the same weight decay on the NETWORK alone, the per-user "
+                 "fields exempt",
     "decay_both_off": "weight decay standing in for both dropouts, which is the "
                       "substitution §1.5 rejects",
 }
@@ -219,6 +228,8 @@ CONFIG_ACTION = {
     "trunk_off": "removing the trunk's dropout",
     "both_off": "removing dropout at both sites",
     "decay": "adding weight decay with both dropouts intact",
+    "decay_net": "adding the same weight decay to the network alone, the "
+                 "per-user fields exempt",
     "decay_both_off": "weight decay in place of both dropouts",
 }
 
@@ -310,7 +321,8 @@ def load_panel():
         # defined by absence.
         for source, cfg in (("manifest entry", want), ("record", got)):
             passed = {k: cfg[k] for k in ("dropout", "input_dropout",
-                                          "weight_decay") if k in cfg}
+                                          "weight_decay",
+                                          "weight_decay_fields") if k in cfg}
             declared = REG_KNOBS[config]
             require(set(passed) == set(declared)
                     and all(float(passed[k]) == float(v)
@@ -584,6 +596,16 @@ def figures():
         f"seed. 0 means decay recovered part of what dropout was doing at some "
         f"seed. The claim is one-sided: it says decay buys back none of that "
         f"cost, not that decay is itself harmful"))
+    out.append(Figure(
+        f"{PANEL}.decay_gain_is_field_ridge",
+        int(all(v < 0 for v in m["cost"]["decay"]["tail"])
+            and all(v > 0 for v in m["cost"]["decay_net"]["tail"])), "d",
+        f"THE ATTRIBUTION of the decay arm's held-out gain: 1 when, at every "
+        f"seed, decaying network AND fields beats the shipped fit while "
+        f"decaying the network alone is worse than it — i.e. the gain belongs "
+        f"entirely to the L2 the fields receive, an ability ridge that "
+        f"re-gauges the fit rather than regularizing the network. A fig-guard's "
+        f"figure for the sentence declining to adopt the decay"))
     out.append(Figure(
         f"{PANEL}.shipped_wander_range_mnat", m["wander_range"], ".2f",
         f"the resolution floor every contrast here is read against: the shipped "
