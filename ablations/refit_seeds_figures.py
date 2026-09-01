@@ -29,7 +29,8 @@ which is the mechanism §1.14 credits with fixing the basis.
                                   pull buys in basis stability.
   seeds.axes_matched              axes matched per pair (K as shipped).
   seeds.problems_scored           the population all of the above run over.
-  seeds.teaching_cost_mnat        what the pull costs on held-out rows, and
+  seeds.teaching_cost_mnat        what the pull costs on the panel's held-aside
+                                  sample, and
   seeds.teaching_cost_final_mnat  whether both same-seed pairs agree on its
   seeds.teaching_cost_sign_consistent  sign. Paired within a seed: the held-aside
                                   draw is a function of the seed alone, so a
@@ -89,8 +90,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-from ablations._figures import Figure, require, panel_budget  # noqa: E402
-from pipeline.train_mirt import EPOCHS  # noqa: E402
+from ablations._figures import Figure, require, panel_regime  # noqa: E402
 from utils.paths import DB_SQLITE  # noqa: E402
 from utils.rating.features import load_first_time_attempts  # noqa: E402
 from utils.rating.model_constants import K_AXES, SIZES  # noqa: E402
@@ -110,6 +110,27 @@ UNTAUGHT_PAIRS = (("untaught_s0", "untaught_s1"),
 
 # --- the panel -------------------------------------------------------------
 
+# What a held-aside score is scored ON, as the noun the printout and the figure
+# notes use. Read off the records rather than assumed: a held-aside ROW is one
+# more attempt on a problem the fit has otherwise seen, a held-aside PROBLEM one
+# the trunk alone has to place, and a reader cannot tell the two apart from the
+# number.
+UNIT_NOUN = {"row": "rows", "problem": "problems"}
+
+
+def panel_unit(arms):
+    """The holdout unit every arm of the panel scored on, or a hard failure if
+    they differ — a cost averaged over both units is between the units as much
+    as between the arms."""
+    units = {r["config"].get("stop_unit", "row") for r in arms.values()}
+    require(len(units) == 1,
+            f"the panel's arms held aside {sorted(units)} — those are different "
+            f"quantities and a cost pooled over them is not one cost")
+    unit = units.pop()
+    require(unit in UNIT_NOUN, f"unknown stop unit {unit!r}")
+    return unit
+
+
 def load_panel():
     require(os.path.exists(MANIFEST),
             f"no {MANIFEST} — the panel manifest is what the arm records are "
@@ -128,14 +149,17 @@ def load_panel():
                 f"`vast_orchestration.py ablate seeds`) first.")
         arms[arm] = json.load(open(path))
 
-    budget = panel_budget(arms)
+    # ONE PANEL IS ONE REGIME, read off the arms rather than off the trainer's
+    # current constants: the arms are only ever compared to each other, so a
+    # later change to the shipped budget or schedule must not make a finished
+    # panel unquotable.
+    budget, schedule = panel_regime(arms)
+    unit = panel_unit(arms)
     for arm, r in arms.items():
-        require(r["metrics"]["epochs"] == budget,
-                f"{arm} ran {r['metrics']['epochs']} epochs against the panel's "
-                f"{budget} — one panel is one budget")
         require(r["metrics"]["trace"]
-                and r["metrics"]["trace"][-1]["epoch"] == EPOCHS,
-                f"{arm}'s convergence trace does not reach its budget")
+                and r["metrics"]["trace"][-1]["epoch"] == budget,
+                f"{arm}'s convergence trace does not reach the panel's "
+                f"{budget}-epoch budget")
         # A record run with a different flag is a well-formed record of a
         # different experiment; every figure below would be attributed to a
         # configuration that was not fitted.
@@ -174,7 +198,7 @@ def load_panel():
             f"but the log now ends at {now} — the arms were fitted against a "
             f"different attempt set than the attempted population read below. "
             f"Re-run the panel.")
-    return arms, seeds
+    return arms, seeds, budget, schedule, unit
 
 
 # --- the loadings ----------------------------------------------------------
@@ -242,7 +266,7 @@ def matched_agreement(a, b, keys):
 # --- the measurement -------------------------------------------------------
 
 def measure():
-    arms, seeds = load_panel()
+    arms, seeds, budget, schedule, unit = load_panel()
     load = {arm: load_loadings(arm) for arm in ARMS}
 
     # ONE population for every pair: attempted, and present in all five arms.
@@ -269,6 +293,9 @@ def measure():
         "taught_min": float(taught.min()),
         "untaught_mean": float(np.mean([p.mean() for p in untaught])),
         "untaught_min": float(np.mean([p.min() for p in untaught])),
+        "budget": budget,
+        "schedule": schedule,
+        "unit_noun": UNIT_NOUN[unit],
         "gpu": arms["taught_s0"]["pins"]["gpu"],
     }
     # WHAT TEACHING COSTS, and why this panel can price it after all. Its arms
@@ -329,9 +356,10 @@ def figures():
         Figure("seeds.axes_matched", K_AXES, "d",
                "axes matched per pair — K as shipped"),
         Figure("seeds.teaching_cost_mnat", m["cost_tail"], ".0f",
-               "what the constant pull costs on held-out rows, millinats, "
-               "positive meaning the taught fit predicts worse. Paired: the "
-               "taught and untaught arms at one seed hold aside the same rows. "
+               f"what the constant pull costs on held-out {m['unit_noun']}, "
+               f"millinats, positive meaning the taught fit predicts worse. "
+               f"Paired: the taught and untaught arms at one seed hold aside "
+               f"the same {m['unit_noun']}. "
                "Each arm is read as the mean over the last third of its budget, "
                "the two same-seed pairs then averaged"),
         Figure("seeds.teaching_cost_final_mnat", m["cost_final"], ".0f",
@@ -350,7 +378,8 @@ def figures():
 
 def main():
     m = measure()
-    print(f"seeds panel  (all arms full budget, one machine: {m['gpu']})")
+    print(f"seeds panel  (all arms full budget: {m['budget']} epochs, "
+          f"{m['schedule']} rate; one machine: {m['gpu']})")
     print(f"  agreement = |correlation| of loadings over {m['keys']} attempted "
           f"problems shared by every arm,")
     print(f"              after matching the {K_AXES} axes one-to-one by "
@@ -372,7 +401,8 @@ def main():
     print()
     print("  no held-out delta is quotable from this panel: the arms run at "
           "different seeds,")
-    print("  so they hold aside different stop rows and the comparison would "
+    print(f"  so they hold aside different stop {m['unit_noun']} and the "
+          f"comparison would "
           "be unpaired.")
 
 

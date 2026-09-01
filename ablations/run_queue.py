@@ -33,6 +33,7 @@ fits stop scaling — and VRAM headroom gates every launch, fill included.
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -59,14 +60,37 @@ DEV_RUNS = os.path.join(PROJECT_ROOT, "ablations", "dev_runs")
 QUEUE = os.path.join(PROJECT_ROOT, "ablations", "queue.txt")
 
 
+_ARM_RE = re.compile(r"--panel\s+(\S+)\s+--arm\s+(\S+)")
+
+
+def live_arms():
+    """{(panel, arm)} with a training process alive on this machine, whoever
+    launched it. A pool restart, or a second pool started by mistake, must not
+    hand out an arm that is already running: the record does not exist until
+    the run ends, so the record check alone cannot see it, and two runs of one
+    arm race to write the same file while sharing the card."""
+    try:
+        out = subprocess.run(["pgrep", "-fa", "ablations.ablation_mirt"],
+                             capture_output=True, text=True, timeout=10).stdout
+    except Exception:
+        return set()
+    return {m.groups() for m in _ARM_RE.finditer(out)}
+
+
+def live_arm_count():
+    return len(live_arms())
+
+
 def read_queue(path):
-    """[(panel, arm, cfg)] in queue order, skipping arms that have a record.
+    """[(panel, arm, cfg)] in queue order, skipping arms that have a record OR
+    a live process.
 
     Read fresh on every call: the file is the live control surface, so a line
     added while the pool is running is picked up at the next free slot."""
     items = []
     if not os.path.exists(path):
         return items
+    running_now = live_arms()
     for raw in open(path):
         line = raw.split("#", 1)[0].strip()
         if not line:
@@ -84,6 +108,8 @@ def read_queue(path):
                       flush=True)
                 continue
             if os.path.exists(os.path.join(DEV_RUNS, panel, f"{arm}.json")):
+                continue
+            if (panel, arm) in running_now:
                 continue
             items.append((panel, arm, manifest["arms"][arm]))
     return items
@@ -103,6 +129,9 @@ def main(argv=None):
     running = {}          # (panel, arm) -> (Popen, log handle, log path)
     started = set()       # everything launched this run, so a re-read cannot
                           # hand the same arm out twice before its record lands
+    retried = set()       # a failed arm is handed out ONCE more — a launch that
+                          # died on a full card deserves a second slot, a broken
+                          # arm does not deserve an endless one
     done_epochs = 0
     failures = []
     ceiling = None
@@ -141,6 +170,11 @@ def main(argv=None):
                   flush=True)
             if rc != 0:
                 failures.append(f"{key[0]}/{key[1]}")
+                if key not in retried:
+                    retried.add(key)
+                    started.discard(key)
+                    print(f"  {key[0]}/{key[1]}: will be retried once",
+                          flush=True)
 
     def rate_now():
         total = done_epochs + sum(_epochs_in_log(p)
@@ -155,11 +189,18 @@ def main(argv=None):
         return (samples[-1][1] - samples[0][1]) / span
 
     def vram_allows_more():
+        # Per-arm usage is read off EVERY arm process on the card, not only the
+        # ones this pool launched: arms outlive the pool that started them, and
+        # a pool that sized headroom by its own count alone launched into a
+        # full card and had the launches die.
         mem = _gpu_mem()
-        if mem is None or not running:
+        if mem is None:
             return True
         used, total = mem
-        return (total - used) >= VRAM_HEADROOM_FACTOR * (used / len(running))
+        n = max(live_arm_count(), len(running))
+        if n == 0:
+            return True
+        return (total - used) >= VRAM_HEADROOM_FACTOR * (used / n)
 
     def want_more():
         if not auto:
@@ -171,7 +212,9 @@ def main(argv=None):
         # Fill to the known-good level without waiting: the interval exists to
         # let a NEW level prove itself, and these levels have already proved
         # themselves on every panel run. VRAM still gates each one.
-        if len(running) < START_LEVEL:
+        # Arms left running by a previous pool count toward the fill: the card
+        # does not know which pool launched them.
+        if max(len(running), live_arm_count()) < START_LEVEL:
             return vram_allows_more()
         if time.time() - last_launch < RAMP_INTERVAL_SECS:
             return False

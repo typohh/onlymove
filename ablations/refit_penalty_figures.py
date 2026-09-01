@@ -138,7 +138,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-from ablations._figures import Figure, load_ledger, require, panel_budget  # noqa: E402
+from ablations._figures import Figure, load_ledger, require, panel_regime  # noqa: E402
 from ablations.axes_fit_figures import leakage, whole_axis  # noqa: E402
 from utils.paths import DB_SQLITE  # noqa: E402
 from utils.rating.features import load_backend_problem_params  # noqa: E402
@@ -196,6 +196,26 @@ def replicate_suffixes(manifest):
     return tuple(suffixes)
 
 
+# What a held-aside score is scored ON, as the noun the printout uses. Read off
+# the records rather than assumed: a held-aside ROW is one more attempt on a
+# problem the fit has otherwise seen, a held-aside PROBLEM one the trunk alone
+# has to place, and a reader cannot tell the two apart from the number.
+UNIT_NOUN = {"row": "rows", "problem": "problems"}
+
+
+def panel_unit(arms):
+    """The holdout unit every arm of the panel scored on, or a hard failure if
+    they differ — a contrast averaged over both units is between the units as
+    much as between the arms."""
+    units = {r["config"].get("stop_unit", "row") for r in arms.values()}
+    require(len(units) == 1,
+            f"the panel's arms held aside {sorted(units)} — those are different "
+            f"quantities and a contrast pooled over them is not one contrast")
+    unit = units.pop()
+    require(unit in UNIT_NOUN, f"unknown stop unit {unit!r}")
+    return unit
+
+
 def load_panel():
     """Every arm's record, checked for the things that make the panel quotable:
     one budget, the manifest's own config per arm, pins agreeing across arms,
@@ -218,10 +238,12 @@ def load_panel():
         with open(path) as f:
             arms[arm] = json.load(f)
 
-    # ONE PANEL IS ONE BUDGET, read off the arms rather than off the trainer's
-    # current constant: the arms are only ever compared to each other, so a
-    # later change to EPOCHS must not make a finished panel unquotable.
-    budget = panel_budget(arms)
+    # ONE PANEL IS ONE REGIME, read off the arms rather than off the trainer's
+    # current constants: the arms are only ever compared to each other, so a
+    # later change to the shipped budget or schedule must not make a finished
+    # panel unquotable.
+    budget, schedule = panel_regime(arms)
+    unit = panel_unit(arms)
     for arm, r in arms.items():
         require(r["metrics"]["trace"]
                 and r["metrics"]["trace"][-1]["epoch"] == budget,
@@ -278,7 +300,7 @@ def load_panel():
             f"the panel was measured at attempt-log frontier {base['db_max_id']} "
             f"but the log now ends at {now} — the stop-row draw moved, the "
             f"paired comparison is void. Re-run the panel.")
-    return arms, budget, seed_groups(arms, suffixes)
+    return arms, budget, schedule, unit, seed_groups(arms, suffixes)
 
 
 def seed_groups(arms, suffixes):
@@ -450,7 +472,7 @@ def deltas_mnat(arm_bce, ship_bce, tail):
 
 
 def measure():
-    arms, budget, groups = load_panel()
+    arms, budget, schedule, unit, groups = load_panel()
     fits = {arm: load_arm_fit(arm) for arm in arms}
     keys = fits[groups[0]["arms"][BASELINE]]["keys"]
     for arm, fit in fits.items():
@@ -549,6 +571,8 @@ def measure():
         "arms": arms, "stats": stats, "groups": groups,
         "seeds": [g["seed"] for g in groups],
         "budget": budget,
+        "schedule": schedule,
+        "unit_noun": UNIT_NOUN[unit],
         "tail_epochs": (grid[tail[0]], grid[tail[-1]], len(tail)),
         "n_problems": len(keys),
         "gpu": arms[groups[0]["arms"][BASELINE]]["pins"]["gpu"],
@@ -723,11 +747,12 @@ def main():
 
     print("\npenalty panel — methodology §1.5, the rating-orthogonality term")
     print(f"{len(CONFIGS)} configurations x {len(seeds)} seeds {seeds} at the "
-          f"panel's budget of {m['budget']} epochs, one machine ({m['gpu']}),")
+          f"panel's budget of {m['budget']} epochs at a {m['schedule']} rate, "
+          f"one machine ({m['gpu']}),")
     print(f"{m['n_problems']:,d} fitted problems per arm, identical problem set "
           f"throughout.")
-    print("A contrast is taken WITHIN a seed (same held-out rows, paired) and "
-          "the seeds are averaged after;")
+    print(f"A contrast is taken WITHIN a seed (same held-out {m['unit_noun']}, "
+          f"paired) and the seeds are averaged after;")
     print(f"'tail' is the mean over the {npts} checkpoints from epoch {lo} to "
           f"{hi}, 'final' is epoch {m['budget']}.")
     print("\nLeakage is measured over EVERY fitted problem, unweighted, by the "

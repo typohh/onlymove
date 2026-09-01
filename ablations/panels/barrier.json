@@ -2,34 +2,44 @@
   "panel": "barrier",
   "description": "methodology 1.7 \u2014 the divergence barrier: the shipped fit against the barrier removed and the barrier at ten times its weight. The claims: without it slopes collapse onto the clamp and derived ratings blow out over hundreds of units at a >20 mnat held-out cost; at 10x the rating range compresses toward nothing. EVERY ARM RUNS AT TWO SEEDS. The shipped configuration's own held-out trace wanders over ten millinats across the last third of its budget, which is wider than the contrasts this panel is asked about, so a single arm per configuration cannot resolve them: within one seed the arms hold aside the same stop rows and the delta is paired, and the two seeds are two independent paired estimates whose agreement in SIGN is what the producer quotes a contrast on. A THIRD SEED was added because the panel's per-fit properties \u2014 the blow-out's size above all \u2014 moved by an order of magnitude between the first two, and because the ten-times arm's held-out advantage is a finding the section now rests on.",
   "arms": {
-    "shipped": {},
+    "shipped": {
+      "stop_unit": "problem"
+    },
     "barrier_off": {
-      "shallow_w": 0.0
+      "shallow_w": 0.0,
+      "stop_unit": "problem"
     },
     "barrier_10x": {
-      "shallow_w": 3.0
+      "shallow_w": 3.0,
+      "stop_unit": "problem"
     },
     "shipped_s1": {
-      "seed": 1
+      "seed": 1,
+      "stop_unit": "problem"
     },
     "barrier_off_s1": {
       "shallow_w": 0.0,
-      "seed": 1
+      "seed": 1,
+      "stop_unit": "problem"
     },
     "barrier_10x_s1": {
       "shallow_w": 3.0,
-      "seed": 1
+      "seed": 1,
+      "stop_unit": "problem"
     },
     "shipped_s2": {
-      "seed": 2
+      "seed": 2,
+      "stop_unit": "problem"
     },
     "barrier_off_s2": {
       "shallow_w": 0.0,
-      "seed": 2
+      "seed": 2,
+      "stop_unit": "problem"
     },
     "barrier_10x_s2": {
       "shallow_w": 3.0,
-      "seed": 2
+      "seed": 2,
+      "stop_unit": "problem"
     }
   }
 }

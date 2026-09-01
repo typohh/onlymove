@@ -150,8 +150,8 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-from ablations._figures import Figure, require, panel_budget  # noqa: E402
-from pipeline.train_mirt import DROPOUT, EPOCHS, INPUT_DROPOUT  # noqa: E402
+from ablations._figures import Figure, require, panel_regime  # noqa: E402
+from pipeline.train_mirt import DROPOUT, INPUT_DROPOUT  # noqa: E402
 from utils.paths import DB_SQLITE  # noqa: E402
 from utils.rating.model_constants import (  # noqa: E402
     K_AXES, PCA_DIM, PRODUCTION_BLOCKS)
@@ -199,12 +199,6 @@ SEEDS = (0, 1)
 # Every arm scores on held-out PROBLEMS. See the module docstring: the row split
 # cannot see the failure mode this whole panel is about.
 STOP_UNIT = "problem"
-
-# The last third of the budget, the same window the other refit producers read
-# their settled level over: past the stretch where these fits still improve, so a
-# mean over it reads the level an arm settled at rather than whichever point of
-# its wander the final checkpoint happened to land on.
-TAIL_FROM_EPOCH = 2 * EPOCHS // 3
 
 # One clause per configuration, reused by every figure and table row that carries
 # it so two configurations can never be described as the same thing.
@@ -268,15 +262,17 @@ def load_panel():
         with open(path) as f:
             arms[key] = json.load(f)
 
-    budget = panel_budget(arms)
+    # ONE PANEL IS ONE REGIME, read off the arms rather than off the trainer's
+    # current constants: the arms are only ever compared to each other, so a
+    # later change to the shipped budget or schedule must not make a finished
+    # panel unquotable.
+    budget, schedule = panel_regime(arms)
     for key, r in arms.items():
         arm, (config, seed) = ARMS[key], key
-        require(r["metrics"]["epochs"] == budget,
-                f"{arm} ran {r['metrics']['epochs']} epochs against the panel's "
-                f"{budget} — one panel is one budget")
         require(r["metrics"]["trace"]
-                and r["metrics"]["trace"][-1]["epoch"] == EPOCHS,
-                f"{arm}'s convergence trace does not reach its budget")
+                and r["metrics"]["trace"][-1]["epoch"] == budget,
+                f"{arm}'s convergence trace does not reach the panel's "
+                f"{budget}-epoch budget")
         require(all(math.isfinite(float(t["stop_bce"]))
                     for t in r["metrics"]["trace"]),
                 f"{arm}'s held-out trace is not finite throughout. A fit that "
@@ -393,7 +389,7 @@ def load_panel():
             f"the panel was measured at attempt-log frontier {base['db_max_id']} "
             f"but the log now ends at {now} — the held-out draw moved, the "
             f"paired comparison is void. Re-run the panel.")
-    return arms
+    return arms, budget, schedule
 
 
 # --- reading a convergence trace ----------------------------------------------
@@ -424,17 +420,22 @@ def same_sign(series):
 # --- the measurement ----------------------------------------------------------
 
 def measure():
-    arms = load_panel()
+    arms, budget, schedule = load_panel()
     curves = {key: stop_curve(r) for key, r in arms.items()}
     grid = curves[(BASELINE, SEEDS[0])][0]
     for key, (ep, _) in curves.items():
         require(ep == grid,
                 f"{ARMS[key]}'s trace is scored at different epochs than the "
                 f"baseline's — the deltas would not be like for like")
-    tail = [i for i, e in enumerate(grid) if e >= TAIL_FROM_EPOCH]
+    # The last third of the budget, the same window the other refit producers
+    # read their settled level over: past the stretch where these fits still
+    # improve, so a mean over it reads the level an arm settled at rather than
+    # whichever point of its wander the final checkpoint happened to land on.
+    tail_from = 2 * budget // 3
+    tail = [i for i, e in enumerate(grid) if e >= tail_from]
     require(len(tail) > 1,
             f"the trace carries {len(tail)} checkpoint(s) at or past epoch "
-            f"{TAIL_FROM_EPOCH} — the settled level and the wander it averages "
+            f"{tail_from} — the settled level and the wander it averages "
             f"over are read across the last third of the budget, and neither "
             f"exists on one point")
 
@@ -498,6 +499,8 @@ def measure():
 
     return {
         "tail_epochs": (grid[tail[0]], grid[tail[-1]], len(tail)),
+        "budget": budget,
+        "schedule": schedule,
         "level": level, "final": final, "cost": cost,
         "holdout_bce": {c: statistics.fmean(level[(c, s)] for s in SEEDS)
                         for c in CONFIGS},
@@ -598,7 +601,8 @@ def main():
     print(f"\nregularization panel — methodology §1.5, the two dropout sites and "
           f"the weight decay offered as their substitute")
     print(f"{len(CONFIGS)} configurations x {len(SEEDS)} seeds {list(SEEDS)}, "
-          f"full budget ({EPOCHS} epochs), one machine ({m['gpu']}),")
+          f"full budget ({m['budget']} epochs, {m['schedule']} rate), one "
+          f"machine ({m['gpu']}),")
     print(f"{m['rows']:,d} attempt rows per arm. Shipped dropout: {DROPOUT} in "
           f"the trunk, {INPUT_DROPOUT} over the feature columns; shipped weight "
           f"decay: none.")
@@ -607,7 +611,7 @@ def main():
     print(f"is the one split that cannot see memorization. Held aside: "
           + ", ".join(f"s{s} {m['stop_rows'][s]:,d} rows" for s in SEEDS) + ".")
     print(f"'tail' is the mean over the {n} checkpoints from epoch {lo} to "
-          f"{hi}; 'final' is epoch {EPOCHS} alone.")
+          f"{hi}; 'final' is epoch {m['budget']} alone.")
 
     print(f"\n{'configuration':>16}"
           + "".join(f"{f'tail s{s}':>11}{f'final s{s}':>11}" for s in SEEDS)

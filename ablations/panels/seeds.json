@@ -2,20 +2,26 @@
   "panel": "seeds",
   "description": "methodology 1.14 \u2014 what fixes the axis basis. The likelihood reads the loadings and the user positions only through their product, so rotating the axis space leaves it exactly unchanged and nothing in it prefers one basis to another. The claims: with the teaching pull off, two runs of one configuration differing only in the random seed agree on their directions weakly (the document's 0.56 / 0.25 / 0.20, mean 0.34, is K=3-era and is re-measured here at the shipped K); and the constant pull toward the taught rule columns is what fixes the basis, so two taught fits at different seeds should agree far better. Seeds differ across arms BY DESIGN, and the held-aside draw is a function of the seed alone: arms at DIFFERENT seeds score different rows and no delta between them means anything, while a taught and an untaught arm at the SAME seed score exactly the same rows, so what the teaching pull costs on held-out data is paired and is quotable. The producer emits that one and nothing else crossing arms.",
   "arms": {
-    "taught_s0": {},
+    "taught_s0": {
+      "stop_unit": "problem"
+    },
     "taught_s1": {
-      "seed": 1
+      "seed": 1,
+      "stop_unit": "problem"
     },
     "untaught_s0": {
-      "teach_weight": 0.0
+      "teach_weight": 0.0,
+      "stop_unit": "problem"
     },
     "untaught_s1": {
       "teach_weight": 0.0,
-      "seed": 1
+      "seed": 1,
+      "stop_unit": "problem"
     },
     "untaught_s2": {
       "teach_weight": 0.0,
-      "seed": 2
+      "seed": 2,
+      "stop_unit": "problem"
     }
   }
 }

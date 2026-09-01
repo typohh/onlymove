@@ -106,8 +106,8 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-from ablations._figures import Figure, require, panel_budget  # noqa: E402
-from pipeline.train_mirt import EPOCHS, LR_FIELD, LR_NET  # noqa: E402
+from ablations._figures import Figure, require, panel_regime  # noqa: E402
+from pipeline.train_mirt import LR_FIELD, LR_NET  # noqa: E402
 from utils.paths import DB_SQLITE  # noqa: E402
 from utils.rating.model_constants import SEED  # noqa: E402
 
@@ -121,8 +121,6 @@ MANIFEST = os.path.join(PROJECT_ROOT, "ablations", "panels", f"{PANEL}.json")
 # matched to the baseline of its own seed.
 CONFIGS = ("shipped", "ratio1x", "ratio10x", "net_slow")
 BASELINE = CONFIGS[0]
-REPLICATE_SUFFIXES = ("", "_s1")
-ARMS = tuple(c + s for s in REPLICATE_SUFFIXES for c in CONFIGS)
 # The ledger key each variant's costs are published under. `ratio1x` is named
 # for what it IS in §1.8 — the single shared rate — rather than for its ratio.
 KEY_STEM = {"ratio1x": "shared_rate", "ratio10x": "ratio10x",
@@ -136,25 +134,62 @@ KEY_STEM = {"ratio1x": "shared_rate", "ratio10x": "ratio10x",
 # best is past anything the widest settled band here reaches, so it separates a
 # blow-up from wandering without being tuned to a particular arm.
 DIVERGENCE_RISE_MNAT = 20.0
-# The last third of the budget: past the stretch where these fits still improve,
-# so a mean over it reads the level an arm settled at rather than whichever
-# point of its wander the final checkpoint happened to land on.
-TAIL_FROM_EPOCH = 2 * EPOCHS // 3
 
 
 # --- the panel -------------------------------------------------------------
+
+def replicate_suffixes(manifest):
+    """The seed suffixes the manifest actually declares, in seed order.
+
+    Read rather than hardcoded: a panel gains a replicate whenever two seeds
+    fail to settle something, and a producer pinned to a fixed list would abort
+    on the panel getting BETTER. Every configuration must carry every suffix —
+    an unbalanced panel would silently average different configurations over
+    different seeds."""
+    suffixes = sorted({arm[len(BASELINE):] for arm in manifest["arms"]
+                       if arm.startswith(BASELINE)})
+    require(suffixes, f"{MANIFEST} declares no {BASELINE} arm to key the "
+                      f"replicates off")
+    want = {c + suf for suf in suffixes for c in CONFIGS}
+    require(set(manifest["arms"]) == want,
+            f"{MANIFEST} declares {sorted(manifest['arms'])}, which is not "
+            f"every one of {sorted(CONFIGS)} at every one of {suffixes} — an "
+            f"unbalanced panel would average different configurations over "
+            f"different seeds")
+    return tuple(suffixes)
+
+
+# What a held-aside score is scored ON, as the noun the printout and the figure
+# notes use. Read off the records rather than assumed: a held-aside ROW is one
+# more attempt on a problem the fit has otherwise seen, a held-aside PROBLEM one
+# the trunk alone has to place, and a reader cannot tell the two apart from the
+# number.
+UNIT_NOUN = {"row": "rows", "problem": "problems"}
+
+
+def panel_unit(arms):
+    """The holdout unit every arm of the panel scored on, or a hard failure if
+    they differ — a contrast averaged over both units is between the units as
+    much as between the arms."""
+    units = {r["config"].get("stop_unit", "row") for r in arms.values()}
+    require(len(units) == 1,
+            f"the panel's arms held aside {sorted(units)} — those are different "
+            f"quantities and a contrast pooled over them is not one contrast")
+    unit = units.pop()
+    require(unit in UNIT_NOUN, f"unknown stop unit {unit!r}")
+    return unit
+
 
 def load_panel():
     require(os.path.exists(MANIFEST),
             f"no {MANIFEST} — the panel manifest is what the arm records are "
             f"checked against, so it cannot be read without it")
     manifest = json.load(open(MANIFEST))
-    require(set(manifest["arms"]) == set(ARMS),
-            f"{MANIFEST} declares arms {sorted(manifest['arms'])}, this "
-            f"producer reads {sorted(ARMS)}")
+    suffixes = replicate_suffixes(manifest)
+    arm_names = tuple(c + suf for suf in suffixes for c in CONFIGS)
 
     arms = {}
-    for arm in ARMS:
+    for arm in arm_names:
         path = os.path.join(PANEL_DIR, f"{arm}.json")
         require(os.path.exists(path),
                 f"no {path} — the lr panel has not run at every seed. Run it "
@@ -163,14 +198,17 @@ def load_panel():
                 f"the arm, so the arms already recorded are skipped.")
         arms[arm] = json.load(open(path))
 
-    budget = panel_budget(arms)
+    # ONE PANEL IS ONE REGIME, read off the arms rather than off the trainer's
+    # current constants: the arms are only ever compared to each other, so a
+    # later change to the shipped budget or schedule must not make a finished
+    # panel unquotable.
+    budget, schedule = panel_regime(arms)
+    unit = panel_unit(arms)
     for arm, r in arms.items():
-        require(r["metrics"]["epochs"] == budget,
-                f"{arm} ran {r['metrics']['epochs']} epochs against the panel's "
-                f"{budget} — one panel is one budget")
         require(r["metrics"]["trace"]
-                and r["metrics"]["trace"][-1]["epoch"] == EPOCHS,
-                f"{arm}'s convergence trace does not reach its budget")
+                and r["metrics"]["trace"][-1]["epoch"] == budget,
+                f"{arm}'s convergence trace does not reach the panel's "
+                f"{budget}-epoch budget")
         # The record has to be the arm this producer thinks it is: an arm run by
         # hand with a different flag is a well-formed record of a different
         # experiment, and every figure below would be attributed to the wrong
@@ -202,7 +240,7 @@ def load_panel():
             f"but the log now ends at {now} — the stop-row draw moved, the "
             f"paired comparison is void. Re-run the panel.")
 
-    groups = seed_groups(arms)
+    groups = seed_groups(arms, suffixes)
 
     # What each arm's rates actually WERE, and the ratios the claims are about.
     # Stated here rather than only in the manifest, because a producer that
@@ -224,10 +262,10 @@ def load_panel():
                 and rates[arm][1] == LR_FIELD,
                 f"{arm} runs at {rates[arm]}, not the shipped field rate with a "
                 f"third of the shipped net rate")
-    return arms, rates, groups
+    return arms, rates, budget, schedule, unit, groups
 
 
-def seed_groups(arms):
+def seed_groups(arms, suffixes):
     """The panel regrouped into replicates: one entry per seed, holding that
     seed's arm name for every configuration.
 
@@ -236,7 +274,7 @@ def seed_groups(arms):
     estimates of that delta under different rows and different inits, which is
     why they are only ever averaged and never subtracted."""
     groups = []
-    for suffix in REPLICATE_SUFFIXES:
+    for suffix in suffixes:
         members = {cfg: cfg + suffix for cfg in CONFIGS}
         seeds = {int(arms[a]["config"].get("seed", SEED))
                  for a in members.values()}
@@ -358,17 +396,21 @@ def same_sign(*series):
 # --- the measurement -------------------------------------------------------
 
 def measure():
-    arms, rates, groups = load_panel()
+    arms, rates, budget, schedule, unit, groups = load_panel()
     curves = {arm: stop_curve(r) for arm, r in arms.items()}
     grid = curves[BASELINE][0]
     for arm, (ep, _) in curves.items():
         require(ep == grid,
                 f"{arm}'s trace is scored at different epochs than the shipped "
                 f"arm's — the deltas would not be like for like")
-    tail = [i for i, e in enumerate(grid) if e >= TAIL_FROM_EPOCH]
+    # The last third of the budget: past the stretch where these fits still
+    # improve, so a mean over it reads the level an arm settled at rather than
+    # whichever point of its wander the final checkpoint happened to land on.
+    tail_from = 2 * budget // 3
+    tail = [i for i, e in enumerate(grid) if e >= tail_from]
     require(len(tail) > 1,
             f"the trace carries {len(tail)} checkpoint(s) at or past epoch "
-            f"{TAIL_FROM_EPOCH} — the settled level is read over the last third "
+            f"{tail_from} — the settled level is read over the last third "
             f"of the budget, and it does not exist on a single point")
 
     for g in groups:
@@ -416,7 +458,7 @@ def measure():
     # Convergence is a per-fit property, read on each seed's arm and averaged;
     # the ratio is taken between those averages rather than per seed, so one
     # arm's late plateau cannot dominate through a division.
-    conv = {cfg: [converge_epoch(grid, curves[g["arms"][cfg]][1], TAIL_FROM_EPOCH)
+    conv = {cfg: [converge_epoch(grid, curves[g["arms"][cfg]][1], tail_from)
                   for g in groups]
             for cfg in (BASELINE, "net_slow")}
     ship_conv = statistics.fmean(conv[BASELINE])
@@ -426,6 +468,9 @@ def measure():
         "seeds": [g["seed"] for g in groups],
         "groups": groups,
         "tail_epochs": (grid[tail[0]], grid[tail[-1]], len(tail)),
+        "budget": budget,
+        "schedule": schedule,
+        "unit_noun": UNIT_NOUN[unit],
         "diverged": 1 if hits else 0,
         "diverge_epoch": hits[0] if hits else 0,
         "diverge_per_seed": diverge,
@@ -445,7 +490,7 @@ def figures():
     over = f"averaged over the panel's {seeds} seeds"
     paired = ("PAIRED against the shipped arm of its own seed — one seed is one "
               "held-out draw, so the arms inside it hold aside the same stop "
-              f"rows — then meaned over the {seeds} seeds")
+              f"{m['unit_noun']} — then meaned over the {seeds} seeds")
     out = [
         Figure("lr.shared_rate_diverged", m["diverged"], "d",
                "1 when the single-shared-rate arm (field rate pulled onto the "
@@ -511,9 +556,10 @@ def main():
     lo, hi, n = m["tail_epochs"]
     seeds = m["seeds"]
     print(f"lr panel  ({len(CONFIGS)} configurations x {len(seeds)} seeds "
-          f"{seeds}, full budget, one machine: {m['gpu']})")
-    print("  a contrast is taken WITHIN a seed (same held-out rows, paired) "
-          "and the seeds are averaged after;")
+          f"{seeds}, full budget ({m['budget']} epochs, {m['schedule']} rate), "
+          f"one machine: {m['gpu']})")
+    print(f"  a contrast is taken WITHIN a seed (same held-out "
+          f"{m['unit_noun']}, paired) and the seeds are averaged after;")
     print(f"  'tail' is the mean over the {n} checkpoints from epoch {lo} to "
           f"{hi}, 'final' the last epoch both traces are finite.")
     print(f"  convergence = first epoch from which the held-out score never "
@@ -543,8 +589,8 @@ def main():
         print(f"{cfg:>10}{net:>10.1e}{field:>10.1e}{field / net:>7.0f}x"
               f"{cells}{summary}{conv_cell:>11}")
     print()
-    print("  cost is against the shipped arm of the SAME seed on the same "
-          "held-out rows; positive = worse")
+    print(f"  cost is against the shipped arm of the SAME seed on the same "
+          f"held-out {m['unit_noun']}; positive = worse")
     print("  (shipped final "
           + ", ".join(f"s{s} {v:.4f}" for s, v in zip(seeds, m["ship_final"]))
           + "); 'converged' lists the per-seed epochs")

@@ -90,8 +90,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-from ablations._figures import Figure, require, panel_budget  # noqa: E402
-from pipeline.train_mirt import EPOCHS  # noqa: E402
+from ablations._figures import Figure, require, panel_regime  # noqa: E402
 from utils.paths import DB_SQLITE  # noqa: E402
 from utils.rating.model_constants import PCA_DIM, PRODUCTION_BLOCKS  # noqa: E402
 
@@ -116,12 +115,6 @@ SEEDS = (0, 1)
 # and the shipped row split leaves every problem partly trained.
 STOP_UNIT = "problem"
 
-# The last third of the budget: past the stretch where these fits still improve,
-# so a mean over it reads the level an arm settled at rather than whichever point
-# of its wander the final checkpoint happened to land on. Same window as the
-# other refit producers, so their tail readings mean the same thing.
-TAIL_FROM_EPOCH = 2 * EPOCHS // 3
-
 
 def arm_name(width, seed):
     """The manifest's name for one (width, seed) arm. The shipped width names
@@ -136,8 +129,8 @@ ARMS = {(w, s): arm_name(w, s) for w in WIDTHS for s in SEEDS}
 # --- the panel record ---------------------------------------------------------
 
 def load_panel():
-    """Every arm's record, checked for what makes this panel quotable: the
-    production budget, the manifest's own config, the held-out-problem split,
+    """Every arm's record, checked for what makes this panel quotable: one
+    regime, the manifest's own config, the held-out-problem split,
     pins agreeing across arms EXCEPT the width they sweep, the within-seed
     pairing, and a snapshot still matching the current attempt log."""
     require(os.path.exists(MANIFEST),
@@ -161,15 +154,17 @@ def load_panel():
         with open(path) as f:
             arms[key] = json.load(f)
 
-    budget = panel_budget(arms)
+    # ONE PANEL IS ONE REGIME, read off the arms rather than off the trainer's
+    # current constants: the arms are only ever compared to each other, so a
+    # later change to the shipped budget or schedule must not make a finished
+    # panel unquotable.
+    budget, schedule = panel_regime(arms)
     for key, r in arms.items():
         arm, (width, seed) = ARMS[key], key
-        require(r["metrics"]["epochs"] == budget,
-                f"{arm} ran {r['metrics']['epochs']} epochs against the panel's "
-                f"{budget} — one panel is one budget")
         require(r["metrics"]["trace"]
-                and r["metrics"]["trace"][-1]["epoch"] == EPOCHS,
-                f"{arm}'s convergence trace does not reach its budget")
+                and r["metrics"]["trace"][-1]["epoch"] == budget,
+                f"{arm}'s convergence trace does not reach the panel's "
+                f"{budget}-epoch budget")
         require(all(math.isfinite(float(t["stop_bce"]))
                     for t in r["metrics"]["trace"]),
                 f"{arm}'s held-out trace is not finite throughout. A width that "
@@ -266,7 +261,7 @@ def load_panel():
             f"the panel was measured at attempt-log frontier {base['db_max_id']} "
             f"but the log now ends at {now} — the held-out draw moved, the "
             f"paired comparison is void. Re-run the panel.")
-    return arms
+    return arms, budget, schedule
 
 
 # --- reading a convergence trace ----------------------------------------------
@@ -300,17 +295,23 @@ def same_sign(*series):
 # --- the measurement ----------------------------------------------------------
 
 def measure():
-    arms = load_panel()
+    arms, budget, schedule = load_panel()
     curves = {key: stop_curve(r) for key, r in arms.items()}
     grid = curves[(SHIPPED_WIDTH, SEEDS[0])][0]
     for key, (ep, _) in curves.items():
         require(ep == grid,
                 f"{ARMS[key]}'s trace is scored at different epochs than the "
                 f"baseline's — the deltas would not be like for like")
-    tail = [i for i, e in enumerate(grid) if e >= TAIL_FROM_EPOCH]
+    # The last third of the budget: past the stretch where these fits still
+    # improve, so a mean over it reads the level an arm settled at rather than
+    # whichever point of its wander the final checkpoint happened to land on.
+    # Same window as the other refit producers, so their tail readings mean the
+    # same thing.
+    tail_from = 2 * budget // 3
+    tail = [i for i, e in enumerate(grid) if e >= tail_from]
     require(len(tail) > 1,
             f"the trace carries {len(tail)} checkpoint(s) at or past epoch "
-            f"{TAIL_FROM_EPOCH} — the settled level and the wander it averages "
+            f"{tail_from} — the settled level and the wander it averages "
             f"over are read across the last third of the budget, and neither "
             f"exists on one point")
 
@@ -373,6 +374,8 @@ def measure():
 
     return {
         "tail_epochs": (grid[tail[0]], grid[tail[-1]], len(tail)),
+        "budget": budget,
+        "schedule": schedule,
         "level": level, "final": final, "contrasts": contrasts,
         "holdout_bce": {w: statistics.fmean(level[(w, s)] for s in SEEDS)
                         for w in WIDTHS},
@@ -441,14 +444,15 @@ def main():
     lo, hi, n = m["tail_epochs"]
     print(f"\nfeatures panel — methodology §1.3, the joint-PCA activation width")
     print(f"{len(WIDTHS)} widths x {len(SEEDS)} seeds {list(SEEDS)}, full budget "
-          f"({EPOCHS} epochs), one machine ({m['gpu']}),")
+          f"({m['budget']} epochs, {m['schedule']} rate), one machine "
+          f"({m['gpu']}),")
     print(f"{m['rows']:,d} attempt rows per arm. Scored on HELD-OUT PROBLEMS "
           f"(stop_unit={STOP_UNIT!r}): a held problem's")
     print(f"parameters come from the feature trunk alone, which is what a width "
           f"is judged on. Held aside: "
           + ", ".join(f"s{s} {m['stop_rows'][s]:,d} rows" for s in SEEDS) + ".")
     print(f"'tail' is the mean over the {n} checkpoints from epoch {lo} to "
-          f"{hi}; 'final' is epoch {EPOCHS} alone.")
+          f"{hi}; 'final' is epoch {m['budget']} alone.")
 
     print(f"\n{'width':>7}"
           + "".join(f"{f'tail s{s}':>11}{f'final s{s}':>11}" for s in SEEDS)

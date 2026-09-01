@@ -83,8 +83,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-from ablations._figures import Figure, require, panel_budget  # noqa: E402
-from pipeline.train_mirt import EPOCHS  # noqa: E402
+from ablations._figures import Figure, require, panel_regime  # noqa: E402
 from utils.paths import DB_SQLITE  # noqa: E402
 from utils.rating.fit_rank_curves import CALIBRATION_P  # noqa: E402
 from utils.rating.model_constants import SEED, SIZES  # noqa: E402
@@ -121,10 +120,25 @@ def replicate_suffixes(manifest):
             f"different seeds")
     return tuple(suffixes)
 
-# The last third of the budget: past the stretch where these fits still improve,
-# so a mean over it reads the level an arm settled at rather than whichever
-# point of its wander the final checkpoint happened to land on.
-TAIL_FROM_EPOCH = 2 * EPOCHS // 3
+
+# What a held-aside score is scored ON, as the noun the printout uses. Read off
+# the records rather than assumed: a held-aside ROW is one more attempt on a
+# problem the fit has otherwise seen, a held-aside PROBLEM one the trunk alone
+# has to place, and a reader cannot tell the two apart from the number.
+UNIT_NOUN = {"row": "rows", "problem": "problems"}
+
+
+def panel_unit(arms):
+    """The holdout unit every arm of the panel scored on, or a hard failure if
+    they differ — a contrast averaged over both units is between the units as
+    much as between the arms."""
+    units = {r["config"].get("stop_unit", "row") for r in arms.values()}
+    require(len(units) == 1,
+            f"the panel's arms held aside {sorted(units)} — those are different "
+            f"quantities and a contrast pooled over them is not one contrast")
+    unit = units.pop()
+    require(unit in UNIT_NOUN, f"unknown stop unit {unit!r}")
+    return unit
 
 
 # --- the panel -------------------------------------------------------------
@@ -147,14 +161,17 @@ def load_panel():
                 f"unit is the arm, so the arms already recorded are skipped.")
         arms[arm] = json.load(open(path))
 
-    budget = panel_budget(arms)
+    # ONE PANEL IS ONE REGIME, read off the arms rather than off the trainer's
+    # current constants: the arms are only ever compared to each other, so a
+    # later change to the shipped budget or schedule must not make a finished
+    # panel unquotable.
+    budget, schedule = panel_regime(arms)
+    unit = panel_unit(arms)
     for arm, r in arms.items():
-        require(r["metrics"]["epochs"] == budget,
-                f"{arm} ran {r['metrics']['epochs']} epochs against the panel's "
-                f"{budget} — one panel is one budget")
         require(r["metrics"]["trace"]
-                and r["metrics"]["trace"][-1]["epoch"] == EPOCHS,
-                f"{arm}'s convergence trace does not reach its budget")
+                and r["metrics"]["trace"][-1]["epoch"] == budget,
+                f"{arm}'s convergence trace does not reach the panel's "
+                f"{budget}-epoch budget")
         # The record has to be the arm this producer thinks it is: an arm run by
         # hand with a different flag is a well-formed record of a different
         # experiment, and every figure below would be attributed to the wrong
@@ -191,7 +208,7 @@ def load_panel():
             f"the panel was measured at attempt-log frontier {base['db_max_id']} "
             f"but the log now ends at {now} — the stop-row draw moved, the "
             f"paired comparison is void. Re-run the panel.")
-    return arms, seed_groups(arms, suffixes)
+    return arms, budget, schedule, unit, seed_groups(arms, suffixes)
 
 
 def seed_groups(arms, suffixes):
@@ -283,17 +300,21 @@ def floors_above_calibration(arm):
 # --- the measurement -------------------------------------------------------
 
 def measure():
-    arms, groups = load_panel()
+    arms, budget, schedule, unit, groups = load_panel()
     curves = {arm: stop_curve(r) for arm, r in arms.items()}
     grid = curves[BASELINE][0]
     for arm, (ep, _) in curves.items():
         require(ep == grid,
                 f"{arm}'s trace is scored at different epochs than the shipped "
                 f"arm's — the deltas would not be like for like")
-    tail = [i for i, e in enumerate(grid) if e >= TAIL_FROM_EPOCH]
+    # The last third of the budget: past the stretch where these fits still
+    # improve, so a mean over it reads the level an arm settled at rather than
+    # whichever point of its wander the final checkpoint happened to land on.
+    tail_from = 2 * budget // 3
+    tail = [i for i, e in enumerate(grid) if e >= tail_from]
     require(len(tail) > 1,
             f"the trace carries {len(tail)} checkpoint(s) at or past epoch "
-            f"{TAIL_FROM_EPOCH} — the settled level and the wander around it "
+            f"{tail_from} — the settled level and the wander around it "
             f"are read over the last third of the budget, and neither exists "
             f"on a single point")
 
@@ -371,6 +392,9 @@ def measure():
                                 / max(min(dist["barrier_off"]["high"]), 1e-9)),
         "wander_sd": statistics.fmean(w["sd"] for w in wander),
         "wander_range": statistics.fmean(w["range"] for w in wander),
+        "budget": budget,
+        "schedule": schedule,
+        "unit_noun": UNIT_NOUN[unit],
         "gpu": arms[BASELINE]["pins"]["gpu"],
     }
 
@@ -482,11 +506,12 @@ def main():
     lo, hi, n = m["tail_epochs"]
     seeds = m["seeds"]
     print(f"barrier panel  ({len(CONFIGS)} configurations x {len(seeds)} seeds "
-          f"{seeds}, full budget, one machine: {m['gpu']})")
-    print("  a contrast is taken WITHIN a seed (same held-out rows, paired) "
-          "and the seeds are averaged after;")
+          f"{seeds}, full budget ({m['budget']} epochs, {m['schedule']} rate), "
+          f"one machine: {m['gpu']})")
+    print(f"  a contrast is taken WITHIN a seed (same held-out "
+          f"{m['unit_noun']}, paired) and the seeds are averaged after;")
     print(f"  'tail' is the mean over the {n} checkpoints from epoch {lo} to "
-          f"{hi}, 'final' is epoch {EPOCHS}.")
+          f"{hi}, 'final' is epoch {m['budget']}.")
 
     print("\nper-fit properties (each arm on its own, no contrast)")
     print(f"{'arm':>14}{'seed':>6}{'rating p0.1..p99.9':>27}{'span':>9}"

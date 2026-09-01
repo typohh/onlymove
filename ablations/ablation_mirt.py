@@ -101,6 +101,13 @@ def snapshot_pins(cfg=None):
         "blocks": str(cfg.get("blocks", PRODUCTION_BLOCKS)),
         "pca_dim": int(cfg.get("pca_dim", PCA_DIM)),
         "k_axes": int(cfg.get("k_axes", K_AXES)),
+        # THE REGIME: what a baseline change moves. Effective values, so an arm
+        # that sweeps either is pinned to what it ran with, and a record written
+        # under a previous baseline carries the one it was measured against —
+        # its config is `{}` either way, which is exactly why the config alone
+        # cannot tell a stale shipped arm from a current one.
+        "epochs": int(cfg.get("epochs", train_mirt.EPOCHS)),
+        "lr_schedule": str(cfg.get("lr_schedule", train_mirt.LR_SCHEDULE)),
         "torch": torch.__version__,
         "gpu": (torch.cuda.get_device_name(0)
                 if torch.cuda.is_available() else "cpu"),
@@ -141,9 +148,12 @@ def main(argv=None):
     ap.add_argument("--seed", type=int, default=None,
                     help="training seed (default: the production seed)")
     ap.add_argument("--epochs", type=int, default=None,
-                    help="epoch budget. SMOKE ONLY when not the production "
-                         "budget — recorded in the arm JSON, and producers "
-                         "refuse to quote a short-budget arm")
+                    help=f"epoch budget (production {train_mirt.EPOCHS}). A "
+                         f"panel is one budget: every producer requires the "
+                         f"arms it reads to share one, so a short arm is a "
+                         f"smoke arm and is never quotable beside full ones; "
+                         f"a budget SWEEP is a panel whose manifest declares "
+                         f"the budgets, read by its own producer")
     # --- the barrier cluster (methodology §1.7) ---
     ap.add_argument("--shallow-w", type=float, default=None,
                     help="the one-sided slope barrier's weight (production "
@@ -201,8 +211,11 @@ def main(argv=None):
                          "substitutes for dropout")
     ap.add_argument("--lr-schedule", choices=("constant", "cosine"),
                     default=None,
-                    help="constant is what ships; cosine decays both rates to "
-                         "zero over the budget, holding their ratio fixed")
+                    help=f"{train_mirt.LR_SCHEDULE} ships: cosine decays both "
+                         f"rates to zero over the budget, holding their ratio "
+                         f"fixed; constant is the comparison arm. A schedule "
+                         f"is only comparable at matched WORK (the recorded "
+                         f"learning-rate integral), not at matched epochs")
     ap.add_argument("--pca-seed", type=int, default=None,
                     help="seed for the randomized joint-PCA FEATURE BASIS alone "
                          "(default: the one seed). Pinning it while --seed "

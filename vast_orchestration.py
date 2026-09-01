@@ -1940,6 +1940,25 @@ def cmd_queue(args):
                  dry, capture_output=True)
     print(f"  pushed {ABLATE_QUEUE} and the panel manifests")
 
+    if not sync_only and not dry:
+        # ONE POOL PER BOX. A pool idles on an empty queue rather than exiting,
+        # so the previous one is usually still alive — and it re-reads the
+        # queue file just pushed, so it is already doing what a second launch
+        # would do. Two pools each fill the card to their own level, launch
+        # into each other's VRAM, and hand out the same arms twice.
+        # The bracket keeps the probing shell's own command line, which
+        # carries this pattern, from matching it.
+        live = _run_or_show(base_ssh + ["pgrep -fc '[a]blations.run_queue' "
+                                        "|| true"],
+                            False, capture_output=True, text=True, timeout=30)
+        n_live = int((getattr(live, "stdout", "") or "0").strip().splitlines()[0]
+                     or 0) if live is not None else 0
+        if n_live:
+            print(f"  a pool is already live on {inst_id} ({n_live} process); "
+                  f"it re-reads the pushed queue at its next slot, so nothing "
+                  f"was launched. Kill it first to restart with new code.")
+            sync_only = True
+
     if not sync_only:
         log = f"{REMOTE_DIR}/{ABLATE_LOG_PREFIX}_queue.log"
         cmd = (f": > {log} && cd {REMOTE_DIR} && "

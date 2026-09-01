@@ -2,6 +2,16 @@
 """What stopping on the held-aside score would cost (methodology §1.8), read off
 the convergence traces the panels already wrote.
 
+THE SUBJECT IS THE CONSTANT-RATE FIT — the alternative to the shipped decayed
+schedule, not the shipped fit itself. Both quantities below are properties of
+what a constant rate's closing window looks like: it takes full-size steps long
+after the fit has arrived, which is the wander a patience rule would be choosing
+among. A decayed run's closing window is a different shape and neither figure
+here describes it. The arms read are therefore the SCHEDULE PANEL's constant-rate
+arms, which are the permanent record of that alternative; every other panel's
+arms follow whatever the trainer's baseline currently is and would stop being
+constant-rate the moment that baseline moves.
+
 §1.8 spends a fixed budget and selects no checkpoint, and the argument against a
 patience rule is that it would choose among epochs differing by noise. That is
 checkable without training anything: every full-budget arm records its held-out
@@ -41,30 +51,41 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-from ablations._figures import Figure, require  # noqa: E402
-from pipeline.train_mirt import EPOCHS  # noqa: E402
-from utils.rating.model_constants import PCA_DIM  # noqa: E402
+from ablations._figures import Figure, require, panel_regime  # noqa: E402
 
 TIER = "refit"
 
 DEV_RUNS = os.path.join(PROJECT_ROOT, "ablations", "dev_runs")
+# The panel that holds the constant-rate arms. Named rather than searched for:
+# these arms are what this producer is ABOUT, and a scan over every panel would
+# quietly swap in whatever schedule the trainer's baseline happens to run.
+SCHEDULE_PANEL = "schedule"
 
 # Patience settings to replay, in CHECKPOINTS. Spanning an order of magnitude
 # because the point is how much the answer depends on this number: a single
 # setting would report one epoch and say nothing about what chose it.
 PATIENCES = (5, 10, 20, 50)
 
-# The window every spread here is read over: the last third of the budget.
-TAIL_FROM = 2 * EPOCHS // 3
+# Config keys that select the DRAW or the initialization rather than anything
+# the model is made of. An arm carrying only these is a replicate of the
+# constant-rate configuration; one carrying anything else — another budget,
+# another feature basis, a decayed rate — is a different fit.
+REPLICATE_KEYS = ("seed", "stop_unit", "split_seed")
 
 
-def shipped_arms(unit="row"):
-    """Full-budget runs of the shipped configuration at one holdout unit, keyed
-    by seed.
+def constant_arms(unit="row"):
+    """The constant-rate arms at one holdout unit, keyed by seed, with the
+    (budget, schedule) regime they share.
 
-    The shipped configuration is an empty config or one carrying nothing but a
-    seed and the unit. Several panels run it, and runs at one seed are bitwise
-    identical, so a seed contributes ONE trace however many panels produced it.
+    The held-aside draw is PINNED across these arms (`split_seed`), so what
+    separates two of them is the initialization alone — which is exactly what
+    the between-seed spread below is asked to be about.
+
+    THE BUDGET IS READ OFF THE ARMS, never off the trainer's current constant:
+    these traces are only ever compared to each other, and a producer pinned to
+    the shipped budget would lose the whole record the moment that constant
+    moves. What is required instead is that the arms read here share one budget
+    and one schedule.
 
     THE UNIT IS THE WHOLE POINT OF THE ARGUMENT BELOW. The row split shares its
     users and its problems with training — a held-out row is one more attempt by
@@ -72,31 +93,43 @@ def shipped_arms(unit="row"):
     it keeps improving long after generalization to unseen problems has
     arrived. It is a convergence detector and was never the criterion the budget
     was chosen on."""
-    by_seed = {}
-    for panel in sorted(os.listdir(DEV_RUNS)) if os.path.isdir(DEV_RUNS) else []:
-        panel_dir = os.path.join(DEV_RUNS, panel)
-        if not os.path.isdir(panel_dir):
+    panel_dir = os.path.join(DEV_RUNS, SCHEDULE_PANEL)
+    require(os.path.isdir(panel_dir),
+            f"no {panel_dir} — this producer replays a patience rule on the "
+            f"constant-rate arms that panel records, and there are none")
+    by_seed, records = {}, {}
+    for entry in sorted(os.listdir(panel_dir)):
+        if not entry.endswith(".json"):
             continue
-        for entry in sorted(os.listdir(panel_dir)):
-            if not entry.endswith(".json"):
-                continue
-            rec = json.load(open(os.path.join(panel_dir, entry)))
-            cfg = dict(rec["config"])
-            seed = cfg.pop("seed", 0)
-            if cfg.pop("stop_unit", "row") != unit:
-                continue
-            # The width-sweep panel writes the width explicitly on every arm,
-            # so its baseline arm carries one and IS the shipped configuration;
-            # any other width is a different fit and not a replicate of this one.
-            if cfg.pop("pca_dim", PCA_DIM) != PCA_DIM:
-                continue
-            if cfg or rec["metrics"]["epochs"] != EPOCHS:
-                continue
-            trace = rec["metrics"]["trace"]
-            require(trace and trace[-1]["epoch"] == EPOCHS,
-                    f"{panel}/{entry[:-5]}'s trace does not reach its budget")
-            by_seed.setdefault(seed, trace)
-    return by_seed
+        arm = entry[:-len(".json")]
+        with open(os.path.join(panel_dir, entry)) as f:
+            rec = json.load(f)
+        cfg = dict(rec["config"])
+        seed = cfg.pop("seed", 0)
+        if cfg.pop("stop_unit", "row") != unit:
+            continue
+        for key in REPLICATE_KEYS:
+            cfg.pop(key, None)
+        if cfg or rec["metrics"].get("lr_schedule", "constant") != "constant":
+            continue
+        prior = records.get(seed, (None, None))[0]
+        require(prior is None,
+                f"{SCHEDULE_PANEL}/{arm} and {SCHEDULE_PANEL}/{prior} are both "
+                f"seed {seed} at the {unit!r} unit — one seed is one "
+                f"observation, and counting a repeat twice would report it as "
+                f"agreement between runs")
+        records[seed] = (arm, rec)
+    require(records,
+            f"no constant-rate arm of {SCHEDULE_PANEL} holds aside "
+            f"{unit}s — run that panel's constant arms first")
+    budget, schedule = panel_regime({a: r for a, r in records.values()})
+    for seed, (arm, rec) in records.items():
+        trace = rec["metrics"]["trace"]
+        require(trace and trace[-1]["epoch"] == budget,
+                f"{SCHEDULE_PANEL}/{arm}'s trace does not reach the "
+                f"{budget}-epoch budget its arms share")
+        by_seed[seed] = trace
+    return by_seed, budget, schedule
 
 
 def patience_epoch(trace, patience):
@@ -116,7 +149,7 @@ def patience_epoch(trace, patience):
     return best_epoch, best
 
 
-def tail_shape(by_seed):
+def tail_shape(by_seed, tail_from):
     """(slope per 500 epochs, detrended sd), both in millinats, averaged over
     the runs given. Fitting a line through the closing window separates a fit
     still descending from noise around a settled one — a spread read as noise
@@ -124,7 +157,7 @@ def tail_shape(by_seed):
     trend, detrended = [], []
     for trace in by_seed.values():
         pts = [(r["epoch"], r["stop_bce"]) for r in trace
-               if r["epoch"] >= TAIL_FROM]
+               if r["epoch"] >= tail_from]
         x = np.array([e for e, _ in pts], float)
         y = np.array([v for _, v in pts], float)
         slope, intercept = np.polyfit(x, y, 1)
@@ -134,11 +167,12 @@ def tail_shape(by_seed):
 
 
 def measure():
-    by_seed = shipped_arms()
+    by_seed, budget, schedule = constant_arms()
     require(len(by_seed) >= 2,
-            f"only {len(by_seed)} seed(s) of the shipped configuration carry a "
-            f"full-budget trace under {DEV_RUNS} — the whole point is how far "
-            f"the chosen epoch moves between runs, which one run cannot show")
+            f"only {len(by_seed)} seed(s) of the constant-rate configuration "
+            f"carry a full-budget trace under {DEV_RUNS}/{SCHEDULE_PANEL} — the "
+            f"whole point is how far the chosen epoch moves between runs, which "
+            f"one run cannot show")
 
     chosen = {}          # (seed, patience) -> epoch
     gains = []
@@ -165,16 +199,26 @@ def measure():
     # patience rule would stop on; whole held-out problems are what a budget
     # should actually be chosen on, since only that unit can tell continued
     # fitting apart from continued generalizing.
-    trend, detrended = tail_shape(by_seed)
-    prob = shipped_arms("problem")
+    # The window every spread here is read over: the last third of the budget
+    # the arms actually ran, not the trainer's current one.
+    tail_from = 2 * budget // 3
+    trend, detrended = tail_shape(by_seed, tail_from)
+    prob, prob_budget, prob_schedule = constant_arms("problem")
     require(prob,
-            "no shipped-configuration arm holds out whole PROBLEMS — without "
-            "one the closing trend can only be read on the row split, which "
-            "shares its users and problems with training and cannot say "
-            "whether a longer budget would generalize better")
-    prob_trend, prob_detrended = tail_shape(prob)
+            "no constant-rate arm holds out whole PROBLEMS — without one the "
+            "closing trend can only be read on the row split, which shares its "
+            "users and problems with training and cannot say whether a longer "
+            "budget would generalize better")
+    require((prob_budget, prob_schedule) == (budget, schedule),
+            f"the problem-unit arms ran {prob_budget} epochs at "
+            f"{prob_schedule!r} against the row-unit arms' {budget} at "
+            f"{schedule!r} — the two closing trends would be read over "
+            f"different windows of different fits, and the comparison between "
+            f"the units is the whole reason both are reported")
+    prob_trend, prob_detrended = tail_shape(prob, tail_from)
 
     return {"seeds": len(by_seed), "settings": len(PATIENCES),
+            "budget": budget, "schedule": schedule,
             "trend_per_500": trend, "detrended_sd": detrended,
             "prob_seeds": len(prob), "prob_trend_per_500": prob_trend,
             "prob_detrended_sd": prob_detrended,
@@ -191,9 +235,10 @@ def figures():
     m = measure()
     return [
         Figure("stopping.seeds", m["seeds"], "d",
-               "seeds of the shipped configuration whose recorded traces a "
-               "patience rule is replayed on; runs of one seed are bitwise "
-               "identical, so each seed counts once"),
+               "seeds of the CONSTANT-RATE configuration whose recorded traces "
+               "a patience rule is replayed on. They share one held-aside "
+               "draw, so what separates two of them is the initialization "
+               "alone"),
         Figure("stopping.patience_spread_settings", m["spread_settings"], "~10",
                "how far the epoch a patience rule selects moves when only the "
                "PATIENCE SETTING changes, averaged over seeds — the rule's "
@@ -253,8 +298,10 @@ def figures():
 
 def main():
     m = measure()
-    print(f"patience rules replayed on {m['seeds']} seed(s) of the shipped "
-          f"configuration\n")
+    print(f"patience rules replayed on {m['seeds']} seed(s) of the "
+          f"CONSTANT-RATE configuration")
+    print(f"  ({m['budget']} epochs, {m['schedule']} rate, held-aside draw "
+          f"pinned across the seeds)\n")
     print(f"{'patience (epochs)':>20}" +
           "".join(f"{f'seed {s}':>10}" for s in sorted(
               {s for s, _ in m["chosen"]})))

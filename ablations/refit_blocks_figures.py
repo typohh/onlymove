@@ -133,8 +133,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-from ablations._figures import Figure, require, panel_budget  # noqa: E402
-from pipeline.train_mirt import EPOCHS  # noqa: E402
+from ablations._figures import Figure, require, panel_regime  # noqa: E402
 from utils.paths import DB_SQLITE  # noqa: E402
 from utils.rating.model_constants import K_AXES, PRODUCTION_BLOCKS  # noqa: E402
 
@@ -162,12 +161,6 @@ CLAIM_UNIT = "problem"
 SEEDS = (0, 1, 2)
 ARMS = tuple(f"{layout}_{unit}_s{seed}"
              for unit in UNITS for layout in LAYOUTS for seed in SEEDS)
-
-# The last third of the budget, the same window `refit_barrier_figures` reads its
-# settled level over: past the stretch where these fits still improve, so a mean
-# over it reads the level an arm settled at rather than whichever point of its
-# wander the final checkpoint happened to land on.
-TAIL_FROM_EPOCH = 2 * EPOCHS // 3
 
 
 def arm_name(layout, unit, seed):
@@ -200,14 +193,16 @@ def load_panel():
         with open(path) as f:
             arms[arm] = json.load(f)
 
-    budget = panel_budget(arms)
+    # ONE PANEL IS ONE REGIME, read off the arms rather than off the trainer's
+    # current constants: the arms are only ever compared to each other, so a
+    # later change to the shipped budget or schedule must not make a finished
+    # panel unquotable.
+    budget, schedule = panel_regime(arms)
     for arm, r in arms.items():
-        require(r["metrics"]["epochs"] == budget,
-                f"{arm} ran {r['metrics']['epochs']} epochs against the panel's "
-                f"{budget} — one panel is one budget")
         require(r["metrics"]["trace"]
-                and r["metrics"]["trace"][-1]["epoch"] == EPOCHS,
-                f"{arm}'s convergence trace does not reach its budget")
+                and r["metrics"]["trace"][-1]["epoch"] == budget,
+                f"{arm}'s convergence trace does not reach the panel's "
+                f"{budget}-epoch budget")
 
     # THE ARM RAN THE MANIFEST'S CONFIG. Every figure below is about a named
     # layout, at a named stop unit, at a named seed, so an arm whose record
@@ -310,7 +305,7 @@ def load_panel():
             f"the panel was measured at attempt-log frontier {base['db_max_id']} "
             f"but the log now ends at {now} — the stop-row draw moved, the "
             f"paired comparison is void. Re-run the panel.")
-    return arms
+    return arms, budget, schedule
 
 
 # --- reading a convergence trace ----------------------------------------------
@@ -322,12 +317,12 @@ def stop_curve(record):
             [float(r["stop_bce"]) for r in trace])
 
 
-def tail_window(epochs):
+def tail_window(epochs, tail_from):
     """Indices of the checkpoints in the last third of the budget."""
-    idx = [i for i, e in enumerate(epochs) if e >= TAIL_FROM_EPOCH]
+    idx = [i for i, e in enumerate(epochs) if e >= tail_from]
     require(len(idx) > 1,
             f"the trace carries {len(idx)} checkpoint(s) at or past epoch "
-            f"{TAIL_FROM_EPOCH} — the settled level is read over the last third "
+            f"{tail_from} — the settled level is read over the last third "
             f"of the budget, and a mean over one point is a final-epoch reading "
             f"under another name")
     return idx
@@ -366,7 +361,7 @@ def read_unit(curves, unit, tail):
 
 
 def measure():
-    arms = load_panel()
+    arms, budget, schedule = load_panel()
     curves = {arm: stop_curve(r) for arm, r in arms.items()}
     grid = curves[arm_name("shipped", UNITS[0], SEEDS[0])][0]
     for arm, (ep, bce) in curves.items():
@@ -381,9 +376,15 @@ def measure():
                 f"{arm}'s held-out trace is not finite throughout — a diverged "
                 f"arm is not a slower version of this panel's finding, and no "
                 f"figure here describes it")
-    tail = tail_window(grid)
+    # The last third of the budget, the same window `refit_barrier_figures`
+    # reads its settled level over: past the stretch where these fits still
+    # improve, so a mean over it reads the level an arm settled at rather than
+    # whichever point of its wander the final checkpoint happened to land on.
+    tail = tail_window(grid, 2 * budget // 3)
     return {
         "units": {unit: read_unit(curves, unit, tail) for unit in UNITS},
+        "budget": budget,
+        "schedule": schedule,
         "tail_from": grid[tail[0]],
         "tail_points": len(tail),
         "gpu": arms[arm_name("shipped", UNITS[0], SEEDS[0])]["pins"]["gpu"],
@@ -461,11 +462,12 @@ def figures():
 
 def main():
     m = measure()
-    print(f"blocks panel  (all arms full budget, one machine: {m['gpu']})")
+    print(f"blocks panel  (all arms full budget: {m['budget']} epochs, "
+          f"{m['schedule']} rate; one machine: {m['gpu']})")
     print(f"  the shipped trunk input ({PRODUCTION_BLOCKS!r}) against "
           f"{ALL_BLOCKS!r}, which adds the answer-derived blocks back")
     print(f"  'last third' = the {m['tail_points']} checkpoints from epoch "
-          f"{m['tail_from']} to {EPOCHS}")
+          f"{m['tail_from']} to {m['budget']}")
     print(f"  a delta is PAIRED within one seed AND one stop unit; no "
           f"cross-seed delta and no cross-unit comparison is quotable")
     for unit in UNITS:

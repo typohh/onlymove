@@ -100,8 +100,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-from ablations._figures import Figure, require  # noqa: E402
-from pipeline.train_mirt import EPOCHS  # noqa: E402
+from ablations._figures import Figure, require, panel_regime  # noqa: E402
 from utils.paths import DB_SQLITE  # noqa: E402
 from utils.rating.model_constants import SEED  # noqa: E402
 
@@ -132,19 +131,23 @@ SHIPPED_MULT_FILE = os.path.join("ratings", "rating_constants.json")
 # --- the arms --------------------------------------------------------------
 
 def load_shipped_arms():
-    """Every full-budget arm under dev_runs whose config is the shipped one, as
-    a list of dicts.
+    """Every arm under dev_runs whose config is the shipped one, as a list of
+    dicts, plus the (budget, schedule) regime they all ran under.
 
-    A shipped-configuration arm that is not at the production budget raises: it
-    is a well-formed record of a fit nobody may quote, and dropping it quietly
-    would leave the count of observations depending on what happened to be lying
-    on disk. Two routes reach a short budget and they are refused differently.
-    An arm run with `--epochs` (which is how `run_panel --smoke-epochs`
-    overrides a whole panel) records the override in its CONFIG, so it is not
-    this configuration at all and never becomes a candidate — that is what keeps
-    a throughput-calibration panel out. What this check catches is the other
-    route: the production budget itself moving, which leaves every arm on disk
-    recorded at a budget that is no longer the shipped one."""
+    THE REGIME IS READ OFF THE ARMS, not off the trainer's current constants:
+    these records are only ever compared to each other, so an arm measured under
+    a retired baseline keeps its meaning and a producer pinned to the shipped
+    budget would make every one of them unquotable the moment that constant
+    moves. What is required instead is that the arms READ HERE share one regime,
+    since the seed spread this producer prices is a spread between runs of one
+    configuration and two regimes are two configurations. A mixed set raises
+    rather than being narrowed to one regime: dropping arms quietly would leave
+    the count of observations depending on what happened to be lying on disk.
+
+    A SHORT SMOKE ARM never becomes a candidate by a different route: an arm run
+    with `--epochs` (which is how `run_panel --smoke-epochs` overrides a whole
+    panel) records the override in its CONFIG, so it is not this configuration
+    at all — that is what keeps a throughput-calibration panel out."""
     require(os.path.isdir(DEV_RUNS),
             f"no {DEV_RUNS} — this producer reads the sweep out of panels that "
             f"have already run, and there are none")
@@ -163,13 +166,6 @@ def load_shipped_arms():
             if set(cfg) - SHIPPED_CONFIG_KEYS:
                 continue
             metrics = record["metrics"]
-            require(metrics.get("epochs") == EPOCHS,
-                    f"{panel}/{arm} carries the shipped configuration but ran "
-                    f"{metrics.get('epochs')} epochs, not the production budget "
-                    f"of {EPOCHS} — a short-budget arm is not quotable, and it "
-                    f"is a shipped-configuration record rather than something "
-                    f"this producer can pass over. Remove it, or re-run it at "
-                    f"the production budget")
             arms.append({
                 "panel": panel, "arm": arm, "name": f"{panel}/{arm}",
                 "seed": int(cfg.get("seed", SEED)),
@@ -178,9 +174,10 @@ def load_shipped_arms():
             })
     require(arms,
             f"no arm under {DEV_RUNS} carries the shipped configuration (an "
-            f"empty config, or one holding nothing but `seed`) at the "
-            f"production budget — run a panel that includes such an arm first")
-    return arms
+            f"empty config, or one holding nothing but `seed`) — run a panel "
+            f"that includes such an arm first")
+    budget, schedule = panel_regime({a["name"]: a["record"] for a in arms})
+    return arms, budget, schedule
 
 
 def with_sweep(arms):
@@ -323,7 +320,8 @@ def dedupe_by_seed(arms, sweeps):
 # --- the measurement -------------------------------------------------------
 
 def measure():
-    arms = with_sweep(load_shipped_arms())
+    arms, budget, schedule = load_shipped_arms()
+    arms = with_sweep(arms)
     pins = check_pins(arms)
 
     sweeps = {a["name"]: sweep_of(a) for a in arms}
@@ -379,6 +377,8 @@ def measure():
         "inside": int(unity_cost < seed_spread),
         "interior": int(not any(p["at_boundary"] for p in per_arm)),
         "pins": pins,
+        "budget": budget,
+        "schedule": schedule,
     }
 
 
@@ -451,6 +451,8 @@ def main():
     print(f"  grid {grid[0]:.2f}..{grid[-1]:.2f} in steps of {step:.2f} "
           f"({len(grid)} points), shipped multiplier {m['shipped_mult']:g}")
     print(f"  one machine: {pins['gpu']}, attempt log to id {pins['db_max_id']}")
+    print(f"  all arms at one regime: {m['budget']} epochs, {m['schedule']} "
+          f"rate")
     print("  the multiplier pivots at the shipped rating: the 80%-clear anchor")
     print("  is held and only the steepness around it moves.")
     print("  ESTIMAND: held-aside ROWS, not held-out users — each row's user is")

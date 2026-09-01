@@ -7,14 +7,23 @@ stack varies, and that this was checked rather than assumed: a repeated run on
 one machine reproduces every per-problem output BITWISE. That check needs two
 independent invocations of one configuration on one machine, and the refit
 panels supply them for free — several panels carry a `shipped` arm, each run in
-its own process, and any two arms anywhere under `dev_runs/` whose recorded
-config is identical are exactly such a repeat.
+its own process, and any two arms anywhere under `dev_runs/` whose EFFECTIVE
+configuration is identical are exactly such a repeat.
+
+EFFECTIVE means the recorded config together with the budget and the schedule
+the arm actually ran, which are properties of the run rather than of the
+trainer's constants at the moment this is read. Two arms of one config at two
+budgets are not a repeat, and nothing here is measured against the shipped
+budget: a pair keeps its meaning after the baseline moves, and what such a move
+costs is only that the pairs on disk describe the PREVIOUS regime until a panel
+is re-measured. The printout says which regime each pair ran under for that
+reason.
 
 So this producer trains nothing and adds no arms. It groups every arm record by
-its config, keeps the groups holding more than one arm, and compares those arms'
-written artifacts byte for byte. The evidence grows on its own as panels are
-added: a second configuration repeated across two panels becomes a second pair
-with no manifest change anywhere.
+its effective configuration, keeps the groups holding more than one arm, and
+compares those arms' written artifacts byte for byte. The evidence grows on its
+own as panels are added: a second configuration repeated across two panels
+becomes a second pair with no manifest change anywhere.
 
 WHAT A DIFFERENCE WOULD MEAN. The comparison is between processes on one
 machine at one revision, which is the only claim §1.8 makes — across machines
@@ -37,7 +46,10 @@ if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 from ablations._figures import Figure, require  # noqa: E402
-from pipeline.train_mirt import EPOCHS  # noqa: E402
+# Imported as a MODULE and read in `main` alone, for one line of printed
+# context. Nothing here selects, groups or checks an arm against the trainer's
+# current constants — a repeat is a repeat under the regime it ran.
+from pipeline import train_mirt  # noqa: E402
 
 TIER = "refit"
 
@@ -76,9 +88,15 @@ def _rows(path):
         return max(0, sum(1 for _ in f) - 1)
 
 
+def regime_of(record):
+    """The (budget, schedule) an arm actually ran — what a repeat has to match
+    beyond its config, since one config at two budgets is two experiments."""
+    metrics = record["metrics"]
+    return int(metrics["epochs"]), str(metrics.get("lr_schedule", "constant"))
+
+
 def load_arms():
-    """Every full-budget arm record under dev_runs, as
-    (panel, arm, record, arm_dir)."""
+    """Every arm record under dev_runs, as (panel, arm, record, arm_dir)."""
     out = []
     for panel in sorted(os.listdir(DEV_RUNS)) if os.path.isdir(DEV_RUNS) else []:
         panel_dir = os.path.join(DEV_RUNS, panel)
@@ -89,8 +107,6 @@ def load_arms():
                 continue
             arm = entry[:-len(".json")]
             record = json.load(open(os.path.join(panel_dir, entry)))
-            if record["metrics"]["epochs"] != EPOCHS:
-                continue          # a smoke arm is not a repeat of anything
             out.append((panel, arm, record,
                         os.path.join(panel_dir, arm)))
     return out
@@ -99,13 +115,15 @@ def load_arms():
 def repeat_pairs(arms):
     """Pairs of arms that ran the SAME configuration in separate processes.
 
-    Grouped by config and by the pins that decide whether two runs are even
-    comparable — one machine, one revision, one attempt-log frontier — because
-    §1.8's claim is scoped to exactly that."""
+    Grouped by the EFFECTIVE configuration — the recorded config plus the budget
+    and schedule the run actually used — and by the pins that decide whether two
+    runs are even comparable: one machine, one revision, one attempt-log
+    frontier, because §1.8's claim is scoped to exactly that. A smoke arm groups
+    with nothing, its short budget being part of what it is."""
     groups = {}
     for panel, arm, record, arm_dir in arms:
         pins = record["pins"]
-        key = (json.dumps(record["config"], sort_keys=True),
+        key = (json.dumps(record["config"], sort_keys=True), regime_of(record),
                pins["gpu"], pins["git"], pins["db_max_id"],
                pins["blocks"], pins["pca_dim"], pins["k_axes"],
                pins["labels_sha"], pins["proxies_sha"], pins["torch"])
@@ -122,7 +140,7 @@ def repeat_pairs(arms):
 def measure():
     arms = load_arms()
     require(arms,
-            f"no full-budget arm records under {DEV_RUNS} — this producer reads "
+            f"no arm records under {DEV_RUNS} — this producer reads "
             f"repeats out of panels that have already run")
     pairs = repeat_pairs(arms)
     require(pairs,
@@ -165,8 +183,9 @@ def measure():
             "pp_differing": per_problem_differing,
             "problems": problems, "traces_identical": traces_identical,
             "gpu": pairs[0][0][2]["pins"]["gpu"],
-            "examples": [(a[0] + "/" + a[1], b[0] + "/" + b[1])
-                         for a, b in pairs]}
+            "regimes": sorted({regime_of(a[2]) for a, _ in pairs}),
+            "examples": [(a[0] + "/" + a[1], b[0] + "/" + b[1],
+                          regime_of(a[2])) for a, b in pairs]}
 
 
 def figures():
@@ -200,8 +219,13 @@ def figures():
 def main():
     m = measure()
     print(f"repeats found: {m['pairs']}  (one machine: {m['gpu']})")
-    for a, b in m["examples"]:
-        print(f"  {a}  vs  {b}")
+    for a, b, (budget, schedule) in m["examples"]:
+        print(f"  {a}  vs  {b}   [{budget} epochs, {schedule} rate]")
+    current = (train_mirt.EPOCHS, train_mirt.LR_SCHEDULE)
+    if current not in m["regimes"]:
+        print(f"  NOTE: no repeat runs the trainer's current regime "
+              f"({current[0]} epochs, {current[1]} rate) — the bitwise claim is "
+              f"so far verified on the previous regime only.")
     print(f"per-problem files: {m['pp_compared'] - m['pp_differing']}"
           f"/{m['pp_compared']} identical  "
           f"({m['problems']} problems per repeat)")

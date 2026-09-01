@@ -57,8 +57,9 @@ the two disagreeing by more than the draw spread would itself be a finding.
                                  cannot order the counts" stands as stated.
   axis_count.increment_k4_mnat   THE TRAP: the axis increment per count —
   axis_count.increment_k6_mnat   `stop_bce_no_axes - stop_bce`, what zeroing the
-  axis_count.increment_k7_mnat   axis term costs on the held-aside rows at the
-                                 final state — millinats, averaged over seeds.
+  axis_count.increment_k7_mnat   axis term costs on the panel's held-aside
+                                 sample at the final state — millinats,
+                                 averaged over seeds.
   axis_count.increment_rises_with_count  1 when that increment is strictly
                                  increasing in the count at EVERY seed, which is
                                  what makes it unusable as the criterion: more
@@ -96,8 +97,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-from ablations._figures import Figure, require, panel_budget  # noqa: E402
-from pipeline.train_mirt import EPOCHS  # noqa: E402
+from ablations._figures import Figure, require, panel_regime  # noqa: E402
 from utils.paths import DB_SQLITE  # noqa: E402
 from utils.rating.model_constants import K_AXES  # noqa: E402
 
@@ -124,11 +124,26 @@ SEEDS = (0, 1, 2)
 # a record cannot be mistaken for one of the swept arms.
 STEM = {4: "k4", 6: "k6", 7: "shipped_k7"}
 
-# The last third of the budget, the same window `refit_barrier_figures` and
-# `refit_blocks_figures` read their settled level over: past the stretch where
-# these fits still improve, so a mean over it reads the level an arm settled at
-# rather than whichever point of its wander the final checkpoint sampled.
-TAIL_FROM_EPOCH = 2 * EPOCHS // 3
+
+# What a held-aside score is scored ON, as the noun the printout and the figure
+# notes use. Read off the records rather than assumed: a held-aside ROW is one
+# more attempt on a problem the fit has otherwise seen, a held-aside PROBLEM one
+# the trunk alone has to place, and a reader cannot tell the two apart from the
+# number.
+UNIT_NOUN = {"row": "rows", "problem": "problems"}
+
+
+def panel_unit(arms):
+    """The holdout unit every arm of the panel scored on, or a hard failure if
+    they differ — a gap averaged over both units is between the units as much
+    as between the counts."""
+    units = {r["config"].get("stop_unit", "row") for r in arms.values()}
+    require(len(units) == 1,
+            f"the panel's arms held aside {sorted(units)} — those are different "
+            f"quantities and a gap pooled over them is not one gap")
+    unit = units.pop()
+    require(unit in UNIT_NOUN, f"unknown stop unit {unit!r}")
+    return unit
 
 
 def arm_name(count, seed):
@@ -171,14 +186,17 @@ def load_panel():
         with open(path) as f:
             arms[arm] = json.load(f)
 
-    budget = panel_budget(arms)
+    # ONE PANEL IS ONE REGIME, read off the arms rather than off the trainer's
+    # current constants: the arms are only ever compared to each other, so a
+    # later change to the shipped budget or schedule must not make a finished
+    # panel unquotable.
+    budget, schedule = panel_regime(arms)
+    unit = panel_unit(arms)
     for arm, r in arms.items():
-        require(r["metrics"]["epochs"] == budget,
-                f"{arm} ran {r['metrics']['epochs']} epochs against the panel's "
-                f"{budget} — one panel is one budget")
         require(r["metrics"]["trace"]
-                and r["metrics"]["trace"][-1]["epoch"] == EPOCHS,
-                f"{arm}'s convergence trace does not reach its budget")
+                and r["metrics"]["trace"][-1]["epoch"] == budget,
+                f"{arm}'s convergence trace does not reach the panel's "
+                f"{budget}-epoch budget")
 
     # THE ARM RAN THE MANIFEST'S CONFIG. Every figure below is about a named
     # count at a named seed, so an arm whose record disagrees with the manifest
@@ -288,7 +306,7 @@ def load_panel():
             f"the panel was measured at attempt-log frontier {base['db_max_id']} "
             f"but the log now ends at {now} — the stop-row draw moved, the "
             f"paired comparison is void. Re-run the panel.")
-    return arms
+    return arms, budget, schedule, unit
 
 
 # --- reading a convergence trace ----------------------------------------------
@@ -300,12 +318,12 @@ def stop_curve(record):
             [float(r["stop_bce"]) for r in trace])
 
 
-def tail_window(epochs):
+def tail_window(epochs, tail_from):
     """Indices of the checkpoints in the last third of the budget."""
-    idx = [i for i, e in enumerate(epochs) if e >= TAIL_FROM_EPOCH]
+    idx = [i for i, e in enumerate(epochs) if e >= tail_from]
     require(len(idx) > 1,
             f"the trace carries {len(idx)} checkpoint(s) at or past epoch "
-            f"{TAIL_FROM_EPOCH} — the settled level is read over the last third "
+            f"{tail_from} — the settled level is read over the last third "
             f"of the budget, and a mean over one point is a final-epoch reading "
             f"under another name")
     return idx
@@ -314,7 +332,7 @@ def tail_window(epochs):
 # --- the measurement ----------------------------------------------------------
 
 def measure():
-    arms = load_panel()
+    arms, budget, schedule, unit = load_panel()
     curves = {arm: stop_curve(r) for arm, r in arms.items()}
     grid = curves[arm_name(BASELINE_COUNT, SEEDS[0])][0]
     for arm, (ep, bce) in curves.items():
@@ -327,7 +345,12 @@ def measure():
         require(all(math.isfinite(v) for v in bce),
                 f"{arm}'s held-out trace is not finite throughout — a diverged "
                 f"arm is not a slower version of this panel's finding")
-    idx = tail_window(grid)
+    # The last third of the budget, the same window `refit_barrier_figures` and
+    # `refit_blocks_figures` read their settled level over: past the stretch
+    # where these fits still improve, so a mean over it reads the level an arm
+    # settled at rather than whichever point of its wander the final checkpoint
+    # sampled.
+    idx = tail_window(grid, 2 * budget // 3)
 
     # The combined held-out score per count per seed, both readings. This is the
     # figure the count decision would turn on: the whole model's likelihood on
@@ -380,6 +403,8 @@ def measure():
         "inc": inc, "inc_mean": inc_mean, "rises": rises,
         "wander": wander,
         "window_from": grid[idx[0]], "window_points": len(idx),
+        "budget": budget, "schedule": schedule,
+        "unit_noun": UNIT_NOUN[unit],
         "gpu": arms[arm_name(BASELINE_COUNT, SEEDS[0])]["pins"]["gpu"],
     }
 
@@ -393,7 +418,8 @@ def figures():
             ".2f",
             f"combined held-out (stop-split) score at {lo} axes minus the same "
             f"at {hi}, millinats, averaged over the panel's three seeds; each "
-            f"seed's gap is PAIRED (same held-aside rows) and read as the mean "
+            f"seed's gap is PAIRED (same held-aside {m['unit_noun']}) and read "
+            f"as the mean "
             f"over the last third of the budget. Positive means {lo} axes fit "
             f"worse than {hi}"))
     for lo, hi in ADJACENT:
@@ -428,7 +454,7 @@ def figures():
         figs.append(Figure(
             f"axis_count.increment_k{c}_mnat", m["inc_mean"][c], ".2f",
             f"the axis increment at {c} axes: what zeroing the axis term costs "
-            f"on the same held-aside rows at the final state "
+            f"on the same held-aside {m['unit_noun']} at the final state "
             f"(`stop_bce_no_axes - stop_bce`), millinats, averaged over the "
             f"three seeds. Positive means the axis channel is contributing. It "
             f"is a diagnostic beside the combined score and never the criterion "
@@ -446,7 +472,8 @@ def figures():
 def main():
     m = measure()
     print(f"axis_count panel  ({len(COUNTS)} counts x {len(SEEDS)} seeds "
-          f"{list(SEEDS)}, full budget, one machine: {m['gpu']})")
+          f"{list(SEEDS)}, full budget ({m['budget']} epochs, {m['schedule']} "
+          f"rate), one machine: {m['gpu']})")
     print(f"  the shipped count is {BASELINE_COUNT}; the banks are nested, so a "
           f"shorter arm teaches the first k rules of axes/labels.json and "
           f"nothing else")
@@ -455,8 +482,9 @@ def main():
           f"teach the extra axis with")
     print(f"  held-out = the stop split; 'last third' = the "
           f"{m['window_points']} checkpoints from epoch {m['window_from']} to "
-          f"{EPOCHS}")
-    print(f"  a gap is PAIRED within a seed (same held-aside rows); no "
+          f"{m['budget']}")
+    print(f"  a gap is PAIRED within a seed (same held-aside "
+          f"{m['unit_noun']}); no "
           f"cross-seed delta is quotable")
 
     print("\ncombined held-out score per count and seed (lower is better)")

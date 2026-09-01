@@ -3,9 +3,17 @@
 # this file and pushing it reprioritises a live pool. Arms with records are
 # skipped, so re-running a drained queue costs nothing.
 #
-# The cosine budget curve is still improving on the level at the longest budget
-# run, so the next point up leads: a sweep whose best value is its largest one
-# has not found anything yet.
-schedule cosine_b10000_prob_i0 cosine_b10000_prob_i1 cosine_b10000_prob_i2
-schedule cosine_b12000_prob_i0 cosine_b12000_prob_i1 cosine_b12000_prob_i2
+# RE-MEASUREMENT UNDER THE cosine@7000 BASELINE, in the original panel order.
+# Every panel's constant-regime records were archived to
+# dev_runs/<panel>.3000constant/ before this queue started — the pool skips
+# arms that have records, so an unarchived panel would re-run nothing. The
+# row-only panels now hold out whole PROBLEMS (their manifests changed with
+# the baseline); features/regularization already did, blocks keeps both units.
+features
+seeds
+barrier
+lr
+penalty
 blocks
+regularization
+axis_count
