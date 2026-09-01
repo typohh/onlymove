@@ -29,6 +29,13 @@ which is the mechanism §1.14 credits with fixing the basis.
                                   pull buys in basis stability.
   seeds.axes_matched              axes matched per pair (K as shipped).
   seeds.problems_scored           the population all of the above run over.
+  seeds.teaching_cost_mnat        what the pull costs on held-out rows, and
+  seeds.teaching_cost_final_mnat  whether both same-seed pairs agree on its
+  seeds.teaching_cost_sign_consistent  sign. Paired within a seed: the held-aside
+                                  draw is a function of the seed alone, so a
+                                  taught and an untaught arm at one seed score
+                                  the same rows. Across seeds nothing is
+                                  comparable, and no figure here crosses them.
 
 THE AGREEMENT STATISTIC, stated because every part of it is a choice:
 
@@ -263,6 +270,31 @@ def measure():
         "untaught_min": float(np.mean([p.min() for p in untaught])),
         "gpu": arms["taught_s0"]["pins"]["gpu"],
     }
+    # WHAT TEACHING COSTS, and why this panel can price it after all. Its arms
+    # differ in seed BY DESIGN, so no figure above compares likelihoods; but the
+    # held-aside draw is a function of the seed alone, so a taught arm and an
+    # untaught arm AT THE SAME SEED hold aside the very same rows and their
+    # delta is paired. Two such pairs exist here, which is two independent
+    # estimates of one quantity and not a spread to average blindly — both are
+    # reported, and their agreement in sign is the figure a guard can hold.
+    cost_final, cost_tail = [], []
+    for sd in (0, 1):
+        t, u = arms[f"taught_s{sd}"]["metrics"], arms[f"untaught_s{sd}"]["metrics"]
+        require(t["stop_rows"] == u["stop_rows"] and t["rows"] == u["rows"],
+                f"the taught and untaught arms at seed {sd} held aside "
+                f"{t['stop_rows']} and {u['stop_rows']} rows of {t['rows']} and "
+                f"{u['rows']} — same-seed pairing is what makes this delta "
+                f"paired, so a mismatch voids it rather than widening it")
+        ft = [r["stop_bce"] for r in t["trace"]]
+        fu = [r["stop_bce"] for r in u["trace"]]
+        cost_final.append(1e3 * (ft[-1] - fu[-1]))
+        cost_tail.append(1e3 * (float(np.mean(ft[-len(ft) // 3:]))
+                                - float(np.mean(fu[-len(fu) // 3:]))))
+    m["cost_final"] = float(np.mean(cost_final))
+    m["cost_tail"] = float(np.mean(cost_tail))
+    m["cost_per_seed"] = cost_tail
+    m["cost_consistent"] = int(cost_final[0] * cost_final[1] > 0
+                               and cost_tail[0] * cost_tail[1] > 0)
     m["gap"] = m["taught_mean"] - m["untaught_mean"]
     require(m["gap"] > 0,
             f"the taught pair agrees no better across seeds than the untaught "
@@ -295,6 +327,20 @@ def figures():
                "stability, the two measured on the same problems"),
         Figure("seeds.axes_matched", K_AXES, "d",
                "axes matched per pair — K as shipped"),
+        Figure("seeds.teaching_cost_mnat", m["cost_tail"], ".0f",
+               "what the constant pull costs on held-out rows, millinats, "
+               "positive meaning the taught fit predicts worse. Paired: the "
+               "taught and untaught arms at one seed hold aside the same rows. "
+               "Each arm is read as the mean over the last third of its budget, "
+               "the two same-seed pairs then averaged"),
+        Figure("seeds.teaching_cost_final_mnat", m["cost_final"], ".0f",
+               "the same cost read at the final epoch alone — the epoch that "
+               "would actually ship"),
+        Figure("seeds.teaching_cost_sign_consistent", m["cost_consistent"], "d",
+               "1 when both same-seed pairs put the cost on the same side of "
+               "zero under both readings, 0 otherwise. An indicator for a "
+               "fig-guard: it is what says the sign is a finding rather than "
+               "the wander of a single pair"),
         Figure("seeds.problems_scored", m["keys"], "~1000",
                "problems every agreement above is measured over: attempted at "
                "least once (first-time attempts) and carried by every arm"),

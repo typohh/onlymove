@@ -2408,6 +2408,146 @@
         "data_version": "f6fba7b749bc0ecb"
       }
     },
+    "seeds.axes_matched": {
+      "value": 7,
+      "fmt": "d",
+      "text": "7",
+      "producer": "ablations.refit_seeds_figures",
+      "tier": "refit",
+      "note": "axes matched per pair — K as shipped",
+      "measured": {
+        "at": "2026-09-01T03:26:53Z",
+        "git": "56de232dcd9+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "seeds.problems_scored": {
+      "value": 107088,
+      "fmt": "~1000",
+      "text": "107,000",
+      "producer": "ablations.refit_seeds_figures",
+      "tier": "refit",
+      "note": "problems every agreement above is measured over: attempted at least once (first-time attempts) and carried by every arm",
+      "measured": {
+        "at": "2026-09-01T03:26:53Z",
+        "git": "56de232dcd9+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "seeds.taught_cross_seed_mean": {
+      "value": 0.9172682846128476,
+      "fmt": ".2f",
+      "text": "0.92",
+      "producer": "ablations.refit_seeds_figures",
+      "tier": "refit",
+      "note": "the same statistic for two fits of the SHIPPED configuration differing only in the seed — the teaching pull on",
+      "measured": {
+        "at": "2026-09-01T03:26:53Z",
+        "git": "56de232dcd9+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "seeds.taught_cross_seed_min": {
+      "value": 0.8627171768392005,
+      "fmt": ".2f",
+      "text": "0.86",
+      "producer": "ablations.refit_seeds_figures",
+      "tier": "refit",
+      "note": "the taught pair's weakest-matched axis",
+      "measured": {
+        "at": "2026-09-01T03:26:53Z",
+        "git": "56de232dcd9+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "seeds.teaching_cost_final_mnat": {
+      "value": 7.5668394565582275,
+      "fmt": ".0f",
+      "text": "8",
+      "producer": "ablations.refit_seeds_figures",
+      "tier": "refit",
+      "note": "the same cost read at the final epoch alone — the epoch that would actually ship",
+      "measured": {
+        "at": "2026-09-01T03:26:53Z",
+        "git": "56de232dcd9+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "seeds.teaching_cost_mnat": {
+      "value": 11.03810697793961,
+      "fmt": ".0f",
+      "text": "11",
+      "producer": "ablations.refit_seeds_figures",
+      "tier": "refit",
+      "note": "what the constant pull costs on held-out rows, millinats, positive meaning the taught fit predicts worse. Paired: the taught and untaught arms at one seed hold aside the same rows. Each arm is read as the mean over the last third of its budget, the two same-seed pairs then averaged",
+      "measured": {
+        "at": "2026-09-01T03:26:53Z",
+        "git": "56de232dcd9+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "seeds.teaching_cost_sign_consistent": {
+      "value": 1,
+      "fmt": "d",
+      "text": "1",
+      "producer": "ablations.refit_seeds_figures",
+      "tier": "refit",
+      "note": "1 when both same-seed pairs put the cost on the same side of zero under both readings, 0 otherwise. An indicator for a fig-guard: it is what says the sign is a finding rather than the wander of a single pair",
+      "measured": {
+        "at": "2026-09-01T03:26:53Z",
+        "git": "56de232dcd9+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "seeds.teaching_gap": {
+      "value": 0.7641107390928348,
+      "fmt": ".2f",
+      "text": "0.76",
+      "producer": "ablations.refit_seeds_figures",
+      "tier": "refit",
+      "note": "taught minus untaught cross-seed agreement, on the means — what the constant pull toward the rule columns buys in basis stability, the two measured on the same problems",
+      "measured": {
+        "at": "2026-09-01T03:26:53Z",
+        "git": "56de232dcd9+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "seeds.untaught_cross_seed_mean": {
+      "value": 0.15315754552001282,
+      "fmt": ".2f",
+      "text": "0.15",
+      "producer": "ablations.refit_seeds_figures",
+      "tier": "refit",
+      "note": "cross-seed direction agreement with the teaching pull off: axes matched one-to-one between two fits by maximum total |correlation| of their per-problem loadings, each matched pair's |correlation| meaned over the 7 axes and then over the three untaught seed pairs, on attempted problems",
+      "measured": {
+        "at": "2026-09-01T03:26:53Z",
+        "git": "56de232dcd9+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "seeds.untaught_cross_seed_min": {
+      "value": 0.04422222784392244,
+      "fmt": ".2f",
+      "text": "0.04",
+      "producer": "ablations.refit_seeds_figures",
+      "tier": "refit",
+      "note": "the same agreement at each untaught pair's weakest-matched axis, averaged over the three pairs",
+      "measured": {
+        "at": "2026-09-01T03:26:53Z",
+        "git": "56de232dcd9+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
     "sefloor.dan_min": {
       "value": 0.48583868024423843,
       "fmt": ".2f",
