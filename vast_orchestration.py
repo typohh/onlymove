@@ -378,8 +378,19 @@ def get_ssh_cmds(host, port):
     return base_ssh, base_rsync
 
 
+# A box that cannot be reached this long after it was reserved is not booting,
+# it is broken — wrong key injection, a dead route, a defective host — and a
+# retry loop that keeps knocking anyway both wastes billed hours and can trip
+# the host's connection rate-limiter, manufacturing its own lockout. So the
+# wait carries a hard deadline and a growing backoff, and expiry raises with
+# the diagnosis steps instead of spinning.
+SSH_WAIT_DEADLINE_SECS = 600
+
+
 def wait_for_ssh(host, port):
     base_ssh, _ = get_ssh_cmds(host, port)
+    deadline = time.time() + SSH_WAIT_DEADLINE_SECS
+    delay = 5
     while True:
         try:
             res = subprocess.run(
@@ -389,10 +400,22 @@ def wait_for_ssh(host, port):
             )
             if res.returncode == 0:
                 return
-            print(f"  SSH not ready ({host}:{port}), retrying...")
+            print(f"  SSH not ready ({host}:{port}), retrying in {delay}s...")
         except subprocess.TimeoutExpired:
-            print(f"  SSH timeout ({host}:{port}), retrying...")
-        time.sleep(5)
+            print(f"  SSH timeout ({host}:{port}), retrying in {delay}s...")
+        if time.time() > deadline:
+            raise RuntimeError(
+                f"SSH to {host}:{port} still failing after "
+                f"{SSH_WAIT_DEADLINE_SECS}s — diagnose or drop the box, do not "
+                f"wait: check `show instances` actual_status; probe auth with a "
+                f"verbose ssh (key injection lags or fails on some hosts — "
+                f"`vastai attach ssh` + one reboot can fix it); a handshake "
+                f"drop (kex_exchange_identification) means the host is "
+                f"rate-limiting this machine after too many attempts, so STOP "
+                f"knocking and wait quietly before one retry. Otherwise "
+                f"`vastai destroy instance` and rent another.")
+        time.sleep(delay)
+        delay = min(delay * 2, 60)
 
 
 def ensure_models(base_ssh, attempts=3):
