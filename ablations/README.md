@@ -64,23 +64,34 @@ Both read RAW per-problem npz, which the shipped store no longer holds — a re-
 
 A refit-tier figure costs one or more full training runs, so its producer never trains. The measurement is a **panel** — a manifest under `panels/<name>.json` naming arms, each arm one invocation of `ablations.ablation_mirt`, which calls `pipeline.train_mirt.run(...)` — the shipped loop itself, every keyword defaulting to the production constant (the seam was verified by a bitwise pre/post comparison of a short-budget run) — with outputs redirected under `dev_runs/<panel>/<arm>/`, so an arm can never touch `ratings/` or `axes/`. `ablations.run_panel <name>` runs a panel with arm-level resume (`--concurrency` to saturate a GPU whose single fit does not, `--smoke-epochs` for plumbing tests); `vast_orchestration.py ablate <name>` runs it on a rented box and rsyncs the records home incrementally. Each `<arm>.json` records the config, the metrics and the **pins** — attempt-log frontier, bank digests, machine identity. The refit producer (`refit_barrier_figures` is the worked example) reads the records and hard-fails on a short budget, on pins differing across arms, or on a pin no longer matching the current DB — a `fetch_database` between panel and producer moves the stop-row draw and voids every paired comparison, the `mirt_benchmark.md` rule mechanized. `--check` and the build stay instant regardless, since guards and spans evaluate against the last-measured ledger; a panel's cost is paid only when it is deliberately re-run. **Knobs on `ablation_mirt` are curated** — one flag per quantity a methodology claim turns on, added cluster by cluster together with the producer that reads it, never a general override surface — and comparisons are valid within one panel on one machine, which the pins enforce.
 
-## Worklist: figures the documents quote with no producer behind them
+## Worklist: what the documents still quote without a producer behind it
 
-`docs/methodology.md` opens with a standing caveat ("How to read the measurements below…", echoed in its Scope section) that exists because many of its quoted figures have no producer here. This list is the audit behind retiring that caveat: an entry leaves it when its numbers become ledger-backed `data-fig` spans with a producer in this directory, or when the document drops the magnitude and keeps the direction — for the GPU-sweep magnitudes, pointing at the pinned record in `docs/mirt_benchmark.md` is the honest fallback, since their reproduction is one or more full refits. Section references are into `methodology.md`.
+`docs/methodology.md` opens with a standing caveat ("How to read the measurements below…", echoed in its Scope section) that exists because its quoted figures were taken while the system was being built rather than against what ships. This list is the audit behind retiring that caveat: an entry leaves it when its numbers become ledger-backed `data-fig` spans with a producer here, or when the document drops the magnitude and keeps the direction.
 
-### Wire existing scripts into the ledger — the measurement exists, the key does not
+**How close the method chapters are.** Numerals in chapters 1–2 that no span backs are now almost entirely DECLARED CONFIGURATION rather than measurements — the calibration probability, the dropout rate, the stored encoding width, the channel counts, the rank scale's own conventions, the retention window's bounds, and the points a sweep was run at. Those are the document stating what the system IS, and they need no producer. What remains genuinely unbacked is listed under "Still open" below; when that is empty the caveat can go.
 
-- **`tendency_null_variants`'s reliability panel** — §2.9's tail "a null held fixed at an even split scores as the *most* reliable of all" reproduces strongly (fixed-0.5 the most split-half-reliable arm on all seven axes, every bootstrap interval clear of zero, ~6 min on the GPU) but is not yet a key: `main()` prints, returns nothing and parses `sys.argv`. One small change (accept `argv`, return the per-axis rho panel) plus a reader in `motif_null_figures` finishes it.
+### Done — measured against what ships, replicated across seeds
 
-### Refit tier — magnitudes whose reproduction is one or more GPU refits
+Every one of these ran on rented GPU time through `vast_orchestration.py ablate`, with each configuration replicated so that a contrast smaller than a single run's own wander is never quoted as a finding.
 
-Each of these is pinned in `docs/mirt_benchmark.md` against its snapshot, and the measurement route is the panel machinery above: one panel + one refit producer per cluster, `refit_barrier_figures` (§1.7, panel `barrier`) the worked example. §3.5's constants table repeats several of the same numbers.
+- §1.3 — the activation width. 128 wins from both sides at every seed. Two details did NOT survive: widening costs about half what cutting does rather than "about as much", and the memorization slope signature holds at one seed and not the other. `panels/features.json`.
+- §1.5, §1.14 — what fixes the axis basis, and what it costs. Untaught seeds barely agree; taught seeds agree nearly perfectly. Teaching is NOT free, against the old text: paired within a seed it costs held-out likelihood, consistently. `panels/seeds.json`.
+- §1.7 — the barrier. The blow-out is real, one-sided, an order of magnitude smaller than claimed and a quarter of the stated cost, and its SIZE is not reproducible. The compression claim at ten times the weight is refuted and backwards. `panels/barrier.json`.
+- §1.8, §3.5 — the learning rates. One shared rate does not diverge here and no field-rate contrast resolves; the network's own rate is what the fit is sensitive to. `panels/lr.json`.
+- §1.8 — determinism, and the wander. Two panels ran the shipped configuration independently and agree bitwise; the shipped fit's own held-out score wanders wider than most contrasts this document quotes, which is now stated as the rule for reading all of them. `refit_determinism_figures.py`.
+- §2.9 — the reliability control. The retired fixed-even null is the most split-half reliable arm on every axis, which is why reliability cannot select a null.
 
-- §1.3 — the answer-conditioning sign reversal ("a tenth to a third" of within-problem comparisons; needs the `"all"`-blocks checkpoint as comparison arm) and the nine-fold rating-parity claims.
-- §1.3 — the PCA width sweep magnitudes (256's cost and slope signature, 64's motif collapse).
-- §1.5 — the whole-axis-penalty leak numbers (0.02–0.09 vs 0.27–0.31; −0.25/+0.57), the free-control correlations (−0.64 with slope), the continuation-evals cost (~a tenth of the margin), weight-decay super-additivity.
-- §1.7 — the barrier failure magnitudes (derived ratings to the hundreds, ~20 mnat, the 10×-weight compression to ~3 rating units).
-- §1.8 / §3.5 — the LR-ratio grid figures.
-- §1.10 — the slope-multiplier sweep (~0.9 optimum, a fifth of a millinat, seed spread ×4) and the empirical-Bayes per-problem variance component.
-- §1.11 — the pivot walk-forward dominance (the document already flags it as unmeasured on the shipping configuration).
-- §1.14 — the count sweep, the half-reliability figures (~100 attempts for ability, 500–2000 for the shipped rules), the axis-payoff bins (<1pp above ~500 prior attempts), seed agreement 0.34, the canonical-correlation collapse, the 2%/5% refit non-monotonicity, the teach-back agreements 0.4–0.7, and the ortho-conflict pair (0.16 vs 4.41 / 4.21 mnat).
+### Running or built, not yet landed
+
+- §1.3 — the answer-conditioning claim, both stop units, three seeds. `panels/blocks.json`.
+- §1.5 — weight decay and the two dropout sites, including the super-additivity claim. `panels/regularization.json`.
+- §1.14 — the axis count. Four against six against seven; EIGHT is out of reach, since `axes/labels.json` ships seven components and a higher count halts. `panels/axis_count.json`.
+- §1.5 — the penalty panel's replicates, which its leak figures need: a per-fit tail statistic has no spread at all from one fit.
+
+### Still open — the genuine gaps
+
+- §1.5 — the free-control correlations (−0.64 with slope) and the difficulty-only displacement (−0.04 → −0.43, +0.62). The penalty panel measures the first; the second needs an arm penalized on difficulty ALONE, which is a knob that does not exist yet.
+- §1.14 — the ortho-conflict pair (0.16 vs 4.41 / 4.21 millinats at correlations of 0.36 and 0.27). Not reachable by any panel: it compares two rule BANKS, and neither is the shipped one. Either the magnitudes come out of the document or a bank is reconstructed to measure them.
+- §1.10 — the slope-multiplier sweep and the empirical-Bayes per-problem variance component. Both are POST-HOC over a fitted checkpoint rather than refits, so they need no panel — the arms already on disk carry what they want.
+- §1.11 — the pivot walk-forward, which the document already flags as unmeasured on the shipping configuration.
+- §1.14 — the half-reliability figures, the axis-payoff bins and the teach-back agreements. All post-hoc over a fitted arm plus the attempt log.
