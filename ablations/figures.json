@@ -295,15 +295,15 @@
       }
     },
     "barrier.off_rating_high": {
-      "value": 79.01231424390873,
+      "value": 64.11795183097074,
       "fmt": ".0f",
-      "text": "79",
+      "text": "64",
       "producer": "ablations.refit_barrier_figures",
       "tier": "refit",
-      "note": "…and the 99.9th percentile, the high side; averaged over the panel's 2 seeds",
+      "note": "…and the 99.9th percentile, the high side; averaged over the panel's 3 seeds",
       "measured": {
-        "at": "2026-09-01T05:09:49Z",
-        "git": "6b2bec99c41+dirty",
+        "at": "2026-09-01T10:37:10Z",
+        "git": "8f9293d2ca4",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -316,50 +316,50 @@
       "tier": "refit",
       "note": "how many times the barrier-off arm's 99.9th rating percentile moved between the panel's seeds — the blow-out HAPPENS every time, while its size is not itself a reproducible quantity, which is what an unbounded tail does",
       "measured": {
-        "at": "2026-09-01T05:09:49Z",
-        "git": "6b2bec99c41+dirty",
+        "at": "2026-09-01T10:37:10Z",
+        "git": "8f9293d2ca4",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
     },
     "barrier.off_rating_low": {
-      "value": -5.276406364250025,
+      "value": -7.217650336283938,
       "fmt": ".0f",
-      "text": "-5",
+      "text": "-7",
       "producer": "ablations.refit_barrier_figures",
       "tier": "refit",
-      "note": "0.1th percentile of the derived rating with the slope barrier removed — the low side of the blow-out. A per-fit property, averaged over the panel's 2 seeds",
+      "note": "0.1th percentile of the derived rating with the slope barrier removed — the low side of the blow-out. A per-fit property, averaged over the panel's 3 seeds",
       "measured": {
-        "at": "2026-09-01T05:09:49Z",
-        "git": "6b2bec99c41+dirty",
+        "at": "2026-09-01T10:37:10Z",
+        "git": "8f9293d2ca4",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
     },
     "barrier.off_slope_at_floor_pct": {
-      "value": 0.0027306169289177773,
+      "value": 0.002009407474270059,
       "fmt": "%.0f",
       "text": "0",
       "producer": "ablations.refit_barrier_figures",
       "tier": "refit",
-      "note": "share of slopes on the clamp with the barrier removed, averaged over the panel's 2 seeds",
+      "note": "share of slopes on the clamp with the barrier removed, averaged over the panel's 3 seeds",
       "measured": {
-        "at": "2026-09-01T05:09:49Z",
-        "git": "6b2bec99c41+dirty",
+        "at": "2026-09-01T10:37:10Z",
+        "git": "8f9293d2ca4",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
     },
     "barrier.off_stop_cost_mnat": {
-      "value": 7.439717650413513,
+      "value": 7.880171140034993,
       "fmt": ".0f",
-      "text": "7",
+      "text": "8",
       "producer": "ablations.refit_barrier_figures",
       "tier": "refit",
-      "note": "the same paired held-out cost read at the FINAL epoch — the fit that would actually ship, averaged over the panel's 2 seeds",
+      "note": "the same paired held-out cost read at the FINAL epoch — the fit that would actually ship, averaged over the panel's 3 seeds",
       "measured": {
-        "at": "2026-09-01T05:09:49Z",
-        "git": "6b2bec99c41+dirty",
+        "at": "2026-09-01T10:37:10Z",
+        "git": "8f9293d2ca4",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -372,22 +372,22 @@
       "tier": "refit",
       "note": "1 when every seed puts the barrier-off cost on the same side of zero on BOTH readings, 0 when the seeds disagree. An indicator for a `fig-guard: barrier.off_stop_cost_sign_consistent == 1` beside any sentence naming the direction of that cost, never for a span",
       "measured": {
-        "at": "2026-09-01T05:09:49Z",
-        "git": "6b2bec99c41+dirty",
+        "at": "2026-09-01T10:37:10Z",
+        "git": "8f9293d2ca4",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
     },
     "barrier.off_stop_tail_cost_mnat": {
-      "value": 4.56122995013053,
+      "value": 5.813732202296973,
       "fmt": ".0f",
-      "text": "5",
+      "text": "6",
       "producer": "ablations.refit_barrier_figures",
       "tier": "refit",
       "note": "held-out (stop-split) cost of removing the barrier over the last third of the budget, millinats — PAIRED against the shipped arm of its own seed, then meaned over the seeds. The headline reading: it is the level the arm settled at, which a final checkpoint alone samples only once",
       "measured": {
-        "at": "2026-09-01T05:09:49Z",
-        "git": "6b2bec99c41+dirty",
+        "at": "2026-09-01T10:37:10Z",
+        "git": "8f9293d2ca4",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -400,8 +400,8 @@
       "tier": "refit",
       "note": "and the most, in a run differing only in the seed. The pair is the figure: this count is a property of a particular fit and not of the model, so it is re-read after a refit rather than carried",
       "measured": {
-        "at": "2026-09-01T05:09:49Z",
-        "git": "6b2bec99c41+dirty",
+        "at": "2026-09-01T10:37:10Z",
+        "git": "8f9293d2ca4",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -414,50 +414,50 @@
       "tier": "refit",
       "note": "fewest problems left with no defined rating — a floor at or above the calibration probability — across the panel's runs of the SHIPPED configuration",
       "measured": {
-        "at": "2026-09-01T05:09:49Z",
-        "git": "6b2bec99c41+dirty",
+        "at": "2026-09-01T10:37:10Z",
+        "git": "8f9293d2ca4",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
     },
     "barrier.shipped_rating_span": {
-      "value": 8.380711717387477,
+      "value": 9.412101768582998,
       "fmt": ".1f",
-      "text": "8.4",
+      "text": "9.4",
       "producer": "ablations.refit_barrier_figures",
       "tier": "refit",
-      "note": "p0.1..p99.9 span of the derived rating as SHIPPED, the same per-fit property the two arms above are compared against, averaged over the panel's 2 seeds — without it neither blow-out nor compression has a reference",
+      "note": "p0.1..p99.9 span of the derived rating as SHIPPED, the same per-fit property the two arms above are compared against, averaged over the panel's 3 seeds — without it neither blow-out nor compression has a reference",
       "measured": {
-        "at": "2026-09-01T05:09:49Z",
-        "git": "6b2bec99c41+dirty",
+        "at": "2026-09-01T10:37:10Z",
+        "git": "8f9293d2ca4",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
     },
     "barrier.shipped_wander_range_mnat": {
-      "value": 11.267304420471191,
+      "value": 9.023845195770264,
       "fmt": ".1f",
-      "text": "11.3",
+      "text": "9.0",
       "producer": "ablations.refit_barrier_figures",
       "tier": "refit",
       "note": "the same wander as a peak-to-peak range, averaged over the seeds — how far apart two honest single-arm readings of one configuration can land",
       "measured": {
-        "at": "2026-09-01T05:09:49Z",
-        "git": "6b2bec99c41+dirty",
+        "at": "2026-09-01T10:37:10Z",
+        "git": "8f9293d2ca4",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
     },
     "barrier.shipped_wander_sd_mnat": {
-      "value": 4.4052578221901975,
+      "value": 3.3396458093988124,
       "fmt": ".1f",
-      "text": "4.4",
+      "text": "3.3",
       "producer": "ablations.refit_barrier_figures",
       "tier": "refit",
       "note": "standard deviation of the SHIPPED arm's own held-out score across the last third of its budget, millinats, averaged over the seeds — the panel's resolution floor. No contrast smaller than this is resolved by one arm per configuration, which is why every configuration here is replicated",
       "measured": {
-        "at": "2026-09-01T05:09:49Z",
-        "git": "6b2bec99c41+dirty",
+        "at": "2026-09-01T10:37:10Z",
+        "git": "8f9293d2ca4",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -470,64 +470,78 @@
       "tier": "refit",
       "note": "1 when every seed puts the ten-times cost on the same side of zero on both readings. An indicator for a fig-guard, not a span",
       "measured": {
-        "at": "2026-09-01T05:09:49Z",
-        "git": "6b2bec99c41+dirty",
+        "at": "2026-09-01T10:37:10Z",
+        "git": "8f9293d2ca4",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
     },
     "barrier.tenx_no_rating_mean": {
-      "value": 1604.5,
+      "value": 2375.3333333333335,
       "fmt": "~10",
-      "text": "1,600",
+      "text": "2,380",
       "producer": "ablations.refit_barrier_figures",
       "tier": "refit",
       "note": "the same count at ten times the barrier weight, seed-averaged — the one cost of a heavier barrier the held-out likelihood cannot show, since the problems it touches ship a sentinel rather than a wrong number",
       "measured": {
-        "at": "2026-09-01T05:09:49Z",
-        "git": "6b2bec99c41+dirty",
+        "at": "2026-09-01T10:37:10Z",
+        "git": "8f9293d2ca4",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "barrier.tenx_no_rating_sign_consistent": {
+      "value": 0,
+      "fmt": "d",
+      "text": "0",
+      "producer": "ablations.refit_barrier_figures",
+      "tier": "refit",
+      "note": "1 when the heavier barrier moves the undefined-rating count the same way at every seed, 0 when it does not. A 0 says this count does not establish a cost for the heavier weight — the count is unstable under BOTH weights, so a difference between two single runs of them is not a difference between the weights",
+      "measured": {
+        "at": "2026-09-01T10:37:10Z",
+        "git": "8f9293d2ca4",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
     },
     "barrier.tenx_rating_span": {
-      "value": 21.926539664853525,
+      "value": 23.466944949811477,
       "fmt": ".1f",
-      "text": "21.9",
+      "text": "23.5",
       "producer": "ablations.refit_barrier_figures",
       "tier": "refit",
-      "note": "p0.1..p99.9 span of the derived rating at ten times the barrier weight — the compression the weight is swept against. A per-fit property, averaged over the panel's 2 seeds",
+      "note": "p0.1..p99.9 span of the derived rating at ten times the barrier weight — the compression the weight is swept against. A per-fit property, averaged over the panel's 3 seeds",
       "measured": {
-        "at": "2026-09-01T05:09:49Z",
-        "git": "6b2bec99c41+dirty",
+        "at": "2026-09-01T10:37:10Z",
+        "git": "8f9293d2ca4",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
     },
     "barrier.tenx_stop_cost_mnat": {
-      "value": -3.4200847148895264,
+      "value": -2.5526881217956543,
       "fmt": ".0f",
       "text": "-3",
       "producer": "ablations.refit_barrier_figures",
       "tier": "refit",
-      "note": "the same cost read at the FINAL epoch, averaged over the panel's 2 seeds",
+      "note": "the same cost read at the FINAL epoch, averaged over the panel's 3 seeds",
       "measured": {
-        "at": "2026-09-01T05:09:49Z",
-        "git": "6b2bec99c41+dirty",
+        "at": "2026-09-01T10:37:10Z",
+        "git": "8f9293d2ca4",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
     },
     "barrier.tenx_stop_tail_cost_mnat": {
-      "value": -7.701014380643883,
+      "value": -5.685868436353843,
       "fmt": ".0f",
-      "text": "-8",
+      "text": "-6",
       "producer": "ablations.refit_barrier_figures",
       "tier": "refit",
-      "note": "held-out cost of TEN TIMES the barrier weight over the last third of the budget, millinats, paired within a seed and then meaned, averaged over the panel's 2 seeds. §1.7 chooses the weight by held-out sweep and names ten times as the failure direction, so where that arm lands is part of the claim: negative means the heavier barrier fits BETTER than what ships",
+      "note": "held-out cost of TEN TIMES the barrier weight over the last third of the budget, millinats, paired within a seed and then meaned, averaged over the panel's 3 seeds. §1.7 chooses the weight by held-out sweep and names ten times as the failure direction, so where that arm lands is part of the claim: negative means the heavier barrier fits BETTER than what ships",
       "measured": {
-        "at": "2026-09-01T05:09:49Z",
-        "git": "6b2bec99c41+dirty",
+        "at": "2026-09-01T10:37:10Z",
+        "git": "8f9293d2ca4",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
