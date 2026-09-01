@@ -1,11 +1,11 @@
-# Work queue for `vast_orchestration.py queue`. One line per item:
-#   <panel> [<arm> ...]     a bare panel name means every arm of that panel
-# Blank lines and # comments are ignored; arms that already have a record are
-# skipped when their slot comes up, so re-running a drained queue is free.
+# Work queue for `vast_orchestration.py queue`. `<panel> [<arm> ...]`; a bare
+# panel name means all of its arms. Re-read whenever a slot opens, so editing
+# this file and pushing it reprioritises a live pool. Arms with records are
+# skipped, so re-running a drained queue costs nothing.
 #
-# THE RUNNER RE-READS THIS FILE WHENEVER A SLOT OPENS, so editing it and
-# pushing (`queue --sync-only`) reprioritises a live pool without killing
-# anything. Put whatever decides a baseline at the TOP: arms measured against a
-# baseline that is about to move are the ones whose time is wasted.
-schedule
+# The cosine budget curve is still improving on the level at the longest budget
+# run, so the next point up leads: a sweep whose best value is its largest one
+# has not found anything yet.
+schedule cosine_b10000_prob_i0 cosine_b10000_prob_i1 cosine_b10000_prob_i2
+schedule cosine_b12000_prob_i0 cosine_b12000_prob_i1 cosine_b12000_prob_i2
 blocks

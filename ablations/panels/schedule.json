@@ -172,6 +172,46 @@
       "lr_schedule": "cosine",
       "epochs": 8000,
       "seed": 2
+    },
+    "cosine_b10000_prob_i0": {
+      "split_seed": 0,
+      "stop_unit": "problem",
+      "lr_schedule": "cosine",
+      "epochs": 10000
+    },
+    "cosine_b10000_prob_i1": {
+      "split_seed": 0,
+      "stop_unit": "problem",
+      "lr_schedule": "cosine",
+      "epochs": 10000,
+      "seed": 1
+    },
+    "cosine_b10000_prob_i2": {
+      "split_seed": 0,
+      "stop_unit": "problem",
+      "lr_schedule": "cosine",
+      "epochs": 10000,
+      "seed": 2
+    },
+    "cosine_b12000_prob_i0": {
+      "split_seed": 0,
+      "stop_unit": "problem",
+      "lr_schedule": "cosine",
+      "epochs": 12000
+    },
+    "cosine_b12000_prob_i1": {
+      "split_seed": 0,
+      "stop_unit": "problem",
+      "lr_schedule": "cosine",
+      "epochs": 12000,
+      "seed": 1
+    },
+    "cosine_b12000_prob_i2": {
+      "split_seed": 0,
+      "stop_unit": "problem",
+      "lr_schedule": "cosine",
+      "epochs": 12000,
+      "seed": 2
     }
   }
 }
