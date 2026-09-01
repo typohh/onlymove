@@ -56,6 +56,160 @@
         "data_version": "f6fba7b749bc0ecb"
       }
     },
+    "axis_count.draw_spread_mnat": {
+      "value": 11.997874125395658,
+      "fmt": ".2f",
+      "text": "12.00",
+      "producer": "ablations.refit_axis_count_figures",
+      "tier": "refit",
+      "note": "the spread between DRAWS the gaps are read against: the range (max minus min) over the three seeds of the shipped count's own last-third mean held-out score, millinats. One count, three holdout draws, so it is scatter alone",
+      "measured": {
+        "at": "2026-09-01T06:18:37Z",
+        "git": "88301e2d5c8",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "axis_count.gaps_within_draw_spread": {
+      "value": 1,
+      "fmt": "d",
+      "text": "1",
+      "producer": "ablations.refit_axis_count_figures",
+      "tier": "refit",
+      "note": "1 when the counts are separated by less than the spread between draws, 0 when they are not. The rule, in full and with no threshold in it: axis_count.largest_gap_mnat is no greater than axis_count.draw_spread_mnat — the larger averaged paired gap against the between-seed range of the shipped count's last-third mean score, both in millinats. A 1 is the claim that held-out likelihood cannot order the counts, standing as stated. An indicator for a fig-guard, not a span",
+      "measured": {
+        "at": "2026-09-01T06:18:37Z",
+        "git": "88301e2d5c8",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "axis_count.increment_k4_mnat": {
+      "value": 0.165631373723348,
+      "fmt": ".2f",
+      "text": "0.17",
+      "producer": "ablations.refit_axis_count_figures",
+      "tier": "refit",
+      "note": "the axis increment at 4 axes: what zeroing the axis term costs on the same held-aside rows at the final state (`stop_bce_no_axes - stop_bce`), millinats, averaged over the three seeds. Positive means the axis channel is contributing. It is a diagnostic beside the combined score and never the criterion for choosing the count",
+      "measured": {
+        "at": "2026-09-01T06:18:37Z",
+        "git": "88301e2d5c8",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "axis_count.increment_k6_mnat": {
+      "value": 0.27614831924438477,
+      "fmt": ".2f",
+      "text": "0.28",
+      "producer": "ablations.refit_axis_count_figures",
+      "tier": "refit",
+      "note": "the axis increment at 6 axes: what zeroing the axis term costs on the same held-aside rows at the final state (`stop_bce_no_axes - stop_bce`), millinats, averaged over the three seeds. Positive means the axis channel is contributing. It is a diagnostic beside the combined score and never the criterion for choosing the count",
+      "measured": {
+        "at": "2026-09-01T06:18:37Z",
+        "git": "88301e2d5c8",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "axis_count.increment_k7_mnat": {
+      "value": 0.29106934865315753,
+      "fmt": ".2f",
+      "text": "0.29",
+      "producer": "ablations.refit_axis_count_figures",
+      "tier": "refit",
+      "note": "the axis increment at 7 axes: what zeroing the axis term costs on the same held-aside rows at the final state (`stop_bce_no_axes - stop_bce`), millinats, averaged over the three seeds. Positive means the axis channel is contributing. It is a diagnostic beside the combined score and never the criterion for choosing the count",
+      "measured": {
+        "at": "2026-09-01T06:18:37Z",
+        "git": "88301e2d5c8",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "axis_count.increment_rises_with_count": {
+      "value": 0,
+      "fmt": "d",
+      "text": "0",
+      "producer": "ablations.refit_axis_count_figures",
+      "tier": "refit",
+      "note": "1 when the axis increment is strictly larger at every higher count at EVERY seed, 0 when any seed breaks that order. A 1 is the trap: more axes mechanically absorb more residual whether or not the model predicts better, so the increment read alone recommends the largest count tried. An indicator for a fig-guard, not a span",
+      "measured": {
+        "at": "2026-09-01T06:18:37Z",
+        "git": "88301e2d5c8",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "axis_count.k4_vs_k6_gap_final_mnat": {
+      "value": 3.2983720302581787,
+      "fmt": ".2f",
+      "text": "3.30",
+      "producer": "ablations.refit_axis_count_figures",
+      "tier": "refit",
+      "note": "the same 4-against-6 gap read at the final epoch alone, where one checkpoint is one draw from the settled trace's own wander",
+      "measured": {
+        "at": "2026-09-01T06:18:37Z",
+        "git": "88301e2d5c8",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "axis_count.k4_vs_k6_gap_mnat": {
+      "value": 1.1735206389977826,
+      "fmt": ".2f",
+      "text": "1.17",
+      "producer": "ablations.refit_axis_count_figures",
+      "tier": "refit",
+      "note": "combined held-out (stop-split) score at 4 axes minus the same at 6, millinats, averaged over the panel's three seeds; each seed's gap is PAIRED (same held-aside rows) and read as the mean over the last third of the budget. Positive means 4 axes fit worse than 6",
+      "measured": {
+        "at": "2026-09-01T06:18:37Z",
+        "git": "88301e2d5c8",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "axis_count.k6_vs_k7_gap_final_mnat": {
+      "value": 0.2092421054840088,
+      "fmt": ".2f",
+      "text": "0.21",
+      "producer": "ablations.refit_axis_count_figures",
+      "tier": "refit",
+      "note": "the same 6-against-7 gap read at the final epoch alone, where one checkpoint is one draw from the settled trace's own wander",
+      "measured": {
+        "at": "2026-09-01T06:18:37Z",
+        "git": "88301e2d5c8",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "axis_count.k6_vs_k7_gap_mnat": {
+      "value": -2.3915951598201994,
+      "fmt": ".2f",
+      "text": "-2.39",
+      "producer": "ablations.refit_axis_count_figures",
+      "tier": "refit",
+      "note": "combined held-out (stop-split) score at 6 axes minus the same at 7, millinats, averaged over the panel's three seeds; each seed's gap is PAIRED (same held-aside rows) and read as the mean over the last third of the budget. Positive means 6 axes fit worse than 7",
+      "measured": {
+        "at": "2026-09-01T06:18:37Z",
+        "git": "88301e2d5c8",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "axis_count.largest_gap_mnat": {
+      "value": 2.3915951598201994,
+      "fmt": ".2f",
+      "text": "2.39",
+      "producer": "ablations.refit_axis_count_figures",
+      "tier": "refit",
+      "note": "the larger of the two adjacent-count gaps in absolute value, millinats, last third of the budget — the best case a held-out likelihood criterion could make for ordering the counts",
+      "measured": {
+        "at": "2026-09-01T06:18:37Z",
+        "git": "88301e2d5c8",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
     "axistail.axes_measured": {
       "value": 7,
       "fmt": "d",
