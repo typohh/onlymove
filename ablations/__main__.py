@@ -122,7 +122,7 @@ def main(argv=None):
         for fig in figs:
             print(f"  {fig.key:<34} {fig.text:>12}   {fig.note}")
         print(flush=True)
-    save_ledger(ledger)
+    save_ledger(ledger, ran=[f"ablations.{n}" for n in selected])
 
     print(f"{'=' * 78}\nledger: {len(all_changes)} figure(s) changed"
           f"  [git {measured['git']}, db max id {measured['db_max_id']}, "

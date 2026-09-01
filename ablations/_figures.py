@@ -203,7 +203,37 @@ def update_ledger(ledger, figures, producer, tier, measured):
     return changes
 
 
-def save_ledger(ledger):
+def save_ledger(ledger, ran=()):
+    """Write the ledger back, keeping every key this run did not own.
+
+    A run holds the whole ledger in memory from the moment it starts, so a
+    straight rewrite would erase whatever another run landed meanwhile — and
+    producers are run concurrently as a matter of course, since a cheap one
+    reading arm records has no reason to wait behind a GPU measurement. What a
+    run OWNS is the keys of the producers it actually executed: those it writes,
+    retirements included. Every other key is taken from the file as it stands at
+    write time rather than from the copy this run loaded.
+
+    `ran` is the producers executed. Empty means the caller owns everything,
+    which is the honest default for a caller that cannot say — it restores the
+    old whole-file behaviour rather than silently half-merging."""
+    if ran:
+        owned = set(ran)
+        try:
+            with open(LEDGER_PATH, encoding="utf-8") as f:
+                on_disk = json.load(f).get("figures", {})
+        except (OSError, ValueError):
+            on_disk = {}
+        merged = dict(ledger["figures"])
+        for key, entry in on_disk.items():
+            if entry.get("producer") not in owned and key not in merged:
+                merged[key] = entry
+        # A key this run holds whose producer it did NOT run is stale in memory
+        # if the disk copy moved under it: the disk wins, being the later write.
+        for key, entry in on_disk.items():
+            if entry.get("producer") not in owned:
+                merged[key] = entry
+        ledger["figures"] = merged
     ledger["_about"] = (
         "Measured figures the documents quote, one key per number. Written by "
         "`python -m ablations`; raw `value` + `fmt` are the record, `text` is "

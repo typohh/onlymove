@@ -125,7 +125,7 @@ DEFAULT_VARIANTS = ("uniform,visits-linear,winrate-linear,1/order,lcb-fixed,"
                     "fixed-0.5")
 
 
-def main():
+def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--variants", default=DEFAULT_VARIANTS,
                     help=f"comma-separated, from "
@@ -144,7 +144,7 @@ def main():
     ap.add_argument("--boot", type=int, default=2000,
                     help="bootstrap resamples over users for the delta CIs")
     ap.add_argument("--seed", type=int, default=0)
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
     if bool(args.model) != bool(args.features):
         ap.error("--model and --features go together")
 
@@ -280,6 +280,12 @@ def main():
           f"{'dr 95% CI':>18}{'rho':>9}{'drho':>8}{'drho 95% CI':>18}")
     print("-" * 109)
     mean_drho = {n: [] for n in names}
+    # The panel this returns is the same numbers the table prints, keyed for a
+    # reader: `ablations.motif_null_figures` turns the fixed-0.5 control's row
+    # into 2.9's claim that reliability is the wrong criterion to select a null
+    # on. An axis with too few users carries no row at all rather than a
+    # placeholder, so a reader counting axes counts measured ones.
+    panel = {"variants": list(names), "axes": []}
     for k in range(K):
         ok = valid[:, :, :, k].all(axis=(0, 2))            # every variant, both halves
         # Two-step indexing: combining the boolean with the integer k in one
@@ -300,9 +306,16 @@ def main():
             for a in range(V):
                 bd[b, a] = pearson(zk[a, sel, 0], zk[a, sel, 1])
                 bs[b, a] = spearman(zk[a, sel, 0], zk[a, sel, 1])
+        row = {"axis": k, "name": axis_names[k], "n_users": nu,
+               "r": {}, "rho": {}, "drho": {}, "drho_ci": {}}
+        panel["axes"].append(row)
         for a in range(V):
             lo, hi = np.percentile(bd[:, a] - bd[:, 0], [2.5, 97.5])
             slo, shi = np.percentile(bs[:, a] - bs[:, 0], [2.5, 97.5])
+            row["r"][names[a]] = float(r[a])
+            row["rho"][names[a]] = float(rho[a])
+            row["drho"][names[a]] = float(rho[a] - rho[0])
+            row["drho_ci"][names[a]] = [float(slo), float(shi)]
             head = axis_names[k][:17] if a == 0 else ""
             dr = "" if a == 0 else f"{r[a] - r[0]:>8.3f}"
             drho = "" if a == 0 else f"{rho[a] - rho[0]:>8.3f}"
@@ -330,6 +343,7 @@ def main():
         if vals:
             print(f"  {n:<16}{np.mean(vals):+.3f}")
     print(f"total {time.time()-t0:.0f}s", flush=True)
+    return panel
 
 
 if __name__ == "__main__":

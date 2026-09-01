@@ -55,6 +55,20 @@ null's reference vector from anywhere but the problem's own per-cell block:
                               from the set-wide correct-move sidecar.
   motif.altstat_crossproj_manifest_pct  the same against each shard's manifest.
 
+THIRD, it drives `ablations.tendency_null_variants` over the parameter-free
+candidates plus the RETIRED fixed-even null as a control, and reads where that
+control RANKS on split-half reliability — the measurement behind §2.9's closing
+clause that reliability is the wrong criterion to select a null on:
+
+  motif.fixed_null_most_reliable_axes  axes on which the fixed-even control is
+                              the most reliable arm of all. A constant says the
+                              same thing about every problem, so it replicates
+                              across a split of a user's errors perfectly while
+                              telling them nothing — reliability rises with
+                              retained confound rather than with quality.
+  motif.fixed_null_reliability_gain   how far ahead of the uniform reference it
+                              sits, in split-half rank correlation.
+
     ./.venv/bin/python3 -m ablations.motif_null_figures
 """
 
@@ -70,6 +84,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 from ablations import eval_error_null_models as nulls  # noqa: E402
+from ablations import tendency_null_variants as tendency  # noqa: E402
 from ablations._figures import Figure, require  # noqa: E402
 # The packaging step's own readers and its own mass computation, imported rather
 # than restated: the cross-projection measurement below has to be the SHIPPED
@@ -386,12 +401,51 @@ def cross_projection(n_sample=CROSSPROJ_SAMPLE, seed=CROSSPROJ_SEED):
     }
 
 
-def figures(m=None, c=None):
-    # The two measurements are passed in when `main` has already run them, so a
+# The fixed-0.5 control's variant name inside tendency_null_variants — the
+# RETIRED client null, carried there as a control precisely because it consults
+# no problem at all.
+FIXED_TAG = "fixed-0.5"
+RELIABILITY_REF = "uniform"
+
+
+def reliability():
+    """§2.9's last clause: reliability is the wrong criterion to pick a null on,
+    because the null that tells a user least about themselves wins it.
+
+    A constant null is perfectly stable across a split of one user's errors —
+    it says the same thing about every problem — so split-half agreement
+    rewards it for carrying no information. That is measured here rather than
+    argued: the retired fixed-even null runs as one arm among the parameter-free
+    candidates, on the same users and the same paired bootstrap resamples, and
+    what comes back is where it RANKS."""
+    panel = tendency.main([])
+    require(isinstance(panel, dict) and panel.get("axes"),
+            "tendency_null_variants returned no per-axis reliability panel")
+    require(FIXED_TAG in panel["variants"],
+            f"the reliability panel has no {FIXED_TAG!r} arm — that control IS "
+            f"the measurement, so its absence is not a partial answer")
+    require(RELIABILITY_REF in panel["variants"],
+            f"the reliability panel has no {RELIABILITY_REF!r} reference")
+
+    most = 0
+    gains = []
+    for row in panel["axes"]:
+        best = max(row["rho"], key=lambda n: row["rho"][n])
+        most += 1 if best == FIXED_TAG else 0
+        gains.append(row["drho"][FIXED_TAG])
+    require(gains, "no axis carried enough users to score reliability on")
+    return {"axes": len(panel["axes"]), "most_reliable": most,
+            "mean_gain": float(np.mean(gains)),
+            "variants": len(panel["variants"]), "panel": panel}
+
+
+def figures(m=None, c=None, rel=None):
+    # The measurements are passed in when `main` has already run them, so a
     # standalone run can print exactly the values the ledger would receive
-    # without paying for either of them twice.
+    # without paying for any of them twice.
     m = measure() if m is None else m
     c = cross_projection() if c is None else c
+    rel = reliability() if rel is None else rel
     r = m["rank"]
     pop, shipped = r["arms"]["population mean"], r["arms"]["shipped null"]
     return [
@@ -436,6 +490,17 @@ def figures(m=None, c=None):
         Figure("motif.altstat_crossproj_manifest_pct",
                c["rate"]["shard manifest"], "%.1f",
                "the same rate against the shard manifest's copy of that vector"),
+        Figure("motif.fixed_null_most_reliable_axes", rel["most_reliable"], "d",
+               f"axes on which the RETIRED fixed-even null is the most "
+               f"split-half reliable of the {rel['variants']} parameter-free "
+               f"arms — a constant says the same thing about every problem, so "
+               f"reliability rewards it for carrying no information. The claim "
+               f"is that it wins everywhere, which is what a fig-guard holds "
+               f"this to"),
+        Figure("motif.fixed_null_reliability_gain", rel["mean_gain"], ".2f",
+               "how far ahead it sits: mean over axes of its split-half rank "
+               "correlation minus the uniform null's, on the same users and the "
+               "same paired resamples"),
     ]
 
 
@@ -493,8 +558,25 @@ def main():
           "one\npackaging ships, which references the problem's own per-cell "
           "block row 0.")
 
+    rel = reliability()
+    print("\n--- split-half reliability, and why it is not the criterion ---")
+    print(f"{'axis':<18}{'users':>7}" +
+          "".join(f"{n[:13]:>14}" for n in rel["panel"]["variants"]))
+    print("-" * (25 + 14 * len(rel["panel"]["variants"])))
+    for row in rel["panel"]["axes"]:
+        print(f"{row['name'][:17]:<18}{row['n_users']:>7,}" +
+              "".join(f"{row['rho'][n]:>14.3f}"
+                      for n in rel["panel"]["variants"]))
+    print(f"\nrho = odd-half against even-half agreement of the per-user "
+          f"tendency reading.\n{FIXED_TAG} is the RETIRED null and a control: it "
+          f"consults no problem at all,\nso it is perfectly stable while telling "
+          f"a user nothing about themselves. It\nleads on {rel['most_reliable']} "
+          f"of {rel['axes']} axes, which is the point -- reliability rises with\n"
+          f"retained confound rather than with measurement quality, so the "
+          f"directional\nlog-loss above is what selects the shipped null.")
+
     print("\n--- the figures this run would put in the ledger ---")
-    for fig in figures(m, c):
+    for fig in figures(m, c, rel):
         print(f"  {fig.key:<40}{fig.text:>8}")
 
 

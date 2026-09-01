@@ -876,8 +876,8 @@
       "tier": "refit",
       "note": "held-out-PROBLEM cross-entropy at a joint-PCA activation width of 128, nats per attempt, meaned over the last third of the budget and then averaged over the panel's 2 seeds. A level, not a comparison: the seeds hold aside different problems",
       "measured": {
-        "at": "2026-09-01T05:12:46Z",
-        "git": "d29528638ab+dirty",
+        "at": "2026-09-01T05:21:21Z",
+        "git": "e83d732cbdc+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -890,8 +890,8 @@
       "tier": "refit",
       "note": "median fitted per-problem slope at a width of 128, over every fitted problem, averaged over the panel's 2 seeds",
       "measured": {
-        "at": "2026-09-01T05:12:46Z",
-        "git": "d29528638ab+dirty",
+        "at": "2026-09-01T05:21:21Z",
+        "git": "e83d732cbdc+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -904,8 +904,8 @@
       "tier": "refit",
       "note": "1 when the shipped width scores better held out than BOTH its neighbours in the swept set (64 below, 256 above) at every seed, on the last-third reading — §1.3's 'wins from both sides' as one indicator",
       "measured": {
-        "at": "2026-09-01T05:12:46Z",
-        "git": "d29528638ab+dirty",
+        "at": "2026-09-01T05:21:21Z",
+        "git": "e83d732cbdc+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -918,8 +918,8 @@
       "tier": "refit",
       "note": "held-out-problem cost of a width of 16 against the shipped 128, millinats over the last third of the budget, signed (positive = worse than the shipped width). PAIRED inside a seed — both arms hold aside the same problems — and then averaged over the panel's 2 seeds",
       "measured": {
-        "at": "2026-09-01T05:12:46Z",
-        "git": "d29528638ab+dirty",
+        "at": "2026-09-01T05:21:21Z",
+        "git": "e83d732cbdc+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -932,8 +932,8 @@
       "tier": "refit",
       "note": "1 when both seeds put the 16-against-128 contrast on the same side of zero on the last-third reading, 0 when they disagree — the two seeds being independent estimates of one paired delta. An indicator for a fig-guard beside a sentence naming that contrast's direction, not for a span",
       "measured": {
-        "at": "2026-09-01T05:12:46Z",
-        "git": "d29528638ab+dirty",
+        "at": "2026-09-01T05:21:21Z",
+        "git": "e83d732cbdc+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -946,8 +946,8 @@
       "tier": "refit",
       "note": "held-out-PROBLEM cross-entropy at a joint-PCA activation width of 16, nats per attempt, meaned over the last third of the budget and then averaged over the panel's 2 seeds. A level, not a comparison: the seeds hold aside different problems",
       "measured": {
-        "at": "2026-09-01T05:12:46Z",
-        "git": "d29528638ab+dirty",
+        "at": "2026-09-01T05:21:21Z",
+        "git": "e83d732cbdc+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -960,8 +960,8 @@
       "tier": "refit",
       "note": "median fitted per-problem slope at a width of 16, over every fitted problem, averaged over the panel's 2 seeds",
       "measured": {
-        "at": "2026-09-01T05:12:46Z",
-        "git": "d29528638ab+dirty",
+        "at": "2026-09-01T05:21:21Z",
+        "git": "e83d732cbdc+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -974,8 +974,8 @@
       "tier": "refit",
       "note": "held-out-problem cost of a width of 256 against the shipped 128, millinats over the last third of the budget, signed (positive = worse than the shipped width). PAIRED inside a seed — both arms hold aside the same problems — and then averaged over the panel's 2 seeds",
       "measured": {
-        "at": "2026-09-01T05:12:46Z",
-        "git": "d29528638ab+dirty",
+        "at": "2026-09-01T05:21:21Z",
+        "git": "e83d732cbdc+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -988,8 +988,8 @@
       "tier": "refit",
       "note": "1 when both seeds put the 256-against-128 contrast on the same side of zero on the last-third reading, 0 when they disagree — the two seeds being independent estimates of one paired delta. An indicator for a fig-guard beside a sentence naming that contrast's direction, not for a span",
       "measured": {
-        "at": "2026-09-01T05:12:46Z",
-        "git": "d29528638ab+dirty",
+        "at": "2026-09-01T05:21:21Z",
+        "git": "e83d732cbdc+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -1002,8 +1002,8 @@
       "tier": "refit",
       "note": "1 when the 256-wide arm carries the highest median slope of any arm at every seed — the memorization signature §1.3 names, as an indicator",
       "measured": {
-        "at": "2026-09-01T05:12:46Z",
-        "git": "d29528638ab+dirty",
+        "at": "2026-09-01T05:21:21Z",
+        "git": "e83d732cbdc+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -1016,8 +1016,8 @@
       "tier": "refit",
       "note": "held-out-PROBLEM cross-entropy at a joint-PCA activation width of 256, nats per attempt, meaned over the last third of the budget and then averaged over the panel's 2 seeds. A level, not a comparison: the seeds hold aside different problems",
       "measured": {
-        "at": "2026-09-01T05:12:46Z",
-        "git": "d29528638ab+dirty",
+        "at": "2026-09-01T05:21:21Z",
+        "git": "e83d732cbdc+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -1030,8 +1030,8 @@
       "tier": "refit",
       "note": "median fitted per-problem slope at a width of 256, over every fitted problem, averaged over the panel's 2 seeds",
       "measured": {
-        "at": "2026-09-01T05:12:46Z",
-        "git": "d29528638ab+dirty",
+        "at": "2026-09-01T05:21:21Z",
+        "git": "e83d732cbdc+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -1044,8 +1044,8 @@
       "tier": "refit",
       "note": "held-out-problem cost of a width of 64 against the shipped 128, millinats over the last third of the budget, signed (positive = worse than the shipped width). PAIRED inside a seed — both arms hold aside the same problems — and then averaged over the panel's 2 seeds",
       "measured": {
-        "at": "2026-09-01T05:12:46Z",
-        "git": "d29528638ab+dirty",
+        "at": "2026-09-01T05:21:21Z",
+        "git": "e83d732cbdc+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -1058,8 +1058,8 @@
       "tier": "refit",
       "note": "1 when both seeds put the 64-against-128 contrast on the same side of zero on the last-third reading, 0 when they disagree — the two seeds being independent estimates of one paired delta. An indicator for a fig-guard beside a sentence naming that contrast's direction, not for a span",
       "measured": {
-        "at": "2026-09-01T05:12:46Z",
-        "git": "d29528638ab+dirty",
+        "at": "2026-09-01T05:21:21Z",
+        "git": "e83d732cbdc+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -1072,8 +1072,8 @@
       "tier": "refit",
       "note": "held-out-PROBLEM cross-entropy at a joint-PCA activation width of 64, nats per attempt, meaned over the last third of the budget and then averaged over the panel's 2 seeds. A level, not a comparison: the seeds hold aside different problems",
       "measured": {
-        "at": "2026-09-01T05:12:46Z",
-        "git": "d29528638ab+dirty",
+        "at": "2026-09-01T05:21:21Z",
+        "git": "e83d732cbdc+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -1086,8 +1086,8 @@
       "tier": "refit",
       "note": "median fitted per-problem slope at a width of 64, over every fitted problem, averaged over the panel's 2 seeds",
       "measured": {
-        "at": "2026-09-01T05:12:46Z",
-        "git": "d29528638ab+dirty",
+        "at": "2026-09-01T05:21:21Z",
+        "git": "e83d732cbdc+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -1394,8 +1394,8 @@
       "tier": "methodology",
       "note": "the same rate against the shard manifest's copy of that vector",
       "measured": {
-        "at": "2026-08-31T21:32:09Z",
-        "git": "da7c25dfaff+dirty",
+        "at": "2026-09-01T05:12:20Z",
+        "git": "d29528638ab+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -1408,8 +1408,8 @@
       "tier": "methodology",
       "note": "share of a 20000-problem seeded sample whose published availability masses move when the reference is taken from the set-wide correct-move sidecar instead of the problem's own per-cell block",
       "measured": {
-        "at": "2026-08-31T21:32:09Z",
-        "git": "da7c25dfaff+dirty",
+        "at": "2026-09-01T05:12:20Z",
+        "git": "d29528638ab+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -1422,8 +1422,8 @@
       "tier": "methodology",
       "note": "axes where the shipped visits-weighted null beats the equal-count one on per-error directional log-loss with the paired 95% bootstrap interval clear of zero, of 7 measured",
       "measured": {
-        "at": "2026-08-31T21:32:09Z",
-        "git": "da7c25dfaff+dirty",
+        "at": "2026-09-01T05:12:20Z",
+        "git": "d29528638ab+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -1436,8 +1436,8 @@
       "tier": "methodology",
       "note": "nats of directional log-loss per scored error the visits-weighted null saves over the equal-count one, pooled over axes",
       "measured": {
-        "at": "2026-08-31T21:32:09Z",
-        "git": "da7c25dfaff+dirty",
+        "at": "2026-09-01T05:12:20Z",
+        "git": "d29528638ab+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -1450,8 +1450,36 @@
       "tier": "methodology",
       "note": "what the fitted null adds over the shipped visits-weighted one, pooled, as a share of that null's own gain over equal counting",
       "measured": {
-        "at": "2026-08-31T21:32:09Z",
-        "git": "da7c25dfaff+dirty",
+        "at": "2026-09-01T05:12:20Z",
+        "git": "d29528638ab+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "motif.fixed_null_most_reliable_axes": {
+      "value": 7,
+      "fmt": "d",
+      "text": "7",
+      "producer": "ablations.motif_null_figures",
+      "tier": "methodology",
+      "note": "axes on which the RETIRED fixed-even null is the most split-half reliable of the 6 parameter-free arms — a constant says the same thing about every problem, so reliability rewards it for carrying no information. The claim is that it wins everywhere, which is what a fig-guard holds this to",
+      "measured": {
+        "at": "2026-09-01T05:12:20Z",
+        "git": "d29528638ab+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "motif.fixed_null_reliability_gain": {
+      "value": 0.3769401461259721,
+      "fmt": ".2f",
+      "text": "0.38",
+      "producer": "ablations.motif_null_figures",
+      "tier": "methodology",
+      "note": "how far ahead it sits: mean over axes of its split-half rank correlation minus the uniform null's, on the same users and the same paired resamples",
+      "measured": {
+        "at": "2026-09-01T05:12:20Z",
+        "git": "d29528638ab+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -1464,8 +1492,8 @@
       "tier": "methodology",
       "note": "share of testable users the retired fixed-50% test flags on that axis",
       "measured": {
-        "at": "2026-08-31T21:32:09Z",
-        "git": "da7c25dfaff+dirty",
+        "at": "2026-09-01T05:12:20Z",
+        "git": "d29528638ab+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -1478,8 +1506,8 @@
       "tier": "methodology",
       "note": "toward-side share of offered-alternative weight on the most menu-skewed axis (yose)",
       "measured": {
-        "at": "2026-08-31T21:32:09Z",
-        "git": "da7c25dfaff+dirty",
+        "at": "2026-09-01T05:12:20Z",
+        "git": "d29528638ab+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -1492,8 +1520,8 @@
       "tier": "methodology",
       "note": "shipped axes the availability-null measurement runs over",
       "measured": {
-        "at": "2026-08-31T21:32:09Z",
-        "git": "da7c25dfaff+dirty",
+        "at": "2026-09-01T05:12:20Z",
+        "git": "d29528638ab+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -1506,8 +1534,8 @@
       "tier": "methodology",
       "note": "axes whose population error lean changes sign between the fixed even split and the shipped visits-linear availability null",
       "measured": {
-        "at": "2026-08-31T21:32:09Z",
-        "git": "da7c25dfaff+dirty",
+        "at": "2026-09-01T05:12:20Z",
+        "git": "d29528638ab+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -1520,8 +1548,8 @@
       "tier": "methodology",
       "note": "share of testable users the shipped null's test flags on that axis",
       "measured": {
-        "at": "2026-08-31T21:32:09Z",
-        "git": "da7c25dfaff+dirty",
+        "at": "2026-09-01T05:12:20Z",
+        "git": "d29528638ab+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -1534,8 +1562,8 @@
       "tier": "methodology",
       "note": "largest per-axis share of the between-user variance the user's rank alone explains when the lean is scored against a population average instead of each problem's own null (ko)",
       "measured": {
-        "at": "2026-08-31T21:32:09Z",
-        "git": "da7c25dfaff+dirty",
+        "at": "2026-09-01T05:12:20Z",
+        "git": "d29528638ab+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -1548,8 +1576,8 @@
       "tier": "methodology",
       "note": "the same share for the reading that ships, scored against each problem's own availability null (yose)",
       "measured": {
-        "at": "2026-08-31T21:32:09Z",
-        "git": "da7c25dfaff+dirty",
+        "at": "2026-09-01T05:12:20Z",
+        "git": "d29528638ab+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
@@ -1562,8 +1590,8 @@
       "tier": "methodology",
       "note": "accounts with a fitted ability and at least 10 scored errors on the axis the share below is measured on",
       "measured": {
-        "at": "2026-08-31T21:32:09Z",
-        "git": "da7c25dfaff+dirty",
+        "at": "2026-09-01T05:12:20Z",
+        "git": "d29528638ab+dirty",
         "db_max_id": 457114,
         "data_version": "f6fba7b749bc0ecb"
       }
