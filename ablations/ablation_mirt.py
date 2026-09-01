@@ -203,6 +203,12 @@ def main(argv=None):
                     default=None,
                     help="constant is what ships; cosine decays both rates to "
                          "zero over the budget, holding their ratio fixed")
+    ap.add_argument("--pca-seed", type=int, default=None,
+                    help="seed for the randomized joint-PCA FEATURE BASIS alone "
+                         "(default: the one seed). Pinning it while --seed "
+                         "varies separates a spread caused by the basis "
+                         "re-rolling from one caused by the network's own "
+                         "initialization")
     ap.add_argument("--split-seed", type=int, default=None,
                     help="seed for the HELD-ASIDE DRAW alone (default: the one "
                          "seed). Pinning it across arms while --seed varies "
@@ -220,7 +226,7 @@ def main(argv=None):
                  "lr_field", "ortho_rating", "ortho_mode", "teach_weight",
                  "pca_dim", "blocks", "stop_unit", "k_axes",
                  "dropout", "input_dropout", "weight_decay",
-                 "lr_schedule", "split_seed"):
+                 "lr_schedule", "split_seed", "pca_seed"):
         v = getattr(args, flag)
         if v is not None:
             cfg[flag] = v

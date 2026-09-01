@@ -542,7 +542,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         shallow_w=SHALLOW_W, shallow_samples=SHALLOW_SAMPLES,
         teach_weight=TEACH_WEIGHT, stop_row_frac=STOP_ROW_FRAC,
         pca_dim=PCA_DIM, blocks=PRODUCTION_BLOCKS, stop_unit="row",
-        split_seed=None, lr_schedule="constant",
+        split_seed=None, pca_seed=None, lr_schedule="constant",
         k_axes=K_AXES, dropout=DROPOUT, input_dropout=INPUT_DROPOUT,
         weight_decay=0.0, out_dir=OUT_DIR, axes_dir=AXES_DIR):
     """The shipped fit, callable. Every keyword defaults to the production
@@ -557,8 +557,14 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     t0 = time.time()
 
+    # THE FEATURE BASIS HAS ITS OWN SEED. The joint PCA is randomized and keyed
+    # on the seed it is given, so one seed re-rolls the basis, the network's
+    # initial weights and the minibatch order together. Production runs them all
+    # off one seed and is self-consistent; a REPLICATE that varies the seed is
+    # varying three things, and separating them is the only way to say which one
+    # a spread between runs comes from.
     feat, keys, key_idx, input_dim = load_joint_mirt_features(
-        SIZES, pca_dim, seed, blocks=blocks)
+        SIZES, pca_dim, seed if pca_seed is None else pca_seed, blocks=blocks)
     fdim = feat.shape[1]
     print(f"loaded in {time.time() - t0:.0f}s: {len(keys)} problems, "
           f"feat {fdim} (dropout region {input_dim})", flush=True)
@@ -976,6 +982,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         "k_axes": int(k_axes),
         "lr_schedule": str(lr_schedule),
         "split_seed": int(seed if split_seed is None else split_seed),
+        "pca_seed": int(seed if pca_seed is None else pca_seed),
         "stop_bce_no_axes": bce_stop_no_axes,
         "slope_scale_sweep": slope_sweep,
         "slope_pct": {str(p): float(np.percentile(a_np, p))

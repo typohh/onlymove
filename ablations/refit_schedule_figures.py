@@ -15,13 +15,18 @@ So this producer reports three things and refuses to collapse them:
   the BETWEEN-RUN spread what actually licenses dropping replicates,
   the LEVEL             whether the consistency was bought by fitting worse.
 
-WHY THE ARMS ARE COMPARABLE AT ALL. A seed normally drives both the
-initialization and the held-aside draw, so two runs at different seeds differ in
-the fit AND in the rows the fit is scored on — their difference is not a
-property of the fit. Every arm of this panel pins the draw (`split_seed`) and
-varies only the initialization, so the between-run spread below is the fit
-moving and nothing else. That also makes the two schedules' levels directly
-comparable, being scored on identical rows.
+WHY THE ARMS ARE COMPARABLE AT ALL. A seed normally drives the held-aside draw
+too, so two runs at different seeds differ in the fit AND in the rows the fit is
+scored on — their difference is not a property of the fit. Every arm of this
+panel pins the draw (`split_seed`), so the between-run spread below is the fit
+moving and the two schedules' levels are scored on identical rows.
+
+WHAT "THE FIT MOVING" INCLUDES, stated because it is broader than it sounds: one
+seed re-rolls the randomized joint-PCA FEATURE BASIS, the network's initial
+weights and the minibatch order together. A spread between arms differing in the
+seed is all three at once. The panel's `pinpca` and `pcaonly` arms separate
+them — a large share coming from the basis would point at a variance fix that
+has nothing to do with the learning rate.
 
 WHAT WOULD LICENSE ONE SEED. Not a small number in isolation: the between-run
 spread has to be small against the contrasts the panels are asked to resolve.
@@ -196,7 +201,9 @@ def figures():
                prob["cosine"]["between_range"], ".1f",
                "the same spread under the cosine decay. Dropping replicates "
                "needs this small against the contrasts a panel is asked to "
-               "resolve — a number to compare, not to read alone"),
+               "resolve — a number to compare, not to read alone. It spans "
+               "everything a seed re-rolls: the feature basis, the initial "
+               "weights and the batch order"),
         Figure("schedule.cosine_level_cost_mnat", prob["level_cost"], ".1f",
                "what the cosine schedule costs on held-out PROBLEMS against the "
                "constant one, millinats, positive meaning the decayed fit "
