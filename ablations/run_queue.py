@@ -21,10 +21,13 @@ panel, in manifest order. Blank lines and `#` comments are ignored. An arm that
 already has a record is skipped when its slot comes up, so a finished queue can
 be re-run and only trains what is missing.
 
-Concurrency is the same in-place ramp `run_panel` uses and for the same reason:
-it starts at one, adds an arm whenever the last addition still bought aggregate
-throughput, and never kills anything. GPU utilization is not a gate — a card
-reads busy long before small-kernel fits stop scaling — and VRAM headroom is.
+Concurrency FILLS TO A KNOWN-GOOD LEVEL AND THEN RAMPS. The ceiling varies with
+arm shape and is still discovered by measurement — an addition is kept only
+while it buys aggregate throughput, and nothing is ever killed. The floor is
+not in doubt and is no longer rediscovered one settle-interval at a time, which
+used to leave the card underused for the first ten minutes of every start. GPU
+utilization gates nothing here — a card reads busy long before small-kernel
+fits stop scaling — and VRAM headroom gates every launch, fill included.
 """
 
 import argparse
@@ -41,6 +44,15 @@ if PROJECT_ROOT not in sys.path:
 from ablations.run_panel import (  # noqa: E402
     POLL_SECS, RAMP_GAIN_MIN, RAMP_INTERVAL_SECS, RATE_WINDOW_SECS,
     VRAM_HEADROOM_FACTOR, _epochs_in_log, _gpu_mem)
+
+# WHERE THE RAMP STARTS. The ceiling genuinely varies with arm shape — short
+# arms have saturated at three or four, long ones at six — so the top is still
+# discovered. The BOTTOM is not in doubt: every panel run so far has sustained
+# this many, and climbing to it one step per settle interval leaves the card
+# underused for the first ten minutes of every pool start for no information.
+# So the pool fills to here immediately, subject to the same VRAM check, and
+# ramps upward from there.
+START_LEVEL = 4
 
 PANELS = os.path.join(PROJECT_ROOT, "ablations", "panels")
 DEV_RUNS = os.path.join(PROJECT_ROOT, "ablations", "dev_runs")
@@ -156,12 +168,18 @@ def main(argv=None):
             return len(running) < ceiling
         if not running:
             return True
+        # Fill to the known-good level without waiting: the interval exists to
+        # let a NEW level prove itself, and these levels have already proved
+        # themselves on every panel run. VRAM still gates each one.
+        if len(running) < START_LEVEL:
+            return vram_allows_more()
         if time.time() - last_launch < RAMP_INTERVAL_SECS:
             return False
         return vram_allows_more()
 
     print(f"queue {args.queue}, concurrency "
-          f"{'auto (ramp in place)' if auto else fixed_level}", flush=True)
+          f"{f'auto (fill to {START_LEVEL}, then ramp)' if auto else fixed_level}",
+          flush=True)
     idle_reported = False
     while True:
         reap()
@@ -183,7 +201,10 @@ def main(argv=None):
         pending = [it for it in read_queue(args.queue)
                    if (it[0], it[1]) not in started]
         if pending and want_more():
-            if auto and running:
+            # Only additions ABOVE the known-good level are judged; the fill is
+            # not an experiment and a rate measured mid-fill would judge the
+            # first real addition against a card that was not yet busy.
+            if auto and len(running) >= START_LEVEL:
                 rate_at_launch = rate if rate is not None else rate_at_launch
             panel, arm, cfg = pending[0]
             launch(panel, arm, cfg)
