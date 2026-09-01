@@ -1,0 +1,10 @@
+{
+  "panel": "calibration",
+  "description": "Throughput calibration, not a measurement: identical default arms, run at a short --smoke-epochs budget under varying --concurrency to find the aggregate epochs-per-second optimum on a box before its real panels are scheduled. The records are smoke-budget by construction, no producer reads this panel, and its dev_runs/calibration/ directory is deleted between sweep points and after use.",
+  "arms": {
+    "a": {},
+    "b": {},
+    "c": {},
+    "d": {}
+  }
+}
