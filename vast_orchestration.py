@@ -2026,6 +2026,14 @@ def cmd_ablate(args):
         print(f"  instance {inst_id} is STILL RUNNING and still billing. "
               f"Destroy it with:")
         print(f"    python vast_orchestration.py shutdown {inst_id}")
+    # A PANEL WITH A HOLE IN IT EXITS NON-ZERO. Everything above is printed
+    # either way, but a caller chaining panels — or reading $? at all — cannot
+    # otherwise tell a finished panel from one that lost arms, and an arm that
+    # aborted remotely leaves no record to notice later. Resumable, so the
+    # answer to a non-zero exit is usually to run the same command again.
+    if missing:
+        return 1
+    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -2130,7 +2138,10 @@ def main():
     if len(sys.argv) < 2 or sys.argv[1] not in COMMANDS:
         print(help_text())
         sys.exit(1)
-    COMMANDS[sys.argv[1]]["handler"](sys.argv[2:])
+    # A handler's return value IS the exit status when it gives one: `ablate`
+    # reports an incomplete panel that way, and a chain of panels has no other
+    # way to notice a hole. Handlers that return nothing keep exiting 0.
+    sys.exit(COMMANDS[sys.argv[1]]["handler"](sys.argv[2:]) or 0)
 
 
 if __name__ == "__main__":
