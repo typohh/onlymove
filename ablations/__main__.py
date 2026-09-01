@@ -50,6 +50,8 @@ PRODUCERS = (
     "refit_blocks_figures",
     "refit_axis_count_figures",
     "refit_regularization_figures",
+    "refit_slope_scale_figures",
+    "refit_stopping_figures",
 )
 
 

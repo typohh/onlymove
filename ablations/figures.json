@@ -3584,6 +3584,104 @@
         "data_version": "f6fba7b749bc0ecb"
       }
     },
+    "stopping.patience_advantage_best_mnat": {
+      "value": -3.926306962966919,
+      "fmt": ".1f",
+      "text": "-3.9",
+      "producer": "ablations.refit_stopping_figures",
+      "tier": "refit",
+      "note": "the rule's BEST case over every seed and setting tried — the most it could claim under its own criterion",
+      "measured": {
+        "at": "2026-09-01T05:39:41Z",
+        "git": "c9264fe3432+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "stopping.patience_advantage_mnat": {
+      "value": -14.779798686504364,
+      "fmt": ".1f",
+      "text": "-14.8",
+      "producer": "ablations.refit_stopping_figures",
+      "tier": "refit",
+      "note": "millinats the selected epoch beats the FINAL epoch by on the held-aside rows, meaned over seeds and settings; SIGNED, so a negative value means the rule stops early and ships the worse fit. Flattering to the rule by construction: the selected epoch is a running minimum over the very rows the selection reads",
+      "measured": {
+        "at": "2026-09-01T05:39:41Z",
+        "git": "c9264fe3432+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "stopping.patience_ever_beats_final": {
+      "value": 0,
+      "fmt": "d",
+      "text": "0",
+      "producer": "ablations.refit_stopping_figures",
+      "tier": "refit",
+      "note": "1 if a patience rule beat the final epoch at any seed and any setting, 0 if it never did. An indicator for a fig-guard: 0 says the fixed budget is not merely lower-variance but better",
+      "measured": {
+        "at": "2026-09-01T05:39:41Z",
+        "git": "c9264fe3432+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "stopping.patience_setting_over_seed_ratio": {
+      "value": 3.264516129032258,
+      "fmt": ".1f",
+      "text": "3.3",
+      "producer": "ablations.refit_stopping_figures",
+      "tier": "refit",
+      "note": "the first spread over the second: how many times more the chosen epoch answers to the rule's own tuning than to the fit it is reading. Above one means the setting dominates",
+      "measured": {
+        "at": "2026-09-01T05:39:41Z",
+        "git": "c9264fe3432+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "stopping.patience_spread_seeds": {
+      "value": 387.5,
+      "fmt": "~10",
+      "text": "390",
+      "producer": "ablations.refit_stopping_figures",
+      "tier": "refit",
+      "note": "how far it moves when only the SEED changes, at a fixed setting, averaged over the settings — the same spread taken the other way round, over the same numbers",
+      "measured": {
+        "at": "2026-09-01T05:39:41Z",
+        "git": "c9264fe3432+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "stopping.patience_spread_settings": {
+      "value": 1265.0,
+      "fmt": "~10",
+      "text": "1,260",
+      "producer": "ablations.refit_stopping_figures",
+      "tier": "refit",
+      "note": "how far the epoch a patience rule selects moves when only the PATIENCE SETTING changes, averaged over seeds — the rule's answer as a property of its own tuning",
+      "measured": {
+        "at": "2026-09-01T05:39:41Z",
+        "git": "c9264fe3432+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
+    "stopping.seeds": {
+      "value": 2,
+      "fmt": "d",
+      "text": "2",
+      "producer": "ablations.refit_stopping_figures",
+      "tier": "refit",
+      "note": "seeds of the shipped configuration whose recorded traces a patience rule is replayed on; runs of one seed are bitwise identical, so each seed counts once",
+      "measured": {
+        "at": "2026-09-01T05:39:41Z",
+        "git": "c9264fe3432+dirty",
+        "db_max_id": 457114,
+        "data_version": "f6fba7b749bc0ecb"
+      }
+    },
     "swing.pass_only_baseline": {
       "value": 26,
       "fmt": "d",
