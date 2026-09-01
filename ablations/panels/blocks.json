@@ -1,0 +1,18 @@
+{
+  "panel": "blocks",
+  "description": "methodology 1.3 — answer conditioning: the shipped trunk input (activations + bot pass rates + the board-size flag) against the same fit with the answer-derived blocks added back (move evaluations, ownership swing, game phase). The claim is a claim of NO DIFFERENCE on the rating, and a null is only as good as the spread it is read against, so EVERY CONFIGURATION RUNS AT THREE SEEDS rather than two: the shipped configuration's own held-out trace wanders by over ten millinats across the last third of its budget, which is wider than the contrast being asked about, so a small delta means nothing until it is placed against that replicate spread. The seed drives the held-out draw as well as the initialization, so within one seed the two arms hold aside the SAME rows and their delta is paired, while NO cross-seed delta is quotable — a difference between two seeds is a difference between two holdout draws. EVERY CONFIGURATION ALSO RUNS AT BOTH STOP UNITS, which is the other half of the panel: adding columns is a FEATURE-side change, and the shipped row split leaves every problem partly trained, so it can reward a layout that fingerprints problems the fit has already seen — the very failure the trunk's feature-side dropout exists to suppress. The problem-held-out arms (stop_unit=problem) hold whole problems aside, so a held-out problem's parameters come from the feature trunk alone, and that is the reading which tests the claim on its own terms; the row arms are kept because the shipped fit's own convergence signal is a row split, and a null that holds on both readings is worth much more than one that holds on either. The two readings are never mixed: they score different quantities, so their millinats are not comparable, a delta is paired only within one seed AND one stop unit, and the replicate spread is measured separately per unit. This panel reaches only the LIKELIHOOD half of the paragraph's parity claim. The other half, that agreement with declared ranks moves in the third decimal, needs a rank re-map per arm (map_rating_to_rank against each arm's own ratings, scored on the declarations the mapping accepts), which this panel does not do; and the per-cell sign-reversal statistics quoted earlier in the same paragraph are a different measurement entirely, made by projecting cells through each fit rather than by comparing held-out likelihoods.",
+  "arms": {
+    "shipped_row_s0": {"stop_unit": "row", "seed": 0},
+    "shipped_row_s1": {"stop_unit": "row", "seed": 1},
+    "shipped_row_s2": {"stop_unit": "row", "seed": 2},
+    "all_row_s0": {"blocks": "all", "stop_unit": "row", "seed": 0},
+    "all_row_s1": {"blocks": "all", "stop_unit": "row", "seed": 1},
+    "all_row_s2": {"blocks": "all", "stop_unit": "row", "seed": 2},
+    "shipped_problem_s0": {"stop_unit": "problem", "seed": 0},
+    "shipped_problem_s1": {"stop_unit": "problem", "seed": 1},
+    "shipped_problem_s2": {"stop_unit": "problem", "seed": 2},
+    "all_problem_s0": {"blocks": "all", "stop_unit": "problem", "seed": 0},
+    "all_problem_s1": {"blocks": "all", "stop_unit": "problem", "seed": 1},
+    "all_problem_s2": {"blocks": "all", "stop_unit": "problem", "seed": 2}
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "panel": "features",
+  "description": "methodology 1.3 — the joint-PCA ACTIVATION WIDTH, which the document states was measured rather than chosen: every other width was run end to end and scored on held-out-PROBLEM likelihood, 128 wins and wins FROM BOTH SIDES, widening to 256 costs about as much as cutting while carrying the HIGHEST MEDIAN SLOPE of any arm — the memorization signature — and 64 ties on ratings while collapsing the motif count to its floor. The arms sweep 16 / 64 / 128 / 256, `shipped128` being the shipped width and the baseline every contrast is taken against; the claim's two ends are represented by 16 and 256, so 8 and 32 are deliberately not run. EVERY ARM HOLDS OUT WHOLE PROBLEMS (stop_unit=problem) in place of the shipped row split, because a claim about the FEATURE side cannot be scored on the row split: that split is a convergence detector and leaves every problem partly trained, whereas a held-out problem's parameters come from the feature trunk alone, which is exactly what a width is being judged on. EVERY ARM RUNS AT TWO SEEDS. Within one seed the arms hold aside the SAME problems, so a cross-arm delta is paired; the seeds differ BY DESIGN and therefore hold aside different problems, so no cross-seed likelihood delta is quotable from this panel — what the second seed buys is a second independent paired estimate, and agreement in SIGN between the two is what a contrast is quoted on. THIS PANEL IS NOT THE END-TO-END REPRODUCTION 1.3 DESCRIBES: it re-fits the model at each width and stops there, re-mapping no ranks and re-deriving no motif count, so the motif half of the claim — 64 collapsing the count to its floor — is out of its reach, and nothing measured here may be read as covering it.",
+  "arms": {
+    "shipped128_s0": {"pca_dim": 128, "stop_unit": "problem", "seed": 0},
+    "w16_s0": {"pca_dim": 16, "stop_unit": "problem", "seed": 0},
+    "w64_s0": {"pca_dim": 64, "stop_unit": "problem", "seed": 0},
+    "w256_s0": {"pca_dim": 256, "stop_unit": "problem", "seed": 0},
+    "shipped128_s1": {"pca_dim": 128, "stop_unit": "problem", "seed": 1},
+    "w16_s1": {"pca_dim": 16, "stop_unit": "problem", "seed": 1},
+    "w64_s1": {"pca_dim": 64, "stop_unit": "problem", "seed": 1},
+    "w256_s1": {"pca_dim": 256, "stop_unit": "problem", "seed": 1}
+  }
+}
