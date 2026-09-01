@@ -19,6 +19,7 @@ Run without args for the command list.
 """
 
 import json
+import glob
 import os
 import shlex
 import subprocess
@@ -195,6 +196,7 @@ ABLATE_CODE_DIRS = ["ablations"]
 ABLATE_RESULTS = os.path.join("ablations", "dev_runs")
 ABLATE_PANELS = os.path.join("ablations", "panels")
 ABLATE_LOG_PREFIX = "ablate"
+ABLATE_QUEUE = os.path.join("ablations", "queue.txt")
 ABLATE_CONCURRENCY = "auto"   # run_panel ramps in place; an integer pins the level
 ABLATE_POLL_SECS = 300
 
@@ -1873,6 +1875,86 @@ def _take_opt(args, name, default=None):
     return val
 
 
+def cmd_queue(args):
+    """Keep a pool of arms training from a queue that spans panels.
+
+    Usage: queue [--instance ID] [--concurrency N] [--sync-only] [--dry-run]
+
+    `ablate` runs ONE panel and returns, so a sequence of panels restarts the
+    ramp at every boundary and drains the card to a single arm at each panel's
+    tail. This launches `ablations.run_queue` instead, which holds the pool full
+    across panels and re-reads `ablations/queue.txt` whenever a slot opens — so
+    the way to reprioritise is to edit that file and push it, with nothing
+    killed and nothing relaunched.
+
+    `--sync-only` pushes the queue file and pulls results without touching the
+    runner, which is how a queue is reordered while it is running.
+    """
+    args = list(args)
+    dry = "--dry-run" in args
+    sync_only = "--sync-only" in args
+    args = [a for a in args if a not in ("--dry-run", "--sync-only")]
+    concurrency = str(_take_opt(args, "--concurrency", ABLATE_CONCURRENCY))
+    if concurrency.lower() != "auto":
+        concurrency = str(int(concurrency))
+    target = _take_opt(args, "--instance", args[0] if args else None)
+
+    local_queue = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), ABLATE_QUEUE)
+    if not os.path.exists(local_queue):
+        print(f"no {ABLATE_QUEUE} — write one first. Lines are "
+              f"`<panel> [<arm> ...]`; a bare panel name means all of its arms.")
+        return 1
+
+    inst = find_instance(target)
+    if inst is None:
+        return 1
+    inst_id = inst["id"]
+    host, port = get_ssh_details(inst)
+    if host is None:
+        print(f"instance {inst_id} has no ssh endpoint yet.")
+        return 1
+    base_ssh, base_rsync = get_ssh_cmds(host, port)
+
+    if not sync_only:
+        if not _ablate_provision(base_ssh, dry):
+            return 1
+        if not _ablate_upload(host, base_ssh, base_rsync, dry):
+            return 1
+        if not _ablate_git_stamp(base_ssh, dry):
+            return 1
+        if not _ablate_check_torch(base_ssh, dry):
+            return 1
+
+    # The queue file travels on its own every time, sync-only included: that is
+    # what makes a reorder a one-line push rather than a relaunch.
+    _run_or_show(base_rsync + [local_queue,
+                               f"root@{host}:{REMOTE_DIR}/{ABLATE_QUEUE}"],
+                 dry, capture_output=True)
+    print(f"  pushed {ABLATE_QUEUE}")
+
+    if not sync_only:
+        log = f"{REMOTE_DIR}/{ABLATE_LOG_PREFIX}_queue.log"
+        cmd = (f": > {log} && cd {REMOTE_DIR} && "
+               f"(setsid nohup env PYTHONUNBUFFERED=1 "
+               f"python3 -u -m ablations.run_queue "
+               f"--concurrency {concurrency} "
+               f">> {log} 2>&1 < /dev/null &)")
+        _run_or_show(base_ssh + [cmd], dry, capture_output=True, timeout=60)
+        print(f"  pool launched on {inst_id}, log {log}")
+
+    # Pull whatever exists now. The pool does not end on its own — it idles on an
+    # empty queue waiting for more — so this returns rather than watching, and
+    # `queue --sync-only` is how results are collected again later.
+    _run_or_show(base_rsync
+                 + [f"root@{host}:{REMOTE_DIR}/{ABLATE_RESULTS}/",
+                    ABLATE_RESULTS + os.sep],
+                 dry, capture_output=True)
+    have = len(glob.glob(os.path.join(ABLATE_RESULTS, "*", "*.json")))
+    print(f"  {have} arm record(s) under {ABLATE_RESULTS}/")
+    return 0
+
+
 def cmd_ablate(args):
     """Run a refit-tier MIRT ablation panel on a rented card.
 
@@ -2079,6 +2161,15 @@ COMMANDS = {
             "tune/generate/benchmark/losing_lines need a board size first, e.g. run generate 13",
         ],
         "handler": cmd_run,
+    },
+    "queue": {
+        "usage": "queue [<id>] [opts]",
+        "help": ["Keep a POOL of ablation arms training from ablations/queue.txt,",
+                 "spanning panels — no ramp restart or drained tail at a panel",
+                 "boundary. The runner re-reads the queue whenever a slot opens,",
+                 "so reprioritising is editing that file and pushing it:",
+                 "[--instance ID] [--concurrency N] [--sync-only] [--dry-run]"],
+        "handler": cmd_queue,
     },
     "ablate": {
         "usage": "ablate <panel> [opts]",

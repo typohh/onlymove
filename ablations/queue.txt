@@ -1,0 +1,11 @@
+# Work queue for `vast_orchestration.py queue`. One line per item:
+#   <panel> [<arm> ...]     a bare panel name means every arm of that panel
+# Blank lines and # comments are ignored; arms that already have a record are
+# skipped when their slot comes up, so re-running a drained queue is free.
+#
+# THE RUNNER RE-READS THIS FILE WHENEVER A SLOT OPENS, so editing it and
+# pushing (`queue --sync-only`) reprioritises a live pool without killing
+# anything. Put whatever decides a baseline at the TOP: arms measured against a
+# baseline that is about to move are the ones whose time is wasted.
+schedule
+blocks
