@@ -181,7 +181,7 @@ ABLATE_CODE_DIRS = ["ablations"]
 ABLATE_RESULTS = os.path.join("ablations", "dev_runs")
 ABLATE_PANELS = os.path.join("ablations", "panels")
 ABLATE_LOG_PREFIX = "ablate"
-ABLATE_CONCURRENCY = 3
+ABLATE_CONCURRENCY = "auto"   # run_panel ramps in place; an integer pins the level
 ABLATE_POLL_SECS = 300
 
 # tmux session and log files use the prefix; multi-instance generate runs use
@@ -1767,7 +1767,7 @@ def _ablate_launch(base_ssh, panel, concurrency, smoke_epochs, dry):
     cmd = (f": > {log} && cd {REMOTE_DIR} && "
            f"(setsid nohup env PYTHONUNBUFFERED=1 "
            f"python3 -u -m ablations.run_panel {panel} "
-           f"--concurrency {int(concurrency)}{extra} "
+           f"--concurrency {concurrency}{extra} "
            f">> {log} 2>&1 < /dev/null &)")
     res = _run_or_show(base_ssh + [cmd], dry, capture_output=True, text=True,
                        timeout=60)
@@ -1885,7 +1885,9 @@ def cmd_ablate(args):
         args.remove("--keep")
     try:
         target = _take_opt(args, "--instance")
-        concurrency = int(_take_opt(args, "--concurrency", ABLATE_CONCURRENCY))
+        concurrency = str(_take_opt(args, "--concurrency", ABLATE_CONCURRENCY))
+        if concurrency != "auto":
+            concurrency = str(int(concurrency))
         smoke_epochs = _take_opt(args, "--smoke-epochs")
         smoke_epochs = None if smoke_epochs is None else int(smoke_epochs)
     except ValueError as e:
