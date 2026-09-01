@@ -227,7 +227,10 @@ async function oneShotBuild() {
 
     // Every figure the documents quote must be the one ablations/figures.json holds.
     const figures = await checkFigures();
-    console.log(`✅ ${figures.spans} quoted figures match ablations/figures.json.`);
+    // Both counts, because a guard that stops being FOUND fails silently: zero
+    // guards checked reads exactly like zero guards violated.
+    console.log(`✅ ${figures.spans} quoted figures match ablations/figures.json`
+        + `, and ${figures.guards} claim guards hold.`);
 
     const methodology = await buildMethodologyPage(DIST_DIR);
     console.log(`✅ methodology.html generated (${methodology.sections} headings).`);
