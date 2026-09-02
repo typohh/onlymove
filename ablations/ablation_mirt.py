@@ -17,8 +17,9 @@ budget, the slope barrier (§1.7), the learning-rate split (§1.8), the
 orthogonality penalty and the taught pull (§1.5, §1.14), and the feature layout
 (§1.3: the activation width, which blocks the trunk sees, and whether the
 held-aside fraction is drawn over rows or over whole problems), the axis count
-(§1.14), and the two dropout sites with the weight decay §1.5 rejects as their
-substitute.
+(§1.14), the two dropout sites with the weight decay §1.5 rejects as their
+substitute, and the schedule (§1.8: the decay against the constant rate, and
+the opening ramp the axis-space panel measures).
 
 An arm writes:
 
@@ -222,6 +223,12 @@ def main(argv=None):
                          f"fixed; constant is the comparison arm. A schedule "
                          f"is only comparable at matched WORK (the recorded "
                          f"learning-rate integral), not at matched epochs")
+    ap.add_argument("--lr-warmup-epochs", type=int, default=None,
+                    help="linear ramp of both rates from near zero over this "
+                         "many opening epochs, multiplied into the schedule "
+                         "(production 0 — no warmup ships). The knob exists "
+                         "for the axis-space panel: whether a gentler opening "
+                         "makes a free axis fit land on the same basis twice")
     ap.add_argument("--pca-seed", type=int, default=None,
                     help="seed for the randomized joint-PCA FEATURE BASIS alone "
                          "(default: the one seed). Pinning it while --seed "
@@ -246,7 +253,7 @@ def main(argv=None):
                  "pca_dim", "blocks", "stop_unit", "k_axes",
                  "dropout", "input_dropout", "weight_decay",
                  "weight_decay_fields",
-                 "lr_schedule", "split_seed", "pca_seed"):
+                 "lr_schedule", "lr_warmup_epochs", "split_seed", "pca_seed"):
         v = getattr(args, flag)
         if v is not None:
             cfg[flag] = v

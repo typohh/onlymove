@@ -551,6 +551,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         teach_weight=TEACH_WEIGHT, stop_row_frac=STOP_ROW_FRAC,
         pca_dim=PCA_DIM, blocks=PRODUCTION_BLOCKS, stop_unit="row",
         split_seed=None, pca_seed=None, lr_schedule=LR_SCHEDULE,
+        lr_warmup_epochs=0,
         k_axes=K_AXES, dropout=DROPOUT, input_dropout=INPUT_DROPOUT,
         weight_decay=0.0, weight_decay_fields=None,
         out_dir=OUT_DIR, axes_dir=AXES_DIR):
@@ -677,6 +678,15 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
     # them at unequal work, and against a fit still descending that reads as the
     # schedule being worse when it was only shorter. Recorded so a panel can
     # match on it.
+    # NO WARMUP SHIPS. The ramp is an ablation knob and nothing else: with the
+    # axis objective indifferent to a rotation, where a free fit lands is decided
+    # by its early path, and a gentler opening is the obvious candidate for
+    # making two runs land closer. At zero the schedule below is exactly the
+    # shipped one — the multiplier is applied only inside the ramp, so the
+    # decay itself is untouched and the recorded rate integral says what the
+    # ramp cost in work.
+    if lr_warmup_epochs < 0:
+        raise ValueError(f"lr_warmup_epochs must be >= 0, got {lr_warmup_epochs}")
     lr_epochs = 0.0
     for ep in range(epochs):
         if lr_schedule == "cosine":
@@ -684,11 +694,15 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
             # applied to BOTH groups so their ratio — the thing 1.8 measures —
             # is held fixed all the way down.
             scale = 0.5 * (1.0 + float(np.cos(np.pi * ep / max(epochs - 1, 1))))
-            for grp, base in zip(opt.param_groups, base_lrs):
-                grp["lr"] = base * scale
-            lr_epochs += scale
         else:
-            lr_epochs += 1.0
+            scale = 1.0
+        if ep < lr_warmup_epochs:
+            # Linear from base/warmup at the first epoch to base at the ramp's
+            # end; a zero-rate epoch would be a wasted one.
+            scale *= (ep + 1) / lr_warmup_epochs
+        for grp, base in zip(opt.param_groups, base_lrs):
+            grp["lr"] = base * scale
+        lr_epochs += scale
         m.train(True)
         perm = tr[torch.randperm(n, device=device)]
         for i in range(0, n, batch):
@@ -1011,6 +1025,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         "epochs": int(epochs), "trace": trace,
         "k_axes": int(k_axes),
         "lr_schedule": str(lr_schedule),
+        "lr_warmup_epochs": int(lr_warmup_epochs),
         "lr_integral_epochs": round(lr_epochs, 3),
         "split_seed": int(seed if split_seed is None else split_seed),
         "pca_seed": int(seed if pca_seed is None else pca_seed),
