@@ -2,7 +2,7 @@
 
 ## 1. Overview
 
-The mobile-first Single Page Application served at [onlymove.net](https://onlymove.net) for practising Go (Baduk / Weiqi) life-and-death problems. Both 9×9 and 13×13 corpora are supported; the size is picked up from the URL path (`/`, `/9`, or `/13`) at boot and then persists in state — it is an entry hint, not a persistent address.
+The mobile-first Single Page Application served at [onlymove.net](https://onlymove.net) for practising Go (Baduk / Weiqi) problems — whole-board positions in which exactly one move wins. Both 9×9 and 13×13 corpora are supported; the size is picked up from the URL path (`/`, `/9`, or `/13`) at boot and then persists in state — it is an entry hint, not a persistent address.
 
 The pipeline publishes raw per-problem numbers (a rating, a discrimination slope, a guessing floor, and a motif vector) and the client does the rest: it estimates the user's rank from their own recent history, picks problems against that estimate, runs a spaced-repetition model over previously-failed problems, and fits a per-user weakness model over the motif axes. When a user fails a problem they enter Analysis mode, where variations and best-move/score data are read from the SGF itself; if the SGF lacks that data, the front-end calls a server-side KataGo fallback.
 

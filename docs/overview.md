@@ -6,7 +6,7 @@ This document describes the shape of the project from a goal and responsibility 
 
 ## What the product is
 
-onlymove.net is a life-and-death trainer for the game of Go. It serves one position at a time on a 9×9 or 13×13 board, each with exactly one correct first move, and the player answers by clicking an intersection. In return the app tells them their kyu/dan rank, chooses what to show them next, reminds them to revisit problems they got wrong, and reports what kind of Go skill they are weak at.
+onlymove.net is a problem trainer for the game of Go. It serves one position at a time on a 9×9 or 13×13 board — a whole-board position from play with exactly one winning move, of whatever kind the position calls for — and the player answers by clicking an intersection. In return the app tells them their kyu/dan rank, chooses what to show them next, reminds them to revisit problems they got wrong, and reports what kind of Go skill they are weak at.
 
 There is no curriculum, no lesson text and no human-authored content of any kind. Every problem is machine-generated, every difficulty is measured rather than assigned, and every personalized number the player sees is computed on their own device. That last point is the organising constraint of the whole system: the backend's job is to publish a static, impersonal description of the problem set, and the client's job is to turn that plus the player's own history into everything personal.
 
