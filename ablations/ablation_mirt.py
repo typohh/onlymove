@@ -180,6 +180,13 @@ def main(argv=None):
                          "the per-tail form but narrows the target to the "
                          "rating alone, which is the displacement arm; off "
                          "removes the term")
+    ap.add_argument("--ortho-axes", type=float, default=None,
+                    help="a MUTUAL orthogonality penalty on the axes — the "
+                         "squared off-diagonal of the loadings' batch "
+                         "correlation matrix (production 0: nothing in the "
+                         "shipped fit asks the axes to differ from each other; "
+                         "the teaching pull is what keeps them apart). The "
+                         "knob exists for the axis-space panel's free fits")
     ap.add_argument("--teach-weight", type=float, default=None,
                     help="the pull toward the taught rule columns (production "
                          f"{train_mirt.TEACH_WEIGHT}); 0 frees the basis")
@@ -249,7 +256,8 @@ def main(argv=None):
 
     cfg = {}
     for flag in ("seed", "epochs", "shallow_w", "shallow_tau", "lr_net",
-                 "lr_field", "ortho_rating", "ortho_mode", "teach_weight",
+                 "lr_field", "ortho_rating", "ortho_mode", "ortho_axes",
+                 "teach_weight",
                  "pca_dim", "blocks", "stop_unit", "k_axes",
                  "dropout", "input_dropout", "weight_decay",
                  "weight_decay_fields",

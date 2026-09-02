@@ -1,22 +1,150 @@
 {
   "panel": "axis_space",
-  "description": "methodology 1.14 — how well behaved the free axis space is, measured with everything pinned but the initialization. The likelihood reads the loadings and the user positions only through their product, so rotating the axis space leaves it unchanged; the document's claims go further than a free choice of basis — that two fits of one configuration reaching the same held-out likelihood can hold different SUBSPACES (the weakest canonical correlation between their spans falls to a few hundredths), and that even the best-matched axis shares only a few dozen of a thousand extreme problems. Those claims rest on fits made under a constant rate, whose endpoint is one draw from a wandering band; the decay that ships freezes the fit where it stands, so whether the space is underdetermined or merely was noisy is a live question, and this panel asks it under the shipped schedule. EVERYTHING BUT THE INITIALIZATION IS PINNED: the held-aside draw (split_seed 0) so every arm is scored on the same problems and a level difference is the fit moving, and the randomized joint-PCA feature basis (pca_seed 0) so what varies between seeds is the network's initial weights and the minibatch order alone — the purest reading of 'where the fit starts'. FOUR SEEDS PER CONFIGURATION, six pairs, because the earlier two-seed readings sat inside the no-ramp baseline's own spread across pairs and could not separate an effect from the draw. Four configurations: the FREE fit (teaching pull off, every other penalty as shipped) at the shipped schedule and with an opening learning-rate ramp; and the SHIPPED, taught fit under the same two schedules, so a ramp that helps can be read for what it would cost or buy on the fit that actually ships. The ramp multiplies both rates by a linear factor over the opening epochs and leaves the decay untouched, so the arms differ only in their first stretch and the recorded rate integral states what the ramp cost in work. The producer scores every pair on three statistics — per-axis agreement after one-to-one matching, the canonical correlations between the two K-dimensional spans, and the shared fraction of each matched axis's extreme problems — and, because the draw is pinned, reads the run-to-run spread of the held-out level and the PAIRED cost of the ramp and of teaching at each seed.",
+  "description": "methodology 1.14 — how well behaved the free axis space is, measured with everything pinned but the initialization. The likelihood reads the loadings and the user positions only through their product, so rotating the axis space leaves it unchanged; the document's claims go further than a free choice of basis — that two fits of one configuration reaching the same held-out likelihood can hold different SUBSPACES (the weakest canonical correlation between their spans falls to a few hundredths), and that even the best-matched axis shares only a few dozen of a thousand extreme problems. Those claims rest on fits made under a constant rate, whose endpoint is one draw from a wandering band; the decay that ships freezes the fit where it stands, so whether the space is underdetermined or merely was noisy is a live question, and this panel asks it under the shipped schedule. EVERYTHING BUT THE INITIALIZATION IS PINNED: the held-aside draw (split_seed 0) so every arm is scored on the same problems and a level difference is the fit moving, and the randomized joint-PCA feature basis (pca_seed 0) so what varies between seeds is the network's initial weights and the minibatch order alone — the purest reading of 'where the fit starts'. FOUR SEEDS PER CONFIGURATION, six pairs, because the earlier two-seed readings sat inside the no-ramp baseline's own spread across pairs and could not separate an effect from the draw. Four configurations: the FREE fit (teaching pull off, every other penalty as shipped) at the shipped schedule and with an opening learning-rate ramp; and the SHIPPED, taught fit under the same two schedules, so a ramp that helps can be read for what it would cost or buy on the fit that actually ships. The ramp multiplies both rates by a linear factor over the opening epochs and leaves the decay untouched, so the arms differ only in their first stretch and the recorded rate integral states what the ramp cost in work. The producer scores every pair on three statistics — per-axis agreement after one-to-one matching, the canonical correlations between the two K-dimensional spans, and the shared fraction of each matched axis's extreme problems — and, because the draw is pinned, reads the run-to-run spread of the held-out level and the PAIRED cost of the ramp and of teaching at each seed. A FIFTH CONFIGURATION carries a MUTUAL orthogonality penalty on the free fit (ortho_axes 0.5, the squared off-diagonal of the loadings' batch correlation matrix, the weight the retired two-stage trainer used for the same term), because the free fits without it spend their seven axes on two to four distinct directions: nothing in the shipped objective asks the axes to differ from each other — the ridge on positions is isotropic and every axis is unit-scaled, so a duplicated direction is the cheaper solution — and the teaching pull is the only thing keeping the shipped axes apart. Whether a free fit made to hold seven distinct directions then reproduces them across seeds is the version of the question a rule-free design would actually have to pass.",
   "arms": {
-    "untaught_i0": {"teach_weight": 0.0, "stop_unit": "problem", "split_seed": 0, "pca_seed": 0, "seed": 0},
-    "untaught_i1": {"teach_weight": 0.0, "stop_unit": "problem", "split_seed": 0, "pca_seed": 0, "seed": 1},
-    "untaught_i2": {"teach_weight": 0.0, "stop_unit": "problem", "split_seed": 0, "pca_seed": 0, "seed": 2},
-    "untaught_i3": {"teach_weight": 0.0, "stop_unit": "problem", "split_seed": 0, "pca_seed": 0, "seed": 3},
-    "untaught_warm_i0": {"teach_weight": 0.0, "stop_unit": "problem", "split_seed": 0, "pca_seed": 0, "seed": 0, "lr_warmup_epochs": 500},
-    "untaught_warm_i1": {"teach_weight": 0.0, "stop_unit": "problem", "split_seed": 0, "pca_seed": 0, "seed": 1, "lr_warmup_epochs": 500},
-    "untaught_warm_i2": {"teach_weight": 0.0, "stop_unit": "problem", "split_seed": 0, "pca_seed": 0, "seed": 2, "lr_warmup_epochs": 500},
-    "untaught_warm_i3": {"teach_weight": 0.0, "stop_unit": "problem", "split_seed": 0, "pca_seed": 0, "seed": 3, "lr_warmup_epochs": 500},
-    "taught_i0": {"stop_unit": "problem", "split_seed": 0, "pca_seed": 0, "seed": 0},
-    "taught_i1": {"stop_unit": "problem", "split_seed": 0, "pca_seed": 0, "seed": 1},
-    "taught_i2": {"stop_unit": "problem", "split_seed": 0, "pca_seed": 0, "seed": 2},
-    "taught_i3": {"stop_unit": "problem", "split_seed": 0, "pca_seed": 0, "seed": 3},
-    "taught_warm_i0": {"stop_unit": "problem", "split_seed": 0, "pca_seed": 0, "seed": 0, "lr_warmup_epochs": 500},
-    "taught_warm_i1": {"stop_unit": "problem", "split_seed": 0, "pca_seed": 0, "seed": 1, "lr_warmup_epochs": 500},
-    "taught_warm_i2": {"stop_unit": "problem", "split_seed": 0, "pca_seed": 0, "seed": 2, "lr_warmup_epochs": 500},
-    "taught_warm_i3": {"stop_unit": "problem", "split_seed": 0, "pca_seed": 0, "seed": 3, "lr_warmup_epochs": 500}
+    "untaught_i0": {
+      "teach_weight": 0.0,
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 0
+    },
+    "untaught_i1": {
+      "teach_weight": 0.0,
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 1
+    },
+    "untaught_i2": {
+      "teach_weight": 0.0,
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 2
+    },
+    "untaught_i3": {
+      "teach_weight": 0.0,
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 3
+    },
+    "untaught_warm_i0": {
+      "teach_weight": 0.0,
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 0,
+      "lr_warmup_epochs": 500
+    },
+    "untaught_warm_i1": {
+      "teach_weight": 0.0,
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 1,
+      "lr_warmup_epochs": 500
+    },
+    "untaught_warm_i2": {
+      "teach_weight": 0.0,
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 2,
+      "lr_warmup_epochs": 500
+    },
+    "untaught_warm_i3": {
+      "teach_weight": 0.0,
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 3,
+      "lr_warmup_epochs": 500
+    },
+    "taught_i0": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 0
+    },
+    "taught_i1": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 1
+    },
+    "taught_i2": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 2
+    },
+    "taught_i3": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 3
+    },
+    "taught_warm_i0": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 0,
+      "lr_warmup_epochs": 500
+    },
+    "taught_warm_i1": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 1,
+      "lr_warmup_epochs": 500
+    },
+    "taught_warm_i2": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 2,
+      "lr_warmup_epochs": 500
+    },
+    "taught_warm_i3": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 3,
+      "lr_warmup_epochs": 500
+    },
+    "untaught_ortho_i0": {
+      "teach_weight": 0.0,
+      "ortho_axes": 0.5,
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 0
+    },
+    "untaught_ortho_i1": {
+      "teach_weight": 0.0,
+      "ortho_axes": 0.5,
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 1
+    },
+    "untaught_ortho_i2": {
+      "teach_weight": 0.0,
+      "ortho_axes": 0.5,
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 2
+    },
+    "untaught_ortho_i3": {
+      "teach_weight": 0.0,
+      "ortho_axes": 0.5,
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 3
+    }
   }
 }

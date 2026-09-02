@@ -37,6 +37,13 @@ obvious remedy if the endpoint is decided by the early path.
                                      best-matched axis, and over all K.
   axis_space.<cfg>_level_sd_mnat     run-to-run sd of the held-out-problem
                                      level across the seeds, at one pinned draw.
+  axis_space.<cfg>_effective_dim     how many DISTINCT directions a fit's K axes
+  axis_space.<cfg>_max_within_r      span: the participation ratio of its axis
+                                     correlation matrix's eigenvalues, and the
+                                     most correlated pair of its own axes,
+                                     averaged over the seeds. A fit whose axes
+                                     duplicate each other reads low on the
+                                     first and near one on the second.
   axis_space.warm_*                  the ramp against the free fit: what it
                                      buys in basis and subspace agreement, and
                                      its PAIRED held-out cost per seed.
@@ -67,12 +74,26 @@ THE AGREEMENT STATISTICS, each stated because every part is a choice:
      matrices, standardized per column — the cosines between the two spans'
      principal directions, invariant to any rotation inside either span. This
      is what separates a basis rotating inside a fixed subspace (all K near one)
-     from the subspace itself moving (the weakest near zero).
-  4. TAILS: for each matched, sign-aligned axis pair, the TAIL_N problems with
+     from the subspace itself moving (the weakest near zero). The weakest one
+     is degenerate for a fit whose axes DUPLICATE each other — a span of fewer
+     than K distinct directions has trailing canonical correlations near zero
+     whatever the other fit holds — so it is read beside the redundancy
+     figures (item 4), and the leading ones carry the subspace claim.
+  4. REDUNDANCY, within one fit: the eigenvalues of the K x K correlation
+     matrix of its own axes over the population. Their participation ratio
+     (sum^2 / sum of squares) is the effective number of distinct directions
+     — K when the axes are uncorrelated, one when they all coincide — and the
+     most correlated pair says how close the worst duplication is. Nothing in
+     the shipped objective asks the axes to differ from each other: the ridge
+     on positions is isotropic and each axis is normalized to unit scale, so
+     splitting one direction over two axes halves the ridge cost at identical
+     predictions, and only the teaching pull, holding each axis to its own
+     rule, keeps them apart.
+  5. TAILS: for each matched, sign-aligned axis pair, the TAIL_N problems with
      the largest loadings in each fit and the TAIL_N with the smallest; the
      shared fraction at each end, averaged. A name is a claim about an axis's
      extremes, so this is the statistic a name's survival actually rests on.
-  5. Per pair each statistic gives K numbers (or K canonical correlations); the
+  6. Per pair each statistic gives K numbers (or K canonical correlations); the
      pair's summary is a mean and a minimum, and the configuration's figure is
      those averaged over its six seed pairs. The pairs are not independent (four
      fits, six pairings), so the average is a summary and not a standard error.
@@ -120,6 +141,7 @@ SEEDS = (0, 1, 2, 3)
 CONFIGS = {
     "untaught": "untaught_i{}",
     "untaught_warm": "untaught_warm_i{}",
+    "untaught_ortho": "untaught_ortho_i{}",
     "taught": "taught_i{}",
     "taught_warm": "taught_warm_i{}",
 }
@@ -209,10 +231,21 @@ def load_panel():
         require(len(ramps) == 1,
                 f"{cfg}'s arms ran different ramps {sorted(ramps)}")
         warm[cfg] = ramps.pop()
-    for cfg in ("untaught", "taught"):
+    for cfg in ("untaught", "untaught_ortho", "taught"):
         require(warm[cfg] == 0,
                 f"{cfg} ran a {warm[cfg]}-epoch ramp — the shipped schedule "
                 f"has none")
+    # The mutual penalty is carried by exactly one configuration, read off the
+    # records: a shipped-path arm that recorded it would be a different fit.
+    for cfg, pat in CONFIGS.items():
+        ws = {float(arms[pat.format(s)]["metrics"].get("ortho_axes", 0.0))
+              for s in SEEDS}
+        require(len(ws) == 1, f"{cfg}'s arms ran different mutual penalties {ws}")
+        w = ws.pop()
+        require((w > 0) == (cfg == "untaught_ortho"),
+                f"{cfg} recorded a mutual-orthogonality weight of {w}")
+        if cfg == "untaught_ortho":
+            ortho_w = w
         require(warm[WARM_OF[cfg]] > 0,
                 f"{WARM_OF[cfg]} ran no ramp — it is the ramp arm")
     require(warm["untaught_warm"] == warm["taught_warm"],
@@ -229,7 +262,7 @@ def load_panel():
             f"but the log now ends at {now} — the arms were fitted against a "
             f"different attempt set than the attempted population read below. "
             f"Re-run the panel.")
-    return arms, budget, schedule, warm["untaught_warm"]
+    return arms, budget, schedule, warm["untaught_warm"], ortho_w
 
 
 # --- the loadings ----------------------------------------------------------
@@ -309,10 +342,21 @@ def pair_stats(A, B):
             "tail": shared[order]}
 
 
+def redundancy(Z):
+    """(effective dimension, max pairwise |r|) of one fit's standardized axes."""
+    C = Z.T @ Z / len(Z)
+    ev = np.linalg.eigvalsh(C)
+    ev = np.clip(ev, 0.0, None)
+    require(ev.sum() > 0, "the axis correlation matrix is degenerate")
+    eff = float(ev.sum() ** 2 / (ev ** 2).sum())
+    off = np.abs(C - np.eye(len(C)))
+    return eff, float(off.max())
+
+
 # --- the measurement -------------------------------------------------------
 
 def measure():
-    arms, budget, schedule, ramp = load_panel()
+    arms, budget, schedule, ramp, ortho_w = load_panel()
     load = {arm: load_loadings(arm) for arm in ARMS}
 
     # ONE population for every pair: attempted, and present in every arm.
@@ -334,12 +378,17 @@ def measure():
                 for s in SEEDS}
         require(len(work) == 1,
                 f"{cfg}'s arms delivered different rate integrals {sorted(work)}")
+        red = [redundancy(Z[pat.format(s)]) for s in SEEDS]
         per_cfg[cfg] = {
             "pairs": pairs,
+            "effective_dim": float(np.mean([e for e, _ in red])),
+            "max_within_r": float(np.mean([r for _, r in red])),
+            "redundancy_per_seed": red,
             "basis_mean": float(np.mean([p["basis"].mean() for p in pairs.values()])),
             "basis_min": float(np.mean([p["basis"].min() for p in pairs.values()])),
             "subspace_lead": float(np.mean([p["subspace"].max() for p in pairs.values()])),
             "subspace_min": float(np.mean([p["subspace"].min() for p in pairs.values()])),
+            "subspace_third": float(np.mean([p["subspace"][2] for p in pairs.values()])),
             "tail_best": float(np.mean([p["tail"][0] for p in pairs.values()])),
             "tail_mean": float(np.mean([p["tail"].mean() for p in pairs.values()])),
             "levels": levels,
@@ -361,6 +410,7 @@ def measure():
 
     contrasts = {
         "warm": paired("untaught", "untaught_warm"),
+        "ortho": paired("untaught", "untaught_ortho"),
         "taught_warm": paired("taught", "taught_warm"),
         "teaching": paired("untaught", "taught"),
     }
@@ -379,7 +429,7 @@ def measure():
         "cfg": per_cfg, "contrasts": contrasts,
         "same_init": same_init, "same_init_mean": same_init_mean,
         "keys": len(keys), "budget": budget, "schedule": schedule,
-        "ramp": ramp, "gpu": arms[ARMS[0]]["pins"]["gpu"],
+        "ramp": ramp, "ortho_w": ortho_w, "gpu": arms[ARMS[0]]["pins"]["gpu"],
         "split_seed": arms[ARMS[0]]["metrics"]["split_seed"],
         "pca_seed": arms[ARMS[0]]["metrics"]["pca_seed"],
         "stop_rows": arms[ARMS[0]]["metrics"]["stop_rows"],
@@ -389,6 +439,7 @@ def measure():
 CFG_NOUN = {
     "untaught": "the free fit (teaching pull off)",
     "untaught_warm": "the free fit under the opening ramp",
+    "untaught_ortho": "the free fit under a mutual-orthogonality penalty",
     "taught": "the shipped, taught fit",
     "taught_warm": "the taught fit under the opening ramp",
 }
@@ -428,9 +479,25 @@ def figures():
             Figure(f"axis_space.{cfg}_subspace_lead", c["subspace_lead"], ".2f",
                    f"{noun}: the strongest canonical correlation between the "
                    f"two fits' {K_AXES}-dimensional spans, averaged over pairs"),
+            Figure(f"axis_space.{cfg}_subspace_third", c["subspace_third"], ".2f",
+                   f"{noun}: the third-strongest canonical correlation, "
+                   f"averaged over pairs — the depth at which two spans still "
+                   f"share a direction, read where a free fit's effective "
+                   f"dimension sits"),
             Figure(f"axis_space.{cfg}_subspace_min", c["subspace_min"], ".2f",
                    f"{noun}: the weakest canonical correlation — near zero "
-                   f"means one fit holds a direction the other's span lacks"),
+                   f"means one fit holds a direction the other's span lacks, "
+                   f"or that the span holds fewer than {K_AXES} distinct "
+                   f"directions at all (see the effective dimension)"),
+            Figure(f"axis_space.{cfg}_effective_dim", c["effective_dim"], ".1f",
+                   f"{noun}: effective number of distinct directions among a "
+                   f"fit's {K_AXES} axes — the participation ratio of its axis "
+                   f"correlation matrix's eigenvalues over attempted problems, "
+                   f"averaged over the seeds"),
+            Figure(f"axis_space.{cfg}_max_within_r", c["max_within_r"], ".2f",
+                   f"{noun}: |correlation| of the most correlated pair of a "
+                   f"fit's own axes, averaged over the seeds — near one is a "
+                   f"duplicated axis"),
             Figure(f"axis_space.{cfg}_tail_shared_best", c["tail_best"], "%.0f",
                    f"{noun}: percent of the {TAIL_N} most extreme problems at "
                    f"each end shared by the two fits on their BEST-matched "
@@ -442,8 +509,9 @@ def figures():
                    f"of the last 2% of checkpoints) across the seeds, "
                    f"millinats, at one pinned draw"),
         ]
-    u, w, t, tw = (m["cfg"][k] for k in ("untaught", "untaught_warm",
-                                         "taught", "taught_warm"))
+    u, w, o, t, tw = (m["cfg"][k] for k in ("untaught", "untaught_warm",
+                                            "untaught_ortho",
+                                            "taught", "taught_warm"))
     ct = m["contrasts"]
     figs += [
         Figure("axis_space.warm_basis_gain", w["basis_mean"] - u["basis_mean"],
@@ -461,6 +529,30 @@ def figures():
         Figure("axis_space.warm_cost_seeds_worse", ct["warm"]["worse"], "d",
                f"of the {len(SEEDS)} seeds, how many put the ramp's free fit "
                f"on the worse side"),
+        Figure("axis_space.ortho_weight", m["ortho_w"], ".2f",
+               "weight of the mutual-orthogonality penalty the ortho arms "
+               "carry (the squared off-diagonal of the loadings' batch "
+               "correlation matrix); production carries none"),
+        Figure("axis_space.ortho_effective_dim_gain",
+               o["effective_dim"] - u["effective_dim"], "+.1f",
+               "free fit: effective number of distinct directions under the "
+               "mutual penalty minus without it"),
+        Figure("axis_space.ortho_basis_gain", o["basis_mean"] - u["basis_mean"],
+               "+.2f",
+               "free fit: mean matched-axis agreement under the mutual penalty "
+               "minus without it — whether seven DISTINCT free directions "
+               "reproduce across seeds any better than duplicated ones"),
+        Figure("axis_space.ortho_subspace_gain",
+               o["subspace_third"] - u["subspace_third"], "+.2f",
+               "free fit: third canonical correlation under the mutual "
+               "penalty minus without it"),
+        Figure("axis_space.ortho_cost_mnat", ct["ortho"]["mean"], "+.1f",
+               "free fit: held-out-problem level under the mutual penalty "
+               "minus without it, paired per seed and averaged; positive "
+               "means the penalty predicts worse"),
+        Figure("axis_space.ortho_cost_seeds_worse", ct["ortho"]["worse"], "d",
+               f"of the {len(SEEDS)} seeds, how many put the mutual-penalty "
+               f"free fit on the worse side"),
         Figure("axis_space.taught_warm_basis_gain",
                tw["basis_mean"] - t["basis_mean"], "+.2f",
                "taught fit: mean matched-axis agreement under the ramp minus "
@@ -478,6 +570,11 @@ def figures():
                "taught minus free mean matched-axis agreement, at pinned draw "
                "and feature basis — what the constant pull buys in basis "
                "stability against initialization alone"),
+        Figure("axis_space.teaching_effective_dim_gap",
+               t["effective_dim"] - u["effective_dim"], "+.1f",
+               "taught minus free effective dimension — how many distinct "
+               "directions the pull recovers from a fit that would otherwise "
+               "spend its axes on duplicates"),
         Figure("axis_space.teaching_subspace_gap",
                t["subspace_min"] - u["subspace_min"], "+.2f",
                "taught minus free weakest canonical correlation"),
@@ -502,7 +599,8 @@ def main():
     m = measure()
     print(f"axis_space panel  (all arms full budget: {m['budget']} epochs, "
           f"{m['schedule']} rate; ramp arms open with a {m['ramp']}-epoch "
-          f"ramp; one machine: {m['gpu']})")
+          f"ramp; ortho arms carry a mutual penalty at {m['ortho_w']}; "
+          f"one machine: {m['gpu']})")
     print(f"  pinned across every arm: held-aside draw (split_seed "
           f"{m['split_seed']}, {m['stop_rows']} rows of held-out problems) and "
           f"feature basis (pca_seed {m['pca_seed']}); the seed moves the "
@@ -526,12 +624,18 @@ def main():
         print(f"{'mean':>8}{c['basis_mean']:>12.2f}{c['basis_min']:>11.2f}"
               f"{c['subspace_lead']:>10.2f}{c['subspace_min']:>9.2f}"
               f"{c['tail_best']:>11.2f}{c['tail_mean']:>11.2f}")
+        red = " ".join(f"s{s}={e:.1f}/{r:.2f}"
+                       for s, (e, r) in zip(SEEDS, c["redundancy_per_seed"]))
+        print(f"  within-fit redundancy, effective dim / max |r| between own "
+              f"axes: {red}  (mean {c['effective_dim']:.1f} / "
+              f"{c['max_within_r']:.2f})")
         lv = " ".join(f"s{s}={v:.4f}" for s, v in c["levels"].items())
         print(f"  held-out-problem level: {lv}  (mean {c['level']:.4f}, "
               f"sd {c['level_sd_mnat']:.1f} mnat)")
     print("\n== paired contrasts per seed (positive = second arm predicts "
           "worse), millinats")
     for name, label in (("warm", "free fit: ramp minus none"),
+                        ("ortho", "free fit: mutual penalty minus none"),
                         ("taught_warm", "taught fit: ramp minus none"),
                         ("teaching", "taught minus free")):
         ct = m["contrasts"][name]

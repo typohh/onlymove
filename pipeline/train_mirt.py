@@ -551,7 +551,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         teach_weight=TEACH_WEIGHT, stop_row_frac=STOP_ROW_FRAC,
         pca_dim=PCA_DIM, blocks=PRODUCTION_BLOCKS, stop_unit="row",
         split_seed=None, pca_seed=None, lr_schedule=LR_SCHEDULE,
-        lr_warmup_epochs=0,
+        lr_warmup_epochs=0, ortho_axes=0.0,
         k_axes=K_AXES, dropout=DROPOUT, input_dropout=INPUT_DROPOUT,
         weight_decay=0.0, weight_decay_fields=None,
         out_dir=OUT_DIR, axes_dir=AXES_DIR):
@@ -793,6 +793,21 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
                 loss = loss + ortho_rating * (W.T @ tz).pow(2).sum()
             elif ortho_mode != "off":
                 raise ValueError(f"unknown ortho_mode {ortho_mode!r}")
+            # MUTUAL ORTHOGONALITY — OFF IN THE SHIPPED FIT, an ablation knob.
+            # Nothing above asks the axes to differ from EACH OTHER: the ridge on
+            # positions is isotropic and every axis is normalized to unit scale,
+            # so splitting one direction over two axes halves the ridge cost at
+            # identical predictions, and a fit with the pull off spends its axes
+            # on duplicates. The pull is what keeps the shipped axes apart. This
+            # term asks the batch correlation matrix of the loadings to be the
+            # identity — whole-axis, since a duplicated axis IS a whole-axis
+            # correlation of one, with or without a sign.
+            if ortho_axes > 0:
+                Wm = gh - gh.mean(dim=0, keepdim=True)
+                Wm = Wm / (Wm.norm(dim=0, keepdim=True) + 1e-9)
+                Cm = Wm.T @ Wm
+                loss = loss + ortho_axes * (
+                    Cm - torch.eye(k_axes, device=Cm.device)).pow(2).sum()
             # TEACHING, ON THE ATTEMPT STREAM, reusing the gh this batch already
             # produced — no second forward and no second sampling distribution.
             #
@@ -1026,6 +1041,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         "k_axes": int(k_axes),
         "lr_schedule": str(lr_schedule),
         "lr_warmup_epochs": int(lr_warmup_epochs),
+        "ortho_axes": float(ortho_axes),
         "lr_integral_epochs": round(lr_epochs, 3),
         "split_seed": int(seed if split_seed is None else split_seed),
         "pca_seed": int(seed if pca_seed is None else pca_seed),
