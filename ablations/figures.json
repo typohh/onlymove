@@ -1456,6 +1456,832 @@
         "data_version": "f6fba7b749bc0ecb"
       }
     },
+    "findings.first100.mean_1sd": {
+      "value": 3.241014799154334,
+      "fmt": ".1f",
+      "text": "3.2",
+      "producer": "ablations.motif_findings_figures",
+      "tier": "about",
+      "note": "findings per user clearing the gate (|z| > 1), both readings over all axes, on the shipped readings run over each account's first 100 attempts, one window per account",
+      "measured": {
+        "at": "2026-09-02T16:14:53Z",
+        "git": "313e069c2ee+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "findings.first100.mean_2sd": {
+      "value": 0.5496828752642706,
+      "fmt": ".1f",
+      "text": "0.5",
+      "producer": "ablations.motif_findings_figures",
+      "tier": "about",
+      "note": "the same at twice the gate (|z| > 2)",
+      "measured": {
+        "at": "2026-09-02T16:14:53Z",
+        "git": "313e069c2ee+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "findings.first100.null_1sd": {
+      "value": 3.0644279068029423,
+      "fmt": ".1f",
+      "text": "3.1",
+      "producer": "ablations.motif_findings_figures",
+      "tier": "about",
+      "note": "findings a user with nothing behind any reading would collect there: the readings that exist times the gate's chance pass share",
+      "measured": {
+        "at": "2026-09-02T16:14:53Z",
+        "git": "313e069c2ee+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "findings.first100.null_2sd": {
+      "value": 0.4394190390667343,
+      "fmt": ".1f",
+      "text": "0.4",
+      "producer": "ablations.motif_findings_figures",
+      "tier": "about",
+      "note": "the same at twice the gate",
+      "measured": {
+        "at": "2026-09-02T16:14:53Z",
+        "git": "313e069c2ee+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "findings.first100.readings": {
+      "value": 9.657505285412261,
+      "fmt": ".1f",
+      "text": "9.7",
+      "producer": "ablations.motif_findings_figures",
+      "tier": "about",
+      "note": "readings that exist at all per user over each account's first 100 attempts, one window per account (a tendency reading needs enough directional errors, an accuracy reading enough attempts)",
+      "measured": {
+        "at": "2026-09-02T16:14:53Z",
+        "git": "313e069c2ee+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "findings.first100.surplus_1sd": {
+      "value": 0.1765868923513918,
+      "fmt": ".1f",
+      "text": "0.2",
+      "producer": "ablations.motif_findings_figures",
+      "tier": "about",
+      "note": "findings at the gate beyond that chance count — what the pane is actually reporting",
+      "measured": {
+        "at": "2026-09-02T16:14:53Z",
+        "git": "313e069c2ee+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "findings.first100.surplus_2sd": {
+      "value": 0.11026383619753632,
+      "fmt": ".1f",
+      "text": "0.1",
+      "producer": "ablations.motif_findings_figures",
+      "tier": "about",
+      "note": "the same at twice the gate",
+      "measured": {
+        "at": "2026-09-02T16:14:53Z",
+        "git": "313e069c2ee+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "findings.first100.users": {
+      "value": 473,
+      "fmt": "d",
+      "text": "473",
+      "producer": "ablations.motif_findings_figures",
+      "tier": "about",
+      "note": "accounts with at least 100 first-time attempts on published problems",
+      "measured": {
+        "at": "2026-09-02T16:14:53Z",
+        "git": "313e069c2ee+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "findings.first200.mean_1sd": {
+      "value": 3.805243445692884,
+      "fmt": ".1f",
+      "text": "3.8",
+      "producer": "ablations.motif_findings_figures",
+      "tier": "about",
+      "note": "findings per user clearing the gate (|z| > 1), both readings over all axes, on the shipped readings run over each account's first 200 attempts, one window per account",
+      "measured": {
+        "at": "2026-09-02T16:14:53Z",
+        "git": "313e069c2ee+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "findings.first200.mean_2sd": {
+      "value": 0.7415730337078652,
+      "fmt": ".1f",
+      "text": "0.7",
+      "producer": "ablations.motif_findings_figures",
+      "tier": "about",
+      "note": "the same at twice the gate (|z| > 2)",
+      "measured": {
+        "at": "2026-09-02T16:14:53Z",
+        "git": "313e069c2ee+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "findings.first200.null_1sd": {
+      "value": 3.4654585802556466,
+      "fmt": ".1f",
+      "text": "3.5",
+      "producer": "ablations.motif_findings_figures",
+      "tier": "about",
+      "note": "findings a user with nothing behind any reading would collect there: the readings that exist times the gate's chance pass share",
+      "measured": {
+        "at": "2026-09-02T16:14:53Z",
+        "git": "313e069c2ee+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "findings.first200.null_2sd": {
+      "value": 0.4969242304186562,
+      "fmt": ".1f",
+      "text": "0.5",
+      "producer": "ablations.motif_findings_figures",
+      "tier": "about",
+      "note": "the same at twice the gate",
+      "measured": {
+        "at": "2026-09-02T16:14:53Z",
+        "git": "313e069c2ee+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "findings.first200.readings": {
+      "value": 10.92134831460674,
+      "fmt": ".1f",
+      "text": "10.9",
+      "producer": "ablations.motif_findings_figures",
+      "tier": "about",
+      "note": "readings that exist at all per user over each account's first 200 attempts, one window per account (a tendency reading needs enough directional errors, an accuracy reading enough attempts)",
+      "measured": {
+        "at": "2026-09-02T16:14:53Z",
+        "git": "313e069c2ee+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "findings.first200.surplus_1sd": {
+      "value": 0.3397848654372373,
+      "fmt": ".1f",
+      "text": "0.3",
+      "producer": "ablations.motif_findings_figures",
+      "tier": "about",
+      "note": "findings at the gate beyond that chance count — what the pane is actually reporting",
+      "measured": {
+        "at": "2026-09-02T16:14:53Z",
+        "git": "313e069c2ee+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "findings.first200.surplus_2sd": {
+      "value": 0.24464880328920902,
+      "fmt": ".1f",
+      "text": "0.2",
+      "producer": "ablations.motif_findings_figures",
+      "tier": "about",
+      "note": "the same at twice the gate",
+      "measured": {
+        "at": "2026-09-02T16:14:53Z",
+        "git": "313e069c2ee+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "findings.first200.users": {
+      "value": 267,
+      "fmt": "d",
+      "text": "267",
+      "producer": "ablations.motif_findings_figures",
+      "tier": "about",
+      "note": "accounts with at least 200 first-time attempts on published problems",
+      "measured": {
+        "at": "2026-09-02T16:14:53Z",
+        "git": "313e069c2ee+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "findings.first300.mean_1sd": {
+      "value": 4.193717277486911,
+      "fmt": ".1f",
+      "text": "4.2",
+      "producer": "ablations.motif_findings_figures",
+      "tier": "about",
+      "note": "findings per user clearing the gate (|z| > 1), both readings over all axes, on the shipped readings run over each account's first 300 attempts, one window per account",
+      "measured": {
+        "at": "2026-09-02T16:14:53Z",
+        "git": "313e069c2ee+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "findings.first300.mean_2sd": {
+      "value": 0.8900523560209425,
+      "fmt": ".1f",
+      "text": "0.9",
+      "producer": "ablations.motif_findings_figures",
+      "tier": "about",
+      "note": "the same at twice the gate (|z| > 2)",
+      "measured": {
+        "at": "2026-09-02T16:14:53Z",
+        "git": "313e069c2ee+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "findings.first300.null_1sd": {
+      "value": 3.593416903180541,
+      "fmt": ".1f",
+      "text": "3.6",
+      "producer": "ablations.motif_findings_figures",
+      "tier": "about",
+      "note": "findings a user with nothing behind any reading would collect there: the readings that exist times the gate's chance pass share",
+      "measured": {
+        "at": "2026-09-02T16:14:53Z",
+        "git": "313e069c2ee+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "findings.first300.null_2sd": {
+      "value": 0.5152726220304885,
+      "fmt": ".1f",
+      "text": "0.5",
+      "producer": "ablations.motif_findings_figures",
+      "tier": "about",
+      "note": "the same at twice the gate",
+      "measured": {
+        "at": "2026-09-02T16:14:53Z",
+        "git": "313e069c2ee+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "findings.first300.readings": {
+      "value": 11.324607329842932,
+      "fmt": ".1f",
+      "text": "11.3",
+      "producer": "ablations.motif_findings_figures",
+      "tier": "about",
+      "note": "readings that exist at all per user over each account's first 300 attempts, one window per account (a tendency reading needs enough directional errors, an accuracy reading enough attempts)",
+      "measured": {
+        "at": "2026-09-02T16:14:53Z",
+        "git": "313e069c2ee+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "findings.first300.surplus_1sd": {
+      "value": 0.6003003743063702,
+      "fmt": ".1f",
+      "text": "0.6",
+      "producer": "ablations.motif_findings_figures",
+      "tier": "about",
+      "note": "findings at the gate beyond that chance count — what the pane is actually reporting",
+      "measured": {
+        "at": "2026-09-02T16:14:53Z",
+        "git": "313e069c2ee+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "findings.first300.surplus_2sd": {
+      "value": 0.37477973399045394,
+      "fmt": ".1f",
+      "text": "0.4",
+      "producer": "ablations.motif_findings_figures",
+      "tier": "about",
+      "note": "the same at twice the gate",
+      "measured": {
+        "at": "2026-09-02T16:14:53Z",
+        "git": "313e069c2ee+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "findings.first300.users": {
+      "value": 191,
+      "fmt": "d",
+      "text": "191",
+      "producer": "ablations.motif_findings_figures",
+      "tier": "about",
+      "note": "accounts with at least 300 first-time attempts on published problems",
+      "measured": {
+        "at": "2026-09-02T16:14:53Z",
+        "git": "313e069c2ee+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "findings.first50.mean_1sd": {
+      "value": 2.4465894465894467,
+      "fmt": ".1f",
+      "text": "2.4",
+      "producer": "ablations.motif_findings_figures",
+      "tier": "about",
+      "note": "findings per user clearing the gate (|z| > 1), both readings over all axes, on the shipped readings run over each account's first 50 attempts, one window per account",
+      "measured": {
+        "at": "2026-09-02T16:14:53Z",
+        "git": "313e069c2ee+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "findings.first50.mean_2sd": {
+      "value": 0.36936936936936937,
+      "fmt": ".1f",
+      "text": "0.4",
+      "producer": "ablations.motif_findings_figures",
+      "tier": "about",
+      "note": "the same at twice the gate (|z| > 2)",
+      "measured": {
+        "at": "2026-09-02T16:14:53Z",
+        "git": "313e069c2ee+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "findings.first50.null_1sd": {
+      "value": 2.3102001840160944,
+      "fmt": ".1f",
+      "text": "2.3",
+      "producer": "ablations.motif_findings_figures",
+      "tier": "about",
+      "note": "findings a user with nothing behind any reading would collect there: the readings that exist times the gate's chance pass share",
+      "measured": {
+        "at": "2026-09-02T16:14:53Z",
+        "git": "313e069c2ee+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "findings.first50.null_2sd": {
+      "value": 0.3312676870806946,
+      "fmt": ".1f",
+      "text": "0.3",
+      "producer": "ablations.motif_findings_figures",
+      "tier": "about",
+      "note": "the same at twice the gate",
+      "measured": {
+        "at": "2026-09-02T16:14:53Z",
+        "git": "313e069c2ee+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "findings.first50.readings": {
+      "value": 7.280566280566281,
+      "fmt": ".1f",
+      "text": "7.3",
+      "producer": "ablations.motif_findings_figures",
+      "tier": "about",
+      "note": "readings that exist at all per user over each account's first 50 attempts, one window per account (a tendency reading needs enough directional errors, an accuracy reading enough attempts)",
+      "measured": {
+        "at": "2026-09-02T16:14:53Z",
+        "git": "313e069c2ee+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "findings.first50.surplus_1sd": {
+      "value": 0.13638926257335227,
+      "fmt": ".1f",
+      "text": "0.1",
+      "producer": "ablations.motif_findings_figures",
+      "tier": "about",
+      "note": "findings at the gate beyond that chance count — what the pane is actually reporting",
+      "measured": {
+        "at": "2026-09-02T16:14:53Z",
+        "git": "313e069c2ee+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "findings.first50.surplus_2sd": {
+      "value": 0.038101682288674776,
+      "fmt": ".1f",
+      "text": "0.0",
+      "producer": "ablations.motif_findings_figures",
+      "tier": "about",
+      "note": "the same at twice the gate",
+      "measured": {
+        "at": "2026-09-02T16:14:53Z",
+        "git": "313e069c2ee+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "findings.first50.users": {
+      "value": 777,
+      "fmt": "d",
+      "text": "777",
+      "producer": "ablations.motif_findings_figures",
+      "tier": "about",
+      "note": "accounts with at least 50 first-time attempts on published problems",
+      "measured": {
+        "at": "2026-09-02T16:14:53Z",
+        "git": "313e069c2ee+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "findings.last1000.mean_1sd": {
+      "value": 5.4424047888395695,
+      "fmt": ".1f",
+      "text": "5.4",
+      "producer": "ablations.motif_findings_figures",
+      "tier": "about",
+      "note": "findings per user clearing the gate (|z| > 1), both readings over all axes, on the shipped readings run over every window of the latest 1000 attempts from position 1000 onward, averaged within the account, then across accounts — a hypothetical width",
+      "measured": {
+        "at": "2026-09-02T16:14:53Z",
+        "git": "313e069c2ee+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "findings.last1000.mean_2sd": {
+      "value": 1.5689515218204293,
+      "fmt": ".1f",
+      "text": "1.6",
+      "producer": "ablations.motif_findings_figures",
+      "tier": "about",
+      "note": "the same at twice the gate (|z| > 2)",
+      "measured": {
+        "at": "2026-09-02T16:14:53Z",
+        "git": "313e069c2ee+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "findings.last1000.null_1sd": {
+      "value": 3.934860686605882,
+      "fmt": ".1f",
+      "text": "3.9",
+      "producer": "ablations.motif_findings_figures",
+      "tier": "about",
+      "note": "findings a user with nothing behind any reading would collect there: the readings that exist times the gate's chance pass share",
+      "measured": {
+        "at": "2026-09-02T16:14:53Z",
+        "git": "313e069c2ee+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "findings.last1000.null_2sd": {
+      "value": 0.5642334407448057,
+      "fmt": ".1f",
+      "text": "0.6",
+      "producer": "ablations.motif_findings_figures",
+      "tier": "about",
+      "note": "the same at twice the gate",
+      "measured": {
+        "at": "2026-09-02T16:14:53Z",
+        "git": "313e069c2ee+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "findings.last1000.readings": {
+      "value": 12.400663038571157,
+      "fmt": ".1f",
+      "text": "12.4",
+      "producer": "ablations.motif_findings_figures",
+      "tier": "about",
+      "note": "readings that exist at all per user over every window of the latest 1000 attempts from position 1000 onward, averaged within the account, then across accounts — a hypothetical width (a tendency reading needs enough directional errors, an accuracy reading enough attempts)",
+      "measured": {
+        "at": "2026-09-02T16:14:53Z",
+        "git": "313e069c2ee+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "findings.last1000.surplus_1sd": {
+      "value": 1.5075441022336875,
+      "fmt": ".1f",
+      "text": "1.5",
+      "producer": "ablations.motif_findings_figures",
+      "tier": "about",
+      "note": "findings at the gate beyond that chance count — what the pane is actually reporting",
+      "measured": {
+        "at": "2026-09-02T16:14:53Z",
+        "git": "313e069c2ee+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "findings.last1000.surplus_2sd": {
+      "value": 1.0047180810756235,
+      "fmt": ".1f",
+      "text": "1.0",
+      "producer": "ablations.motif_findings_figures",
+      "tier": "about",
+      "note": "the same at twice the gate",
+      "measured": {
+        "at": "2026-09-02T16:14:53Z",
+        "git": "313e069c2ee+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "findings.last1000.users": {
+      "value": 58,
+      "fmt": "d",
+      "text": "58",
+      "producer": "ablations.motif_findings_figures",
+      "tier": "about",
+      "note": "accounts with at least 1000 first-time attempts on published problems",
+      "measured": {
+        "at": "2026-09-02T16:14:53Z",
+        "git": "313e069c2ee+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "findings.last2000.mean_1sd": {
+      "value": 6.1064738405465615,
+      "fmt": ".1f",
+      "text": "6.1",
+      "producer": "ablations.motif_findings_figures",
+      "tier": "about",
+      "note": "findings per user clearing the gate (|z| > 1), both readings over all axes, on the shipped readings run over every window of the latest 2000 attempts from position 2000 onward, averaged within the account, then across accounts — a hypothetical width",
+      "measured": {
+        "at": "2026-09-02T16:14:53Z",
+        "git": "313e069c2ee+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "findings.last2000.mean_2sd": {
+      "value": 2.407230800170347,
+      "fmt": ".1f",
+      "text": "2.4",
+      "producer": "ablations.motif_findings_figures",
+      "tier": "about",
+      "note": "the same at twice the gate (|z| > 2)",
+      "measured": {
+        "at": "2026-09-02T16:14:53Z",
+        "git": "313e069c2ee+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "findings.last2000.null_1sd": {
+      "value": 3.898009951300993,
+      "fmt": ".1f",
+      "text": "3.9",
+      "producer": "ablations.motif_findings_figures",
+      "tier": "about",
+      "note": "findings a user with nothing behind any reading would collect there: the readings that exist times the gate's chance pass share",
+      "measured": {
+        "at": "2026-09-02T16:14:53Z",
+        "git": "313e069c2ee+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "findings.last2000.null_2sd": {
+      "value": 0.5589492848798141,
+      "fmt": ".1f",
+      "text": "0.6",
+      "producer": "ablations.motif_findings_figures",
+      "tier": "about",
+      "note": "the same at twice the gate",
+      "measured": {
+        "at": "2026-09-02T16:14:53Z",
+        "git": "313e069c2ee+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "findings.last2000.readings": {
+      "value": 12.284528418406579,
+      "fmt": ".1f",
+      "text": "12.3",
+      "producer": "ablations.motif_findings_figures",
+      "tier": "about",
+      "note": "readings that exist at all per user over every window of the latest 2000 attempts from position 2000 onward, averaged within the account, then across accounts — a hypothetical width (a tendency reading needs enough directional errors, an accuracy reading enough attempts)",
+      "measured": {
+        "at": "2026-09-02T16:14:53Z",
+        "git": "313e069c2ee+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "findings.last2000.surplus_1sd": {
+      "value": 2.2084638892455684,
+      "fmt": ".1f",
+      "text": "2.2",
+      "producer": "ablations.motif_findings_figures",
+      "tier": "about",
+      "note": "findings at the gate beyond that chance count — what the pane is actually reporting",
+      "measured": {
+        "at": "2026-09-02T16:14:53Z",
+        "git": "313e069c2ee+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "findings.last2000.surplus_2sd": {
+      "value": 1.848281515290533,
+      "fmt": ".1f",
+      "text": "1.8",
+      "producer": "ablations.motif_findings_figures",
+      "tier": "about",
+      "note": "the same at twice the gate",
+      "measured": {
+        "at": "2026-09-02T16:14:53Z",
+        "git": "313e069c2ee+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "findings.last2000.users": {
+      "value": 23,
+      "fmt": "d",
+      "text": "23",
+      "producer": "ablations.motif_findings_figures",
+      "tier": "about",
+      "note": "accounts with at least 2000 first-time attempts on published problems",
+      "measured": {
+        "at": "2026-09-02T16:14:53Z",
+        "git": "313e069c2ee+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "findings.last500.mean_1sd": {
+      "value": 4.575811826299204,
+      "fmt": ".1f",
+      "text": "4.6",
+      "producer": "ablations.motif_findings_figures",
+      "tier": "about",
+      "note": "findings per user clearing the gate (|z| > 1), both readings over all axes, on the shipped readings run over every window of the latest 500 attempts from position 500 onward, averaged within the account, then across accounts",
+      "measured": {
+        "at": "2026-09-02T16:14:53Z",
+        "git": "313e069c2ee+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "findings.last500.mean_2sd": {
+      "value": 1.0259845445408287,
+      "fmt": ".1f",
+      "text": "1.0",
+      "producer": "ablations.motif_findings_figures",
+      "tier": "about",
+      "note": "the same at twice the gate (|z| > 2)",
+      "measured": {
+        "at": "2026-09-02T16:14:53Z",
+        "git": "313e069c2ee+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "findings.last500.null_1sd": {
+      "value": 3.8577734431571615,
+      "fmt": ".1f",
+      "text": "3.9",
+      "producer": "ablations.motif_findings_figures",
+      "tier": "about",
+      "note": "findings a user with nothing behind any reading would collect there: the readings that exist times the gate's chance pass share",
+      "measured": {
+        "at": "2026-09-02T16:14:53Z",
+        "git": "313e069c2ee+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "findings.last500.null_2sd": {
+      "value": 0.553179631201647,
+      "fmt": ".1f",
+      "text": "0.6",
+      "producer": "ablations.motif_findings_figures",
+      "tier": "about",
+      "note": "the same at twice the gate",
+      "measured": {
+        "at": "2026-09-02T16:14:53Z",
+        "git": "313e069c2ee+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "findings.last500.readings": {
+      "value": 12.157723578520171,
+      "fmt": ".1f",
+      "text": "12.2",
+      "producer": "ablations.motif_findings_figures",
+      "tier": "about",
+      "note": "readings that exist at all per user over every window of the latest 500 attempts from position 500 onward, averaged within the account, then across accounts (a tendency reading needs enough directional errors, an accuracy reading enough attempts)",
+      "measured": {
+        "at": "2026-09-02T16:14:53Z",
+        "git": "313e069c2ee+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "findings.last500.surplus_1sd": {
+      "value": 0.7180383831420425,
+      "fmt": ".1f",
+      "text": "0.7",
+      "producer": "ablations.motif_findings_figures",
+      "tier": "about",
+      "note": "findings at the gate beyond that chance count — what the pane is actually reporting",
+      "measured": {
+        "at": "2026-09-02T16:14:53Z",
+        "git": "313e069c2ee+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "findings.last500.surplus_2sd": {
+      "value": 0.4728049133391816,
+      "fmt": ".1f",
+      "text": "0.5",
+      "producer": "ablations.motif_findings_figures",
+      "tier": "about",
+      "note": "the same at twice the gate",
+      "measured": {
+        "at": "2026-09-02T16:14:53Z",
+        "git": "313e069c2ee+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "findings.last500.users": {
+      "value": 110,
+      "fmt": "d",
+      "text": "110",
+      "producer": "ablations.motif_findings_figures",
+      "tier": "about",
+      "note": "accounts with at least 500 first-time attempts on published problems",
+      "measured": {
+        "at": "2026-09-02T16:14:53Z",
+        "git": "313e069c2ee+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "findings.null_1sd_pct": {
+      "value": 0.31731050786291415,
+      "fmt": "%.0f",
+      "text": "32",
+      "producer": "ablations.motif_findings_figures",
+      "tier": "about",
+      "note": "share of readings with nothing behind them that the gate passes (|z| > 1)",
+      "measured": {
+        "at": "2026-09-02T16:14:53Z",
+        "git": "313e069c2ee+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "findings.null_2sd_pct": {
+      "value": 0.04550026389635844,
+      "fmt": "%.0f",
+      "text": "5",
+      "producer": "ablations.motif_findings_figures",
+      "tier": "about",
+      "note": "the same at twice the gate (|z| > 2), the pane's full shade",
+      "measured": {
+        "at": "2026-09-02T16:14:53Z",
+        "git": "313e069c2ee+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "findings.readings_per_user": {
+      "value": 14,
+      "fmt": "d",
+      "text": "14",
+      "producer": "ablations.motif_findings_figures",
+      "tier": "about",
+      "note": "readings the motif pane can show one user at most: two per axis, 7 axes",
+      "measured": {
+        "at": "2026-09-02T16:14:53Z",
+        "git": "313e069c2ee+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
     "history.rank_gap_career_excess": {
       "value": 0.0023913705392728524,
       "fmt": "%.1f",

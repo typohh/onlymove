@@ -50,7 +50,8 @@ The three `lib/` bundles are loaded as classic scripts from `index.html` and use
 │   ├── rank-decomposition.js # Curve application, career decomposition, convergence test
 │   ├── rank-translation.js  # Translation to other rating systems
 │   ├── recall-model.js      # Retention model, recall schedule, recall serve gate
-│   ├── motif-stats.js       # Per-motif readings from the user's own attempts
+│   ├── motif-readings.js    # Per-motif readings as a pure function of attempts + rank
+│   ├── motif-stats.js       # ...bound to the live history, rank, axis count and curve
 │   ├── weakness.js          # Flagged serve directions from those readings
 │   ├── optimizer.js         # Damped Newton step, used by the recall fit
 │   ├── math-utils.js        # Numeric helpers
