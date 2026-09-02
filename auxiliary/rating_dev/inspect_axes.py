@@ -201,7 +201,42 @@ def load_named_bank_tails(tids, hinge_at=TAIL_HINGE):
     return out
 
 
-def _match_html(vals, sign, bank_tails, hinge_at, min_r):
+def load_taught_axis_tails(tids, hinge_at=TAIL_HINGE, per_problem=None):
+    """Every NAMED tail of the shipped, rule-taught axes as a hinged weight
+    vector over `tids` — the reference a free fit's tail is read against when
+    the question is "which of the rule-based axes does this look like".
+
+    The axes come from the production `axes/per_problem.csv` and their names
+    from `axes/labels.json`'s `components`, exactly as the standard run captions
+    them: a bare rule names the positive tail, `A/B` names both. An unnamed
+    tail is where everything not at the named end accumulates and makes no
+    claim, so it is skipped. Restricted to the problems this page shows, for the
+    same reason the store tails are.
+    """
+    path = per_problem or os.path.join(PROJECT_ROOT, "axes", "per_problem.csv")
+    labels_path = os.path.join(PROJECT_ROOT, "axes", "labels.json")
+    if not (os.path.exists(path) and os.path.exists(labels_path)):
+        return []
+    t_tids, comps, _sizes = load_per_problem_csv(path)
+    pos = {t: i for i, t in enumerate(tids)}
+    idx = np.array([pos.get(str(t), -1) for t in t_tids])
+    keep = idx >= 0
+    out = []
+    for k, (_key, _title, vals, name) in enumerate(comps):
+        if not name:
+            continue
+        halves = [h.strip() for h in name.split("/")]
+        col = np.full(len(tids), np.nan)
+        col[idx[keep]] = np.asarray(vals, np.float64)[keep]
+        for sign, h in ((+1, 0), (-1, 1)):
+            lab = halves[h] if h < len(halves) and halves[h] else None
+            if lab:
+                out.append((f"axis {k} {lab}{'+' if sign > 0 else '-'}",
+                            hinge_z(sign * col, hinge_at)))
+    return out
+
+
+def _match_html(vals, sign, bank_tails, hinge_at, min_r, source="store"):
     """Which named stored motifs agree with this tail, by hinged correlation.
 
     Both sides are z-scored and floored at the mean, then correlated over the
@@ -223,8 +258,10 @@ def _match_html(vals, sign, bank_tails, hinge_at, min_r):
         r = hinged_r(mine, other, pre_hinged=True)
         if np.isfinite(r) and r >= min_r:
             hits.append((r, lab))
+    what = ("named tail of the rule-taught axes" if source == "taught"
+            else "named motif in the bank")
     if not hits:
-        return ('<div class="matches none">no named motif in the bank agrees '
+        return (f'<div class="matches none">no {what} agrees '
                 f'with this tail above r = {min_r:g}</div>')
     body = " · ".join(
         f'<span class="match"><b>{html.escape(lab)}</b> '
@@ -426,6 +463,18 @@ def main():
                         help="z threshold the tail weight is floored at for the "
                              "bank-agreement summary (default 0.0 = the mean). "
                              "Raise it to score agreement on a narrower tail.")
+    parser.add_argument("--match-source", choices=("taught", "store", "none"),
+                        default=None,
+                        help="what each tail's agreement line is read against: "
+                             "`taught` — the named tails of the shipped, "
+                             "rule-taught axes (axes/per_problem.csv as "
+                             "labels.json names them), the reference for "
+                             "asking which rule-based axis a free direction "
+                             "resembles; `store` — the named directions in the "
+                             "motif store, the reference for asking whether a "
+                             "fit retained a stored motif. Default: taught for "
+                             "a --dump, store for the shipped axes themselves "
+                             "(matching them against themselves says nothing)")
     parser.add_argument("--match-min-r", type=float, default=0.10,
                         help="minimum hinged correlation for a bank motif to be "
                              "listed (default 0.10; 0 = independent)")
@@ -572,8 +621,15 @@ def main():
         # the tail is the unit a reader is actually judging; pairing both ends
         # under one selection makes them scroll past the other half to compare
         # two candidates for the same name.
-        bank_tails = load_named_bank_tails(tids, args.match_hinge)
-        print(f"  bank: {len(bank_tails)} named tails to match against", flush=True)
+        source = args.match_source or ("taught" if args.dump else "store")
+        if source == "taught":
+            bank_tails = load_taught_axis_tails(tids, args.match_hinge)
+        elif source == "store":
+            bank_tails = load_named_bank_tails(tids, args.match_hinge)
+        else:
+            bank_tails = []
+        print(f"  {source}: {len(bank_tails)} named tails to match against",
+              flush=True)
         options, sections = [], []
         n_tails = 2 * len(components)
         for i, (key, title, vals, name) in enumerate(components):
@@ -597,7 +653,8 @@ def main():
                 body = _render_tail_html(tids, vals, sign, args.rows, args.cols,
                                          lookup, ranks, args.by_signal)
                 matches = _match_html(vals, sign, bank_tails,
-                                      args.match_hinge, args.match_min_r)
+                                      args.match_hinge, args.match_min_r,
+                                      source)
                 sections.append(
                     f'<section class="comp-section{" active" if ti == 0 else ""}" '
                     f'data-comp="{tail_key}">'
