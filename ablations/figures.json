@@ -210,6 +210,1084 @@
         "data_version": "f6fba7b749bc0ecb"
       }
     },
+    "axis_space.ortho_basis_gain": {
+      "value": -0.019799061506296733,
+      "fmt": "+.2f",
+      "text": "-0.02",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "free fit: mean matched-axis agreement under the mutual penalty minus without it — whether seven DISTINCT free directions reproduce across seeds any better than duplicated ones",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.ortho_cost_mnat": {
+      "value": 13.075167047125955,
+      "fmt": "+.1f",
+      "text": "+13.1",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "free fit: held-out-problem level under the mutual penalty minus without it, paired per seed and averaged; positive means the penalty predicts worse",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.ortho_cost_seeds_worse": {
+      "value": 4,
+      "fmt": "d",
+      "text": "4",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "of the 4 seeds, how many put the mutual-penalty free fit on the worse side",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.ortho_effective_dim_gain": {
+      "value": 3.3336051968316673,
+      "fmt": "+.1f",
+      "text": "+3.3",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "free fit: effective number of distinct directions under the mutual penalty minus without it",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.ortho_subspace_gain": {
+      "value": -0.06864292719073539,
+      "fmt": "+.2f",
+      "text": "-0.07",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "free fit: third canonical correlation under the mutual penalty minus without it",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.ortho_weight": {
+      "value": 0.5,
+      "fmt": ".2f",
+      "text": "0.50",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "weight of the mutual-orthogonality penalty the ortho arms carry (the squared off-diagonal of the loadings' batch correlation matrix); production carries none",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.pairs": {
+      "value": 6,
+      "fmt": "d",
+      "text": "6",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "seed pairs each agreement figure is averaged over",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.problems_scored": {
+      "value": 107088,
+      "fmt": "~1000",
+      "text": "107,000",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "problems every agreement figure is measured over: attempted at least once (first-time attempts) and carried by every arm",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.ramp_epochs": {
+      "value": 500,
+      "fmt": "d",
+      "text": "500",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "opening epochs over which the ramp arms scale both rates linearly up to the schedule, out of the panel's budget",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.ramp_work_epochs": {
+      "value": 249,
+      "fmt": "d",
+      "text": "249",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "constant-rate epochs of work the ramp removes from the budget",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.same_init_basis_mean": {
+      "value": 0.2123670811154562,
+      "fmt": ".2f",
+      "text": "0.21",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "free fits at the SAME seed under the two schedules: mean matched-axis agreement — high means the initialization decides the basis, low means the path does",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.seeds": {
+      "value": 4,
+      "fmt": "d",
+      "text": "4",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "fits per configuration, differing only in the network's initialization and minibatch order — the held-aside draw and the joint-PCA feature basis are pinned across every arm",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.tail_n": {
+      "value": 1000,
+      "fmt": "d",
+      "text": "1000",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "extreme problems per axis end the tail-overlap figures count",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.taught_basis_mean": {
+      "value": 0.9337660766926447,
+      "fmt": ".2f",
+      "text": "0.93",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "the shipped, taught fit: |correlation| of per-problem loadings between two fits after matching the 7 axes one-to-one, meaned over the axes and over the seed pairs",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.taught_basis_min": {
+      "value": 0.8883422991225444,
+      "fmt": ".2f",
+      "text": "0.89",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "the shipped, taught fit: the same at each pair's weakest-matched axis",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.taught_effective_dim": {
+      "value": 5.3223269539946685,
+      "fmt": ".1f",
+      "text": "5.3",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "the shipped, taught fit: effective number of distinct directions among a fit's 7 axes — the participation ratio of its axis correlation matrix's eigenvalues over attempted problems, averaged over the seeds",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.taught_level_sd_mnat": {
+      "value": 2.3985586655999325,
+      "fmt": ".1f",
+      "text": "2.4",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "the shipped, taught fit: run-to-run sd of the held-out-problem level (mean of the last 2% of checkpoints) across the seeds, millinats, at one pinned draw",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.taught_max_within_r": {
+      "value": 0.40633717848600953,
+      "fmt": ".2f",
+      "text": "0.41",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "the shipped, taught fit: |correlation| of the most correlated pair of a fit's own axes, averaged over the seeds — near one is a duplicated axis",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.taught_subspace_lead": {
+      "value": 0.9782223172490871,
+      "fmt": ".2f",
+      "text": "0.98",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "the shipped, taught fit: the strongest canonical correlation between the two fits' 7-dimensional spans, averaged over pairs",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.taught_subspace_min": {
+      "value": 0.7999138373720908,
+      "fmt": ".2f",
+      "text": "0.80",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "the shipped, taught fit: the weakest canonical correlation — near zero means one fit holds a direction the other's span lacks, or that the span holds fewer than 7 distinct directions at all (see the effective dimension)",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.taught_subspace_third": {
+      "value": 0.9598264707038817,
+      "fmt": ".2f",
+      "text": "0.96",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "the shipped, taught fit: the third-strongest canonical correlation, averaged over pairs — the depth at which two spans still share a direction, read where a free fit's effective dimension sits",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.taught_tail_shared_best": {
+      "value": 0.2943333333333334,
+      "fmt": "%.0f",
+      "text": "29",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "the shipped, taught fit: percent of the 1000 most extreme problems at each end shared by the two fits on their BEST-matched axis, both ends averaged, then over pairs",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.taught_tail_shared_mean": {
+      "value": 0.34736904761904763,
+      "fmt": "%.0f",
+      "text": "35",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "the shipped, taught fit: the same over all 7 matched axes",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.taught_warm_basis_gain": {
+      "value": 0.00504543218474951,
+      "fmt": "+.2f",
+      "text": "+0.01",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "taught fit: mean matched-axis agreement under the ramp minus without it",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.taught_warm_basis_mean": {
+      "value": 0.9388115088773942,
+      "fmt": ".2f",
+      "text": "0.94",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "the taught fit under the opening ramp: |correlation| of per-problem loadings between two fits after matching the 7 axes one-to-one, meaned over the axes and over the seed pairs",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.taught_warm_basis_min": {
+      "value": 0.8905678632860412,
+      "fmt": ".2f",
+      "text": "0.89",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "the taught fit under the opening ramp: the same at each pair's weakest-matched axis",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.taught_warm_cost_mnat": {
+      "value": -1.2624753373009778,
+      "fmt": "+.1f",
+      "text": "-1.3",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "taught fit: held-out-problem level under the ramp minus without it, paired per seed and averaged",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.taught_warm_cost_seeds_worse": {
+      "value": 0,
+      "fmt": "d",
+      "text": "0",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "of the 4 seeds, how many put the ramp's taught fit on the worse side",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.taught_warm_effective_dim": {
+      "value": 5.321642216140674,
+      "fmt": ".1f",
+      "text": "5.3",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "the taught fit under the opening ramp: effective number of distinct directions among a fit's 7 axes — the participation ratio of its axis correlation matrix's eigenvalues over attempted problems, averaged over the seeds",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.taught_warm_level_sd_mnat": {
+      "value": 2.661657811307977,
+      "fmt": ".1f",
+      "text": "2.7",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "the taught fit under the opening ramp: run-to-run sd of the held-out-problem level (mean of the last 2% of checkpoints) across the seeds, millinats, at one pinned draw",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.taught_warm_max_within_r": {
+      "value": 0.42524579793157885,
+      "fmt": ".2f",
+      "text": "0.43",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "the taught fit under the opening ramp: |correlation| of the most correlated pair of a fit's own axes, averaged over the seeds — near one is a duplicated axis",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.taught_warm_subspace_lead": {
+      "value": 0.9830530404830986,
+      "fmt": ".2f",
+      "text": "0.98",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "the taught fit under the opening ramp: the strongest canonical correlation between the two fits' 7-dimensional spans, averaged over pairs",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.taught_warm_subspace_min": {
+      "value": 0.8153704928158026,
+      "fmt": ".2f",
+      "text": "0.82",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "the taught fit under the opening ramp: the weakest canonical correlation — near zero means one fit holds a direction the other's span lacks, or that the span holds fewer than 7 distinct directions at all (see the effective dimension)",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.taught_warm_subspace_third": {
+      "value": 0.9589733833799837,
+      "fmt": ".2f",
+      "text": "0.96",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "the taught fit under the opening ramp: the third-strongest canonical correlation, averaged over pairs — the depth at which two spans still share a direction, read where a free fit's effective dimension sits",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.taught_warm_tail_shared_best": {
+      "value": 0.30091666666666667,
+      "fmt": "%.0f",
+      "text": "30",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "the taught fit under the opening ramp: percent of the 1000 most extreme problems at each end shared by the two fits on their BEST-matched axis, both ends averaged, then over pairs",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.taught_warm_tail_shared_mean": {
+      "value": 0.3752857142857143,
+      "fmt": "%.0f",
+      "text": "38",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "the taught fit under the opening ramp: the same over all 7 matched axes",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.teaching_cost_mnat": {
+      "value": 4.506949335336671,
+      "fmt": "+.1f",
+      "text": "+4.5",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "held-out-problem level of the taught fit minus the free fit, paired per seed and averaged; positive means teaching predicts worse",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.teaching_cost_seeds_worse": {
+      "value": 4,
+      "fmt": "d",
+      "text": "4",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "of the 4 seeds, how many put the taught fit on the worse side",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.teaching_effective_dim_gap": {
+      "value": 2.1376835127456437,
+      "fmt": "+.1f",
+      "text": "+2.1",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "taught minus free effective dimension — how many distinct directions the pull recovers from a fit that would otherwise spend its axes on duplicates",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.teaching_gap": {
+      "value": 0.6926393901981599,
+      "fmt": "+.2f",
+      "text": "+0.69",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "taught minus free mean matched-axis agreement, at pinned draw and feature basis — what the constant pull buys in basis stability against initialization alone",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.teaching_rating_side_cost_mnat": {
+      "value": 4.331052303314209,
+      "fmt": "+.1f",
+      "text": "+4.3",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "the same paired teaching cost with the axis term zeroed at the final state — what the pull costs the RATING heads' generalization to unseen problems, millinats",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.teaching_rating_side_seeds_worse": {
+      "value": 4,
+      "fmt": "d",
+      "text": "4",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "of the 4 seeds, how many put the taught fit's rating side on the worse side",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.teaching_subspace_gap": {
+      "value": 0.7900352932495014,
+      "fmt": "+.2f",
+      "text": "+0.79",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "taught minus free weakest canonical correlation",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.untaught_basis_mean": {
+      "value": 0.2411266864944848,
+      "fmt": ".2f",
+      "text": "0.24",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "the free fit (teaching pull off): |correlation| of per-problem loadings between two fits after matching the 7 axes one-to-one, meaned over the axes and over the seed pairs",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.untaught_basis_min": {
+      "value": 0.04645458369201828,
+      "fmt": ".2f",
+      "text": "0.05",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "the free fit (teaching pull off): the same at each pair's weakest-matched axis",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.untaught_effective_dim": {
+      "value": 3.1846434412490248,
+      "fmt": ".1f",
+      "text": "3.2",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "the free fit (teaching pull off): effective number of distinct directions among a fit's 7 axes — the participation ratio of its axis correlation matrix's eigenvalues over attempted problems, averaged over the seeds",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.untaught_level_sd_mnat": {
+      "value": 2.0982084423963774,
+      "fmt": ".1f",
+      "text": "2.1",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "the free fit (teaching pull off): run-to-run sd of the held-out-problem level (mean of the last 2% of checkpoints) across the seeds, millinats, at one pinned draw",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.untaught_max_within_r": {
+      "value": 0.9645711889616548,
+      "fmt": ".2f",
+      "text": "0.96",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "the free fit (teaching pull off): |correlation| of the most correlated pair of a fit's own axes, averaged over the seeds — near one is a duplicated axis",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.untaught_ortho_basis_mean": {
+      "value": 0.22132762498818806,
+      "fmt": ".2f",
+      "text": "0.22",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "the free fit under a mutual-orthogonality penalty: |correlation| of per-problem loadings between two fits after matching the 7 axes one-to-one, meaned over the axes and over the seed pairs",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.untaught_ortho_basis_min": {
+      "value": 0.08165878459476911,
+      "fmt": ".2f",
+      "text": "0.08",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "the free fit under a mutual-orthogonality penalty: the same at each pair's weakest-matched axis",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.untaught_ortho_effective_dim": {
+      "value": 6.518248638080692,
+      "fmt": ".1f",
+      "text": "6.5",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "the free fit under a mutual-orthogonality penalty: effective number of distinct directions among a fit's 7 axes — the participation ratio of its axis correlation matrix's eigenvalues over attempted problems, averaged over the seeds",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.untaught_ortho_level_sd_mnat": {
+      "value": 2.7732190242292094,
+      "fmt": ".1f",
+      "text": "2.8",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "the free fit under a mutual-orthogonality penalty: run-to-run sd of the held-out-problem level (mean of the last 2% of checkpoints) across the seeds, millinats, at one pinned draw",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.untaught_ortho_max_within_r": {
+      "value": 0.19858173120242373,
+      "fmt": ".2f",
+      "text": "0.20",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "the free fit under a mutual-orthogonality penalty: |correlation| of the most correlated pair of a fit's own axes, averaged over the seeds — near one is a duplicated axis",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.untaught_ortho_subspace_lead": {
+      "value": 0.6543911172166021,
+      "fmt": ".2f",
+      "text": "0.65",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "the free fit under a mutual-orthogonality penalty: the strongest canonical correlation between the two fits' 7-dimensional spans, averaged over pairs",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.untaught_ortho_subspace_min": {
+      "value": 0.017358406868897183,
+      "fmt": ".2f",
+      "text": "0.02",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "the free fit under a mutual-orthogonality penalty: the weakest canonical correlation — near zero means one fit holds a direction the other's span lacks, or that the span holds fewer than 7 distinct directions at all (see the effective dimension)",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.untaught_ortho_subspace_third": {
+      "value": 0.29788871667635375,
+      "fmt": ".2f",
+      "text": "0.30",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "the free fit under a mutual-orthogonality penalty: the third-strongest canonical correlation, averaged over pairs — the depth at which two spans still share a direction, read where a free fit's effective dimension sits",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.untaught_ortho_tail_shared_best": {
+      "value": 0.07383333333333333,
+      "fmt": "%.0f",
+      "text": "7",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "the free fit under a mutual-orthogonality penalty: percent of the 1000 most extreme problems at each end shared by the two fits on their BEST-matched axis, both ends averaged, then over pairs",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.untaught_ortho_tail_shared_mean": {
+      "value": 0.049809523809523804,
+      "fmt": "%.0f",
+      "text": "5",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "the free fit under a mutual-orthogonality penalty: the same over all 7 matched axes",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.untaught_subspace_lead": {
+      "value": 0.6349207024525169,
+      "fmt": ".2f",
+      "text": "0.63",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "the free fit (teaching pull off): the strongest canonical correlation between the two fits' 7-dimensional spans, averaged over pairs",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.untaught_subspace_min": {
+      "value": 0.009878544122589388,
+      "fmt": ".2f",
+      "text": "0.01",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "the free fit (teaching pull off): the weakest canonical correlation — near zero means one fit holds a direction the other's span lacks, or that the span holds fewer than 7 distinct directions at all (see the effective dimension)",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.untaught_subspace_third": {
+      "value": 0.36653164386708914,
+      "fmt": ".2f",
+      "text": "0.37",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "the free fit (teaching pull off): the third-strongest canonical correlation, averaged over pairs — the depth at which two spans still share a direction, read where a free fit's effective dimension sits",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.untaught_tail_shared_best": {
+      "value": 0.21591666666666667,
+      "fmt": "%.0f",
+      "text": "22",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "the free fit (teaching pull off): percent of the 1000 most extreme problems at each end shared by the two fits on their BEST-matched axis, both ends averaged, then over pairs",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.untaught_tail_shared_mean": {
+      "value": 0.1391904761904762,
+      "fmt": "%.0f",
+      "text": "14",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "the free fit (teaching pull off): the same over all 7 matched axes",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.untaught_warm_basis_mean": {
+      "value": 0.23261138725518907,
+      "fmt": ".2f",
+      "text": "0.23",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "the free fit under the opening ramp: |correlation| of per-problem loadings between two fits after matching the 7 axes one-to-one, meaned over the axes and over the seed pairs",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.untaught_warm_basis_min": {
+      "value": 0.02198202991072497,
+      "fmt": ".2f",
+      "text": "0.02",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "the free fit under the opening ramp: the same at each pair's weakest-matched axis",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.untaught_warm_effective_dim": {
+      "value": 2.2678654541505336,
+      "fmt": ".1f",
+      "text": "2.3",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "the free fit under the opening ramp: effective number of distinct directions among a fit's 7 axes — the participation ratio of its axis correlation matrix's eigenvalues over attempted problems, averaged over the seeds",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.untaught_warm_level_sd_mnat": {
+      "value": 1.237235271396533,
+      "fmt": ".1f",
+      "text": "1.2",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "the free fit under the opening ramp: run-to-run sd of the held-out-problem level (mean of the last 2% of checkpoints) across the seeds, millinats, at one pinned draw",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.untaught_warm_max_within_r": {
+      "value": 0.9880397790913753,
+      "fmt": ".2f",
+      "text": "0.99",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "the free fit under the opening ramp: |correlation| of the most correlated pair of a fit's own axes, averaged over the seeds — near one is a duplicated axis",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.untaught_warm_subspace_lead": {
+      "value": 0.6030246933633271,
+      "fmt": ".2f",
+      "text": "0.60",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "the free fit under the opening ramp: the strongest canonical correlation between the two fits' 7-dimensional spans, averaged over pairs",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.untaught_warm_subspace_min": {
+      "value": 0.010154944454306064,
+      "fmt": ".2f",
+      "text": "0.01",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "the free fit under the opening ramp: the weakest canonical correlation — near zero means one fit holds a direction the other's span lacks, or that the span holds fewer than 7 distinct directions at all (see the effective dimension)",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.untaught_warm_subspace_third": {
+      "value": 0.18466861276650925,
+      "fmt": ".2f",
+      "text": "0.18",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "the free fit under the opening ramp: the third-strongest canonical correlation, averaged over pairs — the depth at which two spans still share a direction, read where a free fit's effective dimension sits",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.untaught_warm_tail_shared_best": {
+      "value": 0.16583333333333333,
+      "fmt": "%.0f",
+      "text": "17",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "the free fit under the opening ramp: percent of the 1000 most extreme problems at each end shared by the two fits on their BEST-matched axis, both ends averaged, then over pairs",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.untaught_warm_tail_shared_mean": {
+      "value": 0.11505952380952382,
+      "fmt": "%.0f",
+      "text": "12",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "the free fit under the opening ramp: the same over all 7 matched axes",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.warm_basis_gain": {
+      "value": -0.008515299239295726,
+      "fmt": "+.2f",
+      "text": "-0.01",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "free fit: mean matched-axis agreement under the ramp minus without it — what a gentler opening buys in basis stability",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.warm_cost_mnat": {
+      "value": -1.3467105371611359,
+      "fmt": "+.1f",
+      "text": "-1.3",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "free fit: held-out-problem level under the ramp minus without it, PAIRED at each seed (same initialization, same held-out problems) and averaged; positive means the ramp predicts worse",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.warm_cost_seeds_worse": {
+      "value": 1,
+      "fmt": "d",
+      "text": "1",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "of the 4 seeds, how many put the ramp's free fit on the worse side",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "axis_space.warm_subspace_gain": {
+      "value": 0.00027640033171667626,
+      "fmt": "+.2f",
+      "text": "+0.00",
+      "producer": "ablations.refit_axis_space_figures",
+      "tier": "refit",
+      "note": "free fit: weakest canonical correlation under the ramp minus without it",
+      "measured": {
+        "at": "2026-09-02T23:42:08Z",
+        "git": "a670dc50393+dirty",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
     "axistail.axes_measured": {
       "value": 7,
       "fmt": "d",

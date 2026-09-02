@@ -246,8 +246,9 @@ def load_panel():
                 f"{cfg} recorded a mutual-orthogonality weight of {w}")
         if cfg == "untaught_ortho":
             ortho_w = w
-        require(warm[WARM_OF[cfg]] > 0,
-                f"{WARM_OF[cfg]} ran no ramp — it is the ramp arm")
+    for cfg, warm_cfg in WARM_OF.items():
+        require(warm[warm_cfg] > 0,
+                f"{warm_cfg} ran no ramp — it is {cfg}'s ramp arm")
     require(warm["untaught_warm"] == warm["taught_warm"],
             f"the two ramp configurations ran different ramps "
             f"({warm['untaught_warm']} and {warm['taught_warm']} epochs)")
@@ -408,7 +409,19 @@ def measure():
         return {"mean": statistics.fmean(deltas), "per_seed": deltas,
                 "worse": sum(d > 0 for d in deltas)}
 
+    # THE RATING SIDE ALONE: the same paired contrasts with the axis term
+    # zeroed at the final state (`stop_bce_no_axes`), which says whether a
+    # cost is paid by the rating heads — the trunk is shared, so a pull on the
+    # loadings can move what the rating generalizes — or by the axis channel.
+    def paired_no_axes(cfg_a, cfg_b):
+        deltas = [1e3 * (arms[CONFIGS[cfg_b].format(s)]["metrics"]["stop_bce_no_axes"]
+                         - arms[CONFIGS[cfg_a].format(s)]["metrics"]["stop_bce_no_axes"])
+                  for s in SEEDS]
+        return {"mean": statistics.fmean(deltas), "per_seed": deltas,
+                "worse": sum(d > 0 for d in deltas)}
+
     contrasts = {
+        "teaching_rating_side": paired_no_axes("untaught", "taught"),
         "warm": paired("untaught", "untaught_warm"),
         "ortho": paired("untaught", "untaught_ortho"),
         "taught_warm": paired("taught", "taught_warm"),
@@ -586,6 +599,15 @@ def figures():
                "d",
                f"of the {len(SEEDS)} seeds, how many put the taught fit on the "
                f"worse side"),
+        Figure("axis_space.teaching_rating_side_cost_mnat",
+               ct["teaching_rating_side"]["mean"], "+.1f",
+               "the same paired teaching cost with the axis term zeroed at the "
+               "final state — what the pull costs the RATING heads' "
+               "generalization to unseen problems, millinats"),
+        Figure("axis_space.teaching_rating_side_seeds_worse",
+               ct["teaching_rating_side"]["worse"], "d",
+               f"of the {len(SEEDS)} seeds, how many put the taught fit's "
+               f"rating side on the worse side"),
         Figure("axis_space.same_init_basis_mean",
                m["same_init_mean"]["untaught"], ".2f",
                "free fits at the SAME seed under the two schedules: mean "
@@ -637,7 +659,8 @@ def main():
     for name, label in (("warm", "free fit: ramp minus none"),
                         ("ortho", "free fit: mutual penalty minus none"),
                         ("taught_warm", "taught fit: ramp minus none"),
-                        ("teaching", "taught minus free")):
+                        ("teaching", "taught minus free"),
+                        ("teaching_rating_side", "  same, axis term zeroed")):
         ct = m["contrasts"][name]
         per = " ".join(f"{d:+.2f}" for d in ct["per_seed"])
         print(f"  {label:<30} {per}   mean {ct['mean']:+.2f}  "
