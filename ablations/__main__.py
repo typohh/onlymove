@@ -4,13 +4,17 @@
     ./.venv/bin/python3 -m ablations --tier methodology  # + the per-cell / torch measurements
     ./.venv/bin/python3 -m ablations --only corpus_figures
     ./.venv/bin/python3 -m ablations --check             # documents vs ledger, no measurement
+    ./.venv/bin/python3 -m ablations --sync              # documents FROM ledger, no measurement
     ./.venv/bin/python3 -m ablations --list
 
 A run measures, merges the figures into ablations/figures.json, prints every key
 whose value moved, rewrites the `<span data-fig="…">` values in the documents and
 prints those edits too — that diff is the review step. A figure that moves can
 change the sentence around it ("inside its interval", "most of"), which no
-rewriter can see, so read the diff before committing.
+rewriter can see, so read the diff before committing. The rewrite covers the
+dates a document says its figures were measured between, which come from the
+ledger's own stamps; `--sync` is that rewrite alone, for a document that changed
+what it quotes (or gained the date spans) with nothing new to measure.
 
 Producers are the `*_figures.py` modules listed in PRODUCERS, cheapest tier first.
 Each exposes `TIER`, `figures()` (→ list of `_figures.Figure`) and its own `main()`
@@ -66,6 +70,19 @@ def _load(name):
     return mod
 
 
+def _report_edits(edits):
+    print(f"\ndocuments: {len(edits)} span(s) rewritten")
+    # One line per (document, key): about.html repeats each key per language block.
+    seen = {}
+    for doc, key, old, new in edits:
+        seen.setdefault((doc, key, old, new), 0)
+        seen[(doc, key, old, new)] += 1
+    for (doc, key, old, new), n in seen.items():
+        print(f"  {doc:<22} {key:<34} {old:>12} -> {new}" + (f"   (×{n})" if n > 1 else ""))
+    if edits:
+        print("\nReview the sentences around each rewritten span before committing.")
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     g = ap.add_mutually_exclusive_group()
@@ -74,6 +91,9 @@ def main(argv=None):
     g.add_argument("--only", choices=PRODUCERS, help="run one producer")
     g.add_argument("--check", action="store_true",
                    help="only verify that every document span matches the ledger")
+    g.add_argument("--sync", action="store_true",
+                   help="rewrite the documents' spans (figures and measured-between dates) "
+                        "from the ledger as it stands, measuring nothing")
     g.add_argument("--list", action="store_true", help="list producers and their tiers")
     ap.add_argument("--no-sync", action="store_true",
                     help="update the ledger but leave the documents untouched")
@@ -102,8 +122,18 @@ def main(argv=None):
         print(f"{n} figure spans agree with the ledger; {g} claim guards hold")
         return 0
 
+    if args.sync:
+        ledger = load_ledger()
+        try:
+            _report_edits(sync_documents(ledger, write=True))
+            check_guards(ledger)
+        except AblationError as e:
+            print(e, file=sys.stderr)
+            return 1
+        return 0
+
     if not (args.tier or args.only):
-        ap.error("one of --tier, --only, --check, --list is required")
+        ap.error("one of --tier, --only, --check, --sync, --list is required")
 
     if args.only:
         selected = [args.only]
@@ -137,17 +167,7 @@ def main(argv=None):
 
     if args.no_sync:
         return 0
-    edits = sync_documents(ledger, write=True)
-    print(f"\ndocuments: {len(edits)} span(s) rewritten")
-    # One line per (document, key): about.html repeats each key per language block.
-    seen = {}
-    for doc, key, old, new in edits:
-        seen.setdefault((doc, key, old, new), 0)
-        seen[(doc, key, old, new)] += 1
-    for (doc, key, old, new), n in seen.items():
-        print(f"  {doc:<22} {key:<34} {old:>12} -> {new}" + (f"   (×{n})" if n > 1 else ""))
-    if edits:
-        print("\nReview the sentences around each rewritten span before committing.")
+    _report_edits(sync_documents(ledger, write=True))
 
     # Guards last: the ledger and the spans are already written — the measurement
     # is real either way — so a violated guard is a sentence that no longer

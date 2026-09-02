@@ -11,6 +11,11 @@ re-run's `git diff` shows exactly which figures moved. `pwa/build.mjs` refuses t
 build while a span disagrees with the ledger, so a figure cannot reach the site
 without the ledger backing it (`pwa/scripts/figures-check.mjs`).
 
+A document also DATES its figures from the ledger: two `data-fig-measured` spans
+hold the first and last day on which any figure that document quotes or guards was
+measured, computed from the per-key `measured.at` stamps and never typed by hand
+(`measured_range`). One overall claim per document, never a date beside a claim.
+
 The ledger holds RAW numbers plus a format per key; the rendered `text` is derived
 here and stored beside them only so the build check needs no formatter of its own.
 Nothing else should read `text`.
@@ -51,6 +56,19 @@ TIERS = ("about", "methodology", "refit")
 _KEY_RE = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$")
 _SUFFIX_LOOKALIKES = {"js", "mjs", "py", "json", "npz", "csv", "sql", "cfg", "sgf", "txt"}
 SPAN_RE = re.compile(r'<span data-fig="([a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+)">([^<]*)</span>')
+
+# The dates a document says its figures were measured between, as two spans:
+#     <span data-fig-measured="earliest">2026-09-01</span>
+#     <span data-fig-measured="latest">2026-09-02</span>
+# Each holds a UTC calendar day taken over the ledger's `measured.at` stamps of
+# every key THAT DOCUMENT quotes or guards — so the range is the page's own, not
+# the ledger's, and it widens whenever one tier is re-run without the others,
+# which is the truthful reading (the cheap figures are fresher than the GPU-day
+# ones). Nothing measures a date: a measuring run and `--sync` both rewrite these
+# from the ledger, and `pwa/scripts/figures-check.mjs` recomputes the same range
+# at build time and refuses a document that disagrees.
+MEASURED_SPAN_RE = re.compile(r'<span data-fig-measured="(earliest|latest)">([^<]*)</span>')
+_AT_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 
 # A GUARD is an invisible assertion a document places beside a sentence whose
 # wording depends on a figure staying inside a range without quoting it — "and
@@ -292,11 +310,44 @@ def _scan(doc_rel):
         return path, f.read()
 
 
+def document_keys(text):
+    """Every ledger key a document depends on: the figures it quotes in spans and
+    the ones its guards are evaluated against. A guard that does not parse
+    contributes nothing here; `check_guards` is what reports it."""
+    keys = {m.group(1) for m in SPAN_RE.finditer(text)}
+    for m in GUARD_RE.finditer(text):
+        g = _GUARD_EXPR_RE.match(m.group(1))
+        if g is not None:
+            keys.add(g.group("key"))
+    return keys
+
+
+def measured_range(ledger, text, doc_rel):
+    """{"earliest": "YYYY-MM-DD", "latest": "YYYY-MM-DD"}: the UTC days bounding
+    when the figures `text` depends on were measured, from the ledger's own
+    stamps. A key the ledger lacks is skipped — the span and guard checks report
+    it — but a ledgered key with no usable stamp fails, because a figure that
+    cannot say when it was measured cannot be dated, and a document depending on
+    no ledgered figure has no range to state."""
+    entries = ledger["figures"]
+    days = []
+    for key in sorted(document_keys(text)):
+        if key not in entries:
+            continue
+        at = entries[key].get("measured", {}).get("at")
+        require(isinstance(at, str) and _AT_RE.match(at) is not None,
+                f"{doc_rel}: {key} carries no measured.at stamp in the ledger")
+        days.append(at[:10])
+    require(days, f"{doc_rel}: depends on no ledgered figure, so it has no measurement dates")
+    return {"earliest": min(days), "latest": max(days)}
+
+
 def sync_documents(ledger, write=True):
-    """Rewrite every span's text from the ledger. Returns
-    [(doc, key, old_text, new_text)] for each span that changed; a span whose key
-    the ledger does not hold is an error, because a key in a document is a claim
-    that a producer backs it."""
+    """Rewrite every span's text from the ledger — the figure spans and the
+    measured-between dates. Returns [(doc, key, old_text, new_text)] for each
+    span that changed, a date span reporting as `measured.earliest` or
+    `measured.latest`; a span whose key the ledger does not hold is an error,
+    because a key in a document is a claim that a producer backs it."""
     entries = ledger["figures"]
     changes = []
     for doc_rel in DOCUMENTS:
@@ -311,6 +362,19 @@ def sync_documents(ledger, write=True):
             return f'<span data-fig="{key}">{new}</span>'
 
         updated = SPAN_RE.sub(_sub, text)
+
+        if MEASURED_SPAN_RE.search(text) is not None:
+            dates = measured_range(ledger, text, doc_rel)
+
+            def _sub_date(m):
+                which, old = m.group(1), m.group(2)
+                new = dates[which]
+                if new != old:
+                    changes.append((doc_rel, f"measured.{which}", old, new))
+                return f'<span data-fig-measured="{which}">{new}</span>'
+
+            updated = MEASURED_SPAN_RE.sub(_sub_date, updated)
+
         if write and updated != text:
             with open(path, "w", encoding="utf-8") as f:
                 f.write(updated)
@@ -318,8 +382,9 @@ def sync_documents(ledger, write=True):
 
 
 def check_documents(ledger):
-    """Every span in every document carries exactly the ledger's text. Returns the
-    number of spans checked; raises listing every disagreement at once."""
+    """Every span in every document carries exactly the ledger's text — the
+    figure spans and the measured-between dates. Returns the number of spans
+    checked; raises listing every disagreement at once."""
     entries = ledger["figures"]
     problems, n = [], 0
     for doc_rel in DOCUMENTS:
@@ -335,6 +400,14 @@ def check_documents(ledger):
                 continue
             if problem not in problems:       # one line per (document, key), not per language block
                 problems.append(problem)
+        if MEASURED_SPAN_RE.search(text) is not None:
+            dates = measured_range(ledger, text, doc_rel)
+            for m in MEASURED_SPAN_RE.finditer(text):
+                n += 1
+                which, shown = m.group(1), m.group(2)
+                if dates[which] != shown:
+                    problems.append(f"{doc_rel}: its figures were measured {which} on "
+                                    f"{dates[which]}, the document says {shown!r}")
     require(not problems, "documents disagree with the ledger:\n  " + "\n  ".join(problems))
     return n
 
