@@ -1016,10 +1016,18 @@ def cmd_add():
     instance_id = res["new_contract"]
 
     print(f"Waiting for instance {instance_id}...")
+    # RESOLVE THE ROUTE ONLY ONCE THE CONTAINER IS RUNNING. While the host is
+    # still pulling the image the API already reports an ssh host and port but
+    # no port map, so get_ssh_details can only hand back a guess (the proxy at
+    # ssh_port + 1) — and wait_for_ssh then knocks on that one guess until its
+    # deadline, while the box comes up on a different route entirely. Gating on
+    # actual_status costs nothing: a container that is not running cannot
+    # answer on any route, and once it is, the port map is populated and the
+    # direct route is probed first.
     while True:
         instances = run_vast_cmd(["show", "instances"])
         inst = next((i for i in instances if i["id"] == instance_id), None)
-        if inst:
+        if inst and inst.get("actual_status") == "running":
             host, port = get_ssh_details(inst)
             if host and port:
                 break
