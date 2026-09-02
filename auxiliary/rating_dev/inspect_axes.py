@@ -67,9 +67,14 @@ def load_dump_npz(path, bank_path=None):
     M = np.asarray(z["loading"], dtype=np.float64)
     tids = [str(t) for t in z["tid"]]
     labels = [None] * M.shape[1]
+    # A caption carried INSIDE the dump is whatever its writer chose to say about
+    # the axis — an alignment note, a candidate name — and is shown as is; only
+    # a bank supplies the "taught from" claim, since only a bank taught anything.
+    caption = " — {}"
     if "labels" in z.files:
         labels = [str(x) for x in z["labels"]]
     elif bank_path:
+        caption = " — taught from {!r}"
         b = np.load(bank_path, allow_pickle=False)
         if "labels" not in b.files:
             raise SystemExit(f"{bank_path} carries no 'labels' array")
@@ -88,7 +93,7 @@ def load_dump_npz(path, bank_path=None):
         # title alone would leave the positive tail of "life and death/territory"
         # captioned with the territory name too.
         components.append((f"ax{k}",
-                           f"axis {k}" + (f" — taught from {name!r}" if name else ""),
+                           f"axis {k}" + (caption.format(name) if name else ""),
                            M[:, k], name))
     # A dump carries `size` when the fit wrote one; absent, the caller falls back
     # to pwa/lookup.txt purely to learn which board each problem is on.
