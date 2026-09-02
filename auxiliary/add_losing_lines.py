@@ -84,14 +84,14 @@ from auxiliary.check_tsumego_sequences import (  # noqa: E402
     subtree_has_complete_line,
     to_solver,
 )
-from utils.constants import ALL_BOARD_SIZES, DEBUG, DEFAULT_MODEL  # noqa: E402
+from utils.constants import ALL_BOARD_SIZES, DEBUG  # noqa: E402
 from utils.katago.add_variations import (  # noqa: E402
     VariationDepthExceeded,
     generate_variations_directly_to_sgf,
 )
 from utils.katago.controller import KatagoController  # noqa: E402
 from utils.katago.coords import sgf_to_gtp  # noqa: E402
-from utils.katago.models import get_model  # noqa: E402
+from utils.katago.models import DEFAULT_MODEL, get_model  # noqa: E402
 from utils.katago.queries import KatagoQueries  # noqa: E402
 
 # Threads per unit of KataGo's batch size. Same ratio as

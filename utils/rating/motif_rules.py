@@ -34,8 +34,8 @@ if PROJECT_ROOT not in sys.path:
 # The two engine-side helpers are imported INSIDE the rules that use them. This
 # module is the authority on what the motifs are AND on what they are called, and
 # packaging reads the naming half; importing it must not drag in the KataGo side,
-# which also keeps `utils/rating` and `utils/katago` free of each other as the
-# split intends.
+# which is what keeps importing `utils/rating` from loading `utils/katago`, as
+# the split intends.
 
 SIGNAL_CACHE = os.path.join(PROJECT_ROOT, "activations", "_signal_cache")
 OWNERSHIP_CSV = os.path.join(SIGNAL_CACHE, "ownership_swing.csv")

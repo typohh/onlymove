@@ -161,12 +161,12 @@ import utils.katago.torch_model  # noqa: F401  -- adds vendored katago/ to sys.p
 from katago.game.board import Board
 from katago.game.gamestate import GameState
 
-from utils.constants import ALL_BOARD_SIZES, DEFAULT_MODEL, KOMI, RULES
+from utils.constants import ALL_BOARD_SIZES, KOMI, RULES
 from utils.katago.add_variations import (  # noqa: E402
     parse_eval_comment, subtree_reaches_conclusion)
 from utils.katago.controller import KatagoController
 from utils.katago.coords import gtp_to_xy, sgf_to_gtp, xy_to_gtp
-from utils.katago.models import get_model
+from utils.katago.models import DEFAULT_MODEL, get_model
 from utils.katago.sgf_parsing import parse_tsumego_sgf
 
 # Beside the other per-problem feature caches the rating loaders read, not in a

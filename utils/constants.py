@@ -1,13 +1,16 @@
+"""The handful of values both halves of utils/ need.
+
+This module imports from neither `utils.katago` nor `utils.rating`: both sides
+read it, so an import here would load one side into every process of the other.
+"""
 import functools
 import os
 from datetime import datetime
 
-from utils.katago.models import MODEL_FULL
 from utils.paths import PROJECT_ROOT
 
 DEBUG = False
 ALL_BOARD_SIZES = (9, 13)
-DEFAULT_MODEL = MODEL_FULL
 KOMI = 6.5
 RULES = "japanese"
 

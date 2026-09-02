@@ -8,9 +8,8 @@ project root — the failure surfaces far from the cause, as a missing artifact
 under a path with `utils/` doubled into it.
 
 Resolving it here makes a future move a non-event. This module deliberately
-imports nothing from the package (`utils/constants.py` needs it too, and
-`constants` already reaches into `utils.katago.models` for the default network,
-so any dependency in the other direction would close a cycle).
+imports nothing from the package (`utils/constants.py` and `utils.katago.models`
+both need it, so any dependency in the other direction would close a cycle).
 """
 import os
 

@@ -21,12 +21,12 @@ from utils.katago.add_variations import (  # noqa: E402
     generate_variations_directly_to_sgf,
 )
 from utils.constants import (  # noqa: E402
-    ALL_BOARD_SIZES, DEBUG, DEFAULT_MODEL, debug, read_retired_ids)
+    ALL_BOARD_SIZES, DEBUG, debug, read_retired_ids)
 from utils.katago.add_variations import construct_initial_sgf  # noqa: E402
 from utils.katago.controller import KatagoController  # noqa: E402
 from utils.katago.queries import KatagoQueries  # noqa: E402
 from utils.katago.coords import gtp_to_sgfmill_point  # noqa: E402
-from utils.katago.models import get_model  # noqa: E402
+from utils.katago.models import DEFAULT_MODEL, get_model  # noqa: E402
 from utils.katago.problem_finder import ProblemFinder  # noqa: E402
 from sgfmill import boards  # noqa: E402
 

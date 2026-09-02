@@ -26,9 +26,9 @@ import time
 
 import requests
 
-from utils.constants import ALL_BOARD_SIZES, DEFAULT_MODEL, KOMI, RULES
+from utils.constants import ALL_BOARD_SIZES, KOMI, RULES
 from utils.katago.controller import KatagoController
-from utils.katago.models import get_model
+from utils.katago.models import DEFAULT_MODEL, get_model
 
 # --- Configuration ---
 SERVER_URL = (os.environ.get("ONLYMOVE_ANALYSIS_URL") or "https://api.onlymove.net").rstrip("/")
