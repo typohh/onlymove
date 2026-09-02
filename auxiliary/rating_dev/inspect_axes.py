@@ -222,7 +222,7 @@ def load_taught_axis_tails(tids, hinge_at=TAIL_HINGE, per_problem=None):
     idx = np.array([pos.get(str(t), -1) for t in t_tids])
     keep = idx >= 0
     out = []
-    for k, (_key, _title, vals, name) in enumerate(comps):
+    for _key, _title, vals, name in comps:
         if not name:
             continue
         halves = [h.strip() for h in name.split("/")]
@@ -231,7 +231,9 @@ def load_taught_axis_tails(tids, hinge_at=TAIL_HINGE, per_problem=None):
         for sign, h in ((+1, 0), (-1, 1)):
             lab = halves[h] if h < len(halves) and halves[h] else None
             if lab:
-                out.append((f"axis {k} {lab}{'+' if sign > 0 else '-'}",
+                # Named by the RULE alone: the rule is the tail's identity, and
+                # the shipped fit's axis index means nothing on another fit's page.
+                out.append((f"{lab}{'+' if sign > 0 else '-'}",
                             hinge_z(sign * col, hinge_at)))
     return out
 
