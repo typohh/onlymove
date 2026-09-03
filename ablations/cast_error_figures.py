@@ -23,10 +23,14 @@ bits directly:
                     what says the bulk of the set sits an order of magnitude
                     finer than the worst case.
 
-Both are in units of an axis standard deviation, which costs no conversion: the
-axis gauge divides every loading by its own axis's corpus RMS, so a loading is
-already in those units. That is checked against `axes/per_problem.csv` rather
-than assumed.
+Both are in the axis's own unit, its corpus root-mean-square, which costs no
+conversion: the axis gauge divides every loading by that RMS, so a loading is
+already in those units. The unit is NOT a standard deviation and must not be
+called one: nothing in the objective pins an axis's mean over problems, and the
+axis of a one-sided rule holds most of the corpus below zero with its
+rule-positive end above, so its spread about its mean can sit well under one
+while its RMS is exactly one. The RMS is what is checked against
+`axes/per_problem.csv` rather than assumed; the mean is reported beside it.
 
 The comparison that makes the bound mean something is the within-problem one,
 because both client readings compare two cells of the SAME problem and a
@@ -193,11 +197,12 @@ def cast_bound(rows, offsets, n_cells, bytes_per_cell):
 
 
 def check_axis_units():
-    """The published values are quoted in axis standard deviations, and that is
-    a claim about the gauge rather than a rescaling: `problem_params` divides
-    every loading by its own axis's corpus RMS, so an axis's spread over the
-    corpus is one by construction. Verified here so the unit cannot silently
-    become something else."""
+    """The published values are quoted in axis units, and that is a claim about
+    the gauge rather than a rescaling: `problem_params` divides every loading by
+    its own axis's corpus RMS, so an axis's root-mean-square over the corpus is
+    one by construction. Verified here so the unit cannot silently become
+    something else. The mean is reported, not asserted: a one-sided rule's axis
+    is legitimately off-centre, and the gauge never claimed otherwise."""
     import pandas as pd
     require(os.path.exists(PER_PROBLEM), f"no {PER_PROBLEM} — run pipeline.train_mirt")
     per = pd.read_csv(PER_PROBLEM)
@@ -206,13 +211,9 @@ def check_axis_units():
     require(not missing, f"{PER_PROBLEM} lacks {missing}")
     G = per[cols].to_numpy(np.float64)
     rms = np.sqrt((G ** 2).mean(axis=0))
-    sd = G.std(axis=0)
     require(np.all(np.abs(rms - 1.0) < 0.01),
-            f"the loadings are not standardized: per-axis RMS {rms.round(4)}")
-    require(np.all(np.abs(sd - 1.0) < 0.05),
-            f"per-axis standard deviation {sd.round(4)} is not one, so a raw "
-            f"value is not an axis standard deviation")
-    return {"rms": rms, "sd": sd, "n": len(G)}
+            f"the loadings are not gauged: per-axis RMS {rms.round(4)} is not one")
+    return {"rms": rms, "mean": G.mean(axis=0), "sd": G.std(axis=0), "n": len(G)}
 
 
 def sample_rows(rows, n_per_size, seed):
@@ -338,8 +339,8 @@ def figures():
     return [
         Figure("cast.worst_sd", m["bound"]["worst"], ".4f",
                "largest half-precision rounding error the published per-cell "
-               "motif vectors can carry, in axis standard deviations (the "
-               "loadings are gauged to unit RMS, so a raw unit is one)"),
+               "motif vectors can carry, in axis units (the loadings are gauged "
+               "to unit corpus RMS, so a raw unit is one)"),
         Figure("cast.p999_sd", m["bound"]["p999"], ".4f",
                "the same bound at the 99.9th percentile of published per-cell "
                "values"),
@@ -362,10 +363,13 @@ def main():
           f"{b['n_shards']} shards,\n{b['n_bytes'] / 1e6:.0f} MB of "
           f"{m['meta']['dtype']} at {m['meta']['bytes_per_cell']} bytes per cell, "
           f"K={m['meta']['K']}.")
-    print(f"\nunits: a loading is divided by its own axis's corpus RMS, so an "
-          f"axis standard\ndeviation IS one raw unit — per-axis RMS "
-          f"{u['rms'].min():.4f}..{u['rms'].max():.4f}, sd "
-          f"{u['sd'].min():.4f}..{u['sd'].max():.4f} over {u['n']:,d} problems.")
+    print(f"\nunits: a loading is divided by its own axis's corpus RMS, so one "
+          f"raw unit IS one axis RMS — per-axis RMS "
+          f"{u['rms'].min():.4f}..{u['rms'].max():.4f} over {u['n']:,d} "
+          f"problems; the axes are not centred (mean "
+          f"{u['mean'].min():+.3f}..{u['mean'].max():+.3f}, sd "
+          f"{u['sd'].min():.3f}..{u['sd'].max():.3f}), which the unit does "
+          f"not require.")
 
     print("\n=== the cast bound, exact over every published value ===")
     print("half the spacing between neighbouring half-precision numbers at each "
