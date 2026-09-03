@@ -11,7 +11,7 @@
 import { state, getMergedAnswerHistory } from './state.js';
 import { SHIPPED_K } from './data-version.js';
 import { curveForSize } from './rank-decomposition.js';
-import { motifReadings, isFlagged } from './motif-readings.js';
+import { motifReadings, isFlagged, countUsableAttempts } from './motif-readings.js';
 
 export { isFlagged };
 
@@ -21,4 +21,10 @@ export { isFlagged };
 export function computeMotifStats(history = null) {
     return motifReadings(history || getMergedAnswerHistory(), state.userRank,
                          SHIPPED_K, curveForSize);
+}
+
+// How many attempts the readings above would read — what the stats pane shows
+// against MIN_ATTEMPTS while there are too few for any reading.
+export function usableMotifAttempts(history = null) {
+    return countUsableAttempts(history || getMergedAnswerHistory(), SHIPPED_K);
 }

@@ -41,7 +41,8 @@ import { getTerm, localizedMotif } from './i18n.js';
 import { normCdf } from './math-utils.js';
 import { findExamplesForIssue, probit } from './stats-compute.js';
 import { getRecallCandidates } from './recall-model.js';
-import { computeMotifStats, isFlagged } from './motif-stats.js';
+import { computeMotifStats, isFlagged, usableMotifAttempts } from './motif-stats.js';
+import { MIN_ATTEMPTS } from './motif-readings.js';
 import { beginExampleReview } from './problem-loader.js';
 import { enterAnalysisMode } from './analysis.js';
 import { hideStatsModal, restoreStatsModal, discardStatsModal } from './stats-ui.js';
@@ -85,7 +86,7 @@ export function buildMotifPane(kind, history = state.answerHistory) {
     if (!stats || stats.length === 0) {
         const empty = document.createElement('div');
         empty.className = 'stats-issues-empty';
-        empty.textContent = getTerm('statsIssuesNotEnough');
+        empty.textContent = getTerm('statsIssuesNotEnough', { min: MIN_ATTEMPTS, count: usableMotifAttempts(history) });
         root.appendChild(empty);
         return root;
     }
@@ -128,7 +129,7 @@ export function buildMotifPane(kind, history = state.answerHistory) {
     if (rows.length === 0) {
         const empty = document.createElement('div');
         empty.className = 'stats-issues-empty';
-        empty.textContent = getTerm('statsIssuesNotEnough');
+        empty.textContent = getTerm('statsIssuesNoAxes');
         root.appendChild(empty);
         return root;
     }

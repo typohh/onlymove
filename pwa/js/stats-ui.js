@@ -265,7 +265,7 @@ export async function showDetailedStats() {
 
     } catch (error) {
         console.error('Failed to generate stats text:', error);
-        Sentry.captureException(error);
+        captureException(error);
         alert(getTerm('statsFailed'));
     } finally {
         hideLoading();
@@ -415,7 +415,11 @@ function showStatsModal(tabs) {
             b.className = 'stats-tab';
             b.classList.toggle('active', e === current);
             b.textContent = e.label;
-            b.onclick = () => { current = e; renderTabbar(); renderBody(); };
+            b.onclick = () => {
+                current = e; renderTabbar(); renderBody();
+                // The bar scrolls rather than wraps; bring the chosen tab fully in.
+                tabbar.querySelector('.stats-tab.active')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+            };
             tabbar.append(b);
         }
     };

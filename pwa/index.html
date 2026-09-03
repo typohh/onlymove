@@ -11,7 +11,12 @@
        layers stop at the browser's letterbox and the insets are all 0px. -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="color-scheme" content="dark light">
-  <meta name="theme-color" content="#000000">
+  <!-- Browser chrome colour follows the page: the app paints #222 by default and
+       white under a light preference (style.css), and the manifest, which cannot
+       switch, takes the default. -->
+  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
+  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#222222">
+  <meta name="theme-color" content="#222222">
   <!-- Standalone hints. `mobile-web-app-capable` is the modern, cross-browser
        key (Chrome/Samsung Internet); the `apple-*` pair is the iOS equivalent.
        These make even a legacy "Add to Home screen" shortcut (the fallback
@@ -86,7 +91,10 @@
       <div id="captures-container" class="captures-container">
         <div id="capture-score" class="capture-score" role="button" tabindex="0"></div>
       </div>
-      <div id="text1" class="info-text"></div>
+      <div id="text1-slot" class="info-slot">
+        <span id="text1-label" class="info-label"></span>
+        <div id="text1" class="info-text"></div>
+      </div>
       <a href="#" id="menu-toggle" class="menu-toggle" role="button" tabindex="0" aria-label="Menu">☰</a>
     </div>
 
@@ -103,7 +111,10 @@
         <div id="captures-container-h" class="captures-container horizontal-only">
           <div id="capture-score-h" class="capture-score" role="button" tabindex="0"></div>
         </div>
-        <div id="text1-h" class="info-text horizontal-only"></div>
+        <div id="text1-h-slot" class="info-slot horizontal-only">
+          <span id="text1-h-label" class="info-label"></span>
+          <div id="text1-h" class="info-text"></div>
+        </div>
         <a href="#" id="menu-toggle-h" class="btn horizontal-only" role="button" tabindex="0">Menu</a>
         <a href="#" id="button1" class="btn"></a>
         <a href="#" id="button2" class="btn"></a>

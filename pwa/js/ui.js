@@ -350,6 +350,7 @@ const updateSolvingModeUI = () => {
     if (state.appMode === APP_MODES.LINKED) {
         // In view mode, don't show any rank
         text1Elements.forEach(element => element.textContent = '');
+        setInfoLabel(null);
         text1Elements.forEach(element => {
             element.classList.remove('progress-bar-wrapper');
             element.style.removeProperty('--progress');
@@ -362,6 +363,7 @@ const updateSolvingModeUI = () => {
         // the posterior is wide (see state.js's three-rank note).
         const rank = getDescriptiveRank(state.displayRank);
         text1Elements.forEach(element => element.textContent = `${rank}`);
+        setInfoLabel('labelYou');
 
         // Add progress bar. Same band + progress as getDescriptiveRank above and the
         // modal/Rank tab, via the shared rankProgress — deriving it inline here would
@@ -460,12 +462,15 @@ const updateAnalysisModeUI = () => {
         if (problem && problem.rank !== undefined) {
             const rank = getDescriptiveRank(problem.rank);
             text1Elements.forEach(element => element.textContent = rank);
+            setInfoLabel('labelProblem');
         } else {
             text1Elements.forEach(element => element.textContent = '');
+            setInfoLabel(null);
         }
     } else {
         // For other positions, show analyzing initially
         text1Elements.forEach(element => element.textContent = getTerm('analyzing'));
+        setInfoLabel('score');
     }
     text1Elements.forEach(element => {
         element.classList.remove('progress-bar-wrapper');
@@ -619,6 +624,16 @@ export function updateBoardSize() {
     state.board.setHeight(boardSize);
 }
 
+// The small label above the header slot, naming what the slot shows: the
+// user's rank, the problem's rank or the review score. null clears it.
+function setInfoLabel(termKey) {
+    const text = termKey ? getTerm(termKey) : '';
+    for (const id of ['text1-label', 'text1-h-label']) {
+        const el = document.getElementById(id);
+        if (el) el.textContent = text;
+    }
+}
+
 export function updateAnalysisUI(score, bestMove) {
     // In analysis mode, display rank at starting position, score otherwise
     if (state.appMode === APP_MODES.ANALYZING) {
@@ -629,11 +644,13 @@ export function updateAnalysisUI(score, bestMove) {
                 const rank = getDescriptiveRank(problem.rank);
                 document.getElementById('text1').textContent = rank;
                 document.getElementById('text1-h').textContent = rank;
+                setInfoLabel('labelProblem');
             }
         } else {
-            // For other positions, show score
+            // For other positions, show the score. The slot's label names it, so
+            // the value stands alone; status strings stand alone too.
+            setInfoLabel('score');
             const formattedScore = typeof score === 'number' ? score.toFixed(1) : score;
-            const scoreText = getTerm('score');
             const currentNode = getCurrentNode();
             let isUnreliable = false;
             if (bestMove) {
@@ -642,14 +659,7 @@ export function updateAnalysisUI(score, bestMove) {
                     isUnreliable = true;
                 }
             }
-            let displayText;
-            if (formattedScore === getTerm('analyzing') || formattedScore === getTerm('error')) {
-                // Status strings stand alone; only real scores get the
-                // "Score:" prefix.
-                displayText = formattedScore;
-            } else {
-                displayText = `${scoreText}: ${formattedScore}`;
-            }
+            const displayText = formattedScore;
             if (isUnreliable) {
                 const warningMsg = getTerm('unreliableWarning');
                 for (const id of ['text1', 'text1-h']) {
@@ -677,13 +687,6 @@ export function updateAnalysisUI(score, bestMove) {
                 onboardingReviewScoreShown();
             }
         }
-        // Prevent text selection on Android to treat as button
-        const text1 = document.getElementById('text1');
-        const text1h = document.getElementById('text1-h');
-        text1.style.userSelect = 'none';
-        text1.style.webkitUserSelect = 'none';
-        text1h.style.userSelect = 'none';
-        text1h.style.webkitUserSelect = 'none';
     }
     // Future: could also use bestMove to highlight a button or provide a hint
 }

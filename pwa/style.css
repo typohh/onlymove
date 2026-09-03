@@ -58,6 +58,7 @@
     --safe-r: env(safe-area-inset-right, 0px);
     --safe-b: env(safe-area-inset-bottom, 0px);
     --safe-l: env(safe-area-inset-left, 0px);
+    --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 
     --app-h: calc(100vh - var(--safe-t) - var(--safe-b));
     --app-w: calc(100vw - var(--safe-l) - var(--safe-r));
@@ -132,7 +133,7 @@ html, body {
     margin: 0; padding: 0; width: 100%; height: 100%;
     overflow: hidden;
     background-color: #222;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-family: var(--font-ui);
     color: #fff;
 }
 
@@ -349,6 +350,28 @@ input, textarea, [contenteditable],
     text-wrap: nowrap;
 }
 
+/* The header slot changes meaning with the mode — the user's rank, the
+   problem's rank, the review score — so a small label above the value names
+   what it shows, in the menu's category-label idiom. ui.js writes it. */
+.info-slot {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+}
+.info-label {
+    display: block;
+    font-size: 0.55em;
+    line-height: 1;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    opacity: 0.5;
+    margin-bottom: 0.15em;
+}
+.info-label:empty {
+    display: none;
+}
+
 #title, #title-h {
     text-decoration: none;
     font-size: 1.25em;
@@ -424,7 +447,7 @@ input, textarea, [contenteditable],
         border-radius: 0 0 var(--radius) var(--radius);
     }
 
-    #text1 {
+    #text1-slot {
         margin-left: 1.4286em;
     }
 
@@ -1169,7 +1192,7 @@ input, textarea, [contenteditable],
 
 .stats-modal-pre {
     margin: 0;
-    font: 13px/1.4 ui-monospace, Menlo, Consolas, monospace;
+    font: 1em/1.45 var(--font-ui);
     white-space: pre-wrap;
     word-break: break-word;
 }
@@ -1196,12 +1219,20 @@ input, textarea, [contenteditable],
     background-color: rgba(255, 255, 255, 0.06);
 }
 
+/* One row that scrolls: four labels do not fit a phone, and a wrapped second
+   row read as a separate control. The scrollbar is hidden; the cut-off tab at
+   the edge is the affordance, and activating a tab scrolls it fully in. */
 .stats-tabbar {
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
     gap: 0.25em;
     border-bottom: 1px solid rgba(128, 128, 128, 0.35);
     flex: 0 0 auto;
+}
+.stats-tabbar::-webkit-scrollbar {
+    display: none;
 }
 
 .stats-tab {
@@ -1210,6 +1241,8 @@ input, textarea, [contenteditable],
     color: inherit;
     font: inherit;
     padding: 0.4em 0.8em;
+    flex: 0 0 auto;
+    white-space: nowrap;
     cursor: pointer;
     opacity: 0.55;
     border-bottom: 2px solid transparent;
@@ -1311,8 +1344,9 @@ input, textarea, [contenteditable],
 }
 
 .stats-issues-empty {
-    opacity: 0.7;
-    padding-left: 1.5ch;
+    font: 1em/1.45 var(--font-ui);
+    opacity: 0.8;
+    max-width: 44ch;
 }
 
 .stats-issue {
@@ -1646,6 +1680,16 @@ input, textarea, [contenteditable],
 
     .info-text {
         color: #000;
+    }
+
+    /* The number is what WHITE gets, so the token stays a white stone; on a
+       light page that is drawn the way diagrams draw one, a white disc with
+       a dark rim, rather than the outline that reads as white on dark. */
+    .capture-score {
+        background-color: #fff;
+        border-color: #333;
+        color: #000;
+        text-shadow: none;
     }
 
     #white-captures, #white-captures-h {

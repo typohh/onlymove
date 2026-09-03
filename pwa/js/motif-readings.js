@@ -115,6 +115,23 @@ function olsSlope(x, y) {
     return { slope, se, n };
 }
 
+// The attempts a reading is made from: first attempts (no repeats, no linked
+// try-outs) with a graded answer and a vector of the shipped shape, the most
+// recent `windowLength` of them. Single-sourced so the stats pane's "you have
+// N so far" counts exactly what the reading would read.
+function usableRows(history, K, windowLength) {
+    const usable = a => Array.isArray(a.embedding) && a.embedding.length === K;
+    return history
+        .filter(a => a && !a.isRepeat && !a.linked && usable(a) &&
+                     typeof a.correct === 'boolean')
+        .slice(-windowLength);
+}
+
+export function countUsableAttempts(history, K, windowLength = MODEL_INPUT_HISTORY_LENGTH) {
+    if (!K) return 0;
+    return usableRows(history, K, windowLength).length;
+}
+
 // Per-axis statistics over a user's own window: `history` is the attempt
 // record in time order, `theta` the user's rank (the posterior mean, the value
 // everything calibrated reads), `K` the shipped axis count, `curveFor(size)` the
@@ -133,12 +150,7 @@ export function motifReadings(history, theta, K, curveFor,
     // settled before a reader sees a row, and this only has to check that a row
     // HAS a vector of the right shape, so the per-axis loops stay in range.
     if (!K) return null;
-    const usable = a => Array.isArray(a.embedding) && a.embedding.length === K;
-
-    const rows = history
-        .filter(a => a && !a.isRepeat && !a.linked && usable(a) &&
-                     typeof a.correct === 'boolean')
-        .slice(-windowLength);
+    const rows = usableRows(history, K, windowLength);
     if (rows.length < MIN_ATTEMPTS) return null;
 
     // --- TENDENCY: error composition against the availability null. Rows
