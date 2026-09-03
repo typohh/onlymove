@@ -199,6 +199,31 @@ Per-seed gains (mnat): 250: +3.29 +1.79 +3.02 +0.13 +0.26 +1.56 −0.62 −5.58;
 
 **Nothing at any length.** Every gain sits inside its interval at p 0.44–0.72; the best length (250) is interior, so the sweep brackets and no longer ramp is owed. The first four seeds of R=500 reproduce the axis_space reading to the hundredth (determinism across two boxes of one GPU model), and the next four land on the other side. Identity does not move either way. The no-ramp schedule stays; the knob stays for the panel. Reproduction: `vast_orchestration.py ablate ramp`; `./.venv/bin/python3 -m ablations.refit_ramp_figures`.
 
+## WHICH TERMS ON THE LOADINGS NEED THE TRUNK — MEASURED 2026-09-03
+
+Panel `ablations/panels/detach.json`: the shipped fit against the same fit with one term's path into the shared trunk closed — the term acts on loadings computed from a detached copy of the trunk output (`teach_detach`, `ortho_detach`, `ortho_axes_detach` in `pipeline.train_mirt`; same values, no second trunk pass, no gauge update) — plus the taught fit carrying a DETACHED mutual-orthogonality penalty at `ortho_axes 0.25`, and the free fit under an anisotropic ridge (`v_ridge_ladder 1.3`, geometric over the axis index). EIGHT seeds per paired configuration at `split_seed 0` / `pca_seed 0`, four for the anisotropic free fit; 44 arms on one RTX 4080 at attempt-log frontier 457,114; producer `ablations/refit_detach_figures.py` (figures `detach.*`). Gains are shipped level minus the arm's on held-out problems, paired per seed; identity is agreement with the taught rule ends, cross-seed matched-axis agreement over all 28 pairs, and the effective number of distinct directions.
+
+| configuration | gain vs shipped (mnat) | ±95% | p | better | rating share | taught agreement | cross-seed basis | effective dim | worst own pair |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| shipped | — | | | | | 0.66 | 0.93 | 5.4 | 0.40 |
+| teaching pull detached | +6.00 | 2.77 | 0.001 | 8/8 | +5.85 | 0.10 | 0.25 | 2.4 | 0.91 |
+| rating-orthogonality penalty detached | −14.85 | 1.75 | <0.001 | 0/8 | −15.20 | 0.66 | 0.95 | 4.9 | 0.55 |
+| both detached | +2.80 | 2.47 | 0.031 | 6/8 | +2.74 | 0.12 | 0.64 | 1.6 | 0.99 |
+| taught + detached mutual penalty, 0.25 | +1.90 | 1.33 | 0.012 | 7/8 | +1.62 | 0.66 | 0.95 | 6.7 | 0.20 |
+| free + anisotropic ridge, 1.3 (4 seeds) | level 0.4999, sd 1.3 | | | | | — | 0.20 (min 0.03) | 2.5 | 0.96 |
+
+Per-seed gains: pull detached +10.40 +2.75 +9.28 +4.17 +7.86 +1.15 +7.88 +4.48; penalty detached −15.07 −14.91 −13.42 −15.32 −12.67 −19.38 −14.97 −13.08; both +6.45 +0.70 +6.91 −0.12 +3.86 +0.79 +4.22 −0.44; mutual +3.65 −0.35 +0.83 +0.99 +4.24 +1.00 +3.00 +1.82. Pooled run-to-run sd 1.7 mnat.
+
+**The pull has to reach the trunk.** Detached, the rating recovers what teaching costs it (+6.0, every seed — the axis_space panel's +4.5 read on the same seeds), and the axes stop being taught: agreement with the rule ends 0.10, cross-seed 0.25, an effective 2.4 directions — the free fit's numbers. A rule direction is not linearly readable from a representation the pull did not shape. Untried: scaling the pull's trunk gradient down rather than to zero.
+
+**The rating-orthogonality penalty's path into the trunk is load-bearing for the RATING.** Detached, the fit is 14.9 mnat worse on held-out problems at every seed, with the axes' identity untouched. The route is not separated; what is measured is that the term, acting through the trunk, does the rating a service its own heads do not. The section-1.5 argument for the penalty (the axes must not absorb the shipped triple) stands on identity grounds; this adds a level reason to leave its gradient where it is.
+
+**A detached mutual penalty on the taught fit is better on every count the panel reads.** +1.9 mnat (interval clear of zero, 7 of 8 seeds, +1.6 of it in the rating's own outputs), seven distinct directions instead of five (worst own pair 0.20 against 0.40), identity and cross-seed agreement unchanged. Its axis VALUE is higher too, by the walk (`auxiliary.rating_dev.panel_axis_by_history`, the eight mutual arms against the eight shipped ones, paired by seed, two account draws): past 500 prior attempts +0.94 ± 0.42 (8/8, p = 0.001) and +0.66 ± 0.83 (7/8, p = 0.10) mnat over the shipped axes' +1.80 / +2.03; in the 30–100 band the shipped axes' loss shrinks by +0.61 and +0.79 (8/8 at both draws, p ≤ 0.004); over all attempts +0.66 and +0.58 (8/8, p ≤ 0.001). The weight is one point (0.25); the free fits carried 0.5 undetached and paid 13 mnat of rating for it (axis_space panel), so detachment is what makes the term affordable, and a weight sweep on the taught fit is owed before the value is treated as tuned.
+
+**The anisotropic ridge does nothing.** The free fit under a 1.3 ladder reproduces no better (0.20) and still duplicates its axes (effective dimension 2.5, worst pair 0.96): a distinct ridge per axis prefers one basis among distinct directions, but two axes sharing a direction still pay less than one carrying it, so the duplicate solution stands and there is no ordering to stabilize. Measured-rejected.
+
+Reproduction: `vast_orchestration.py ablate detach`; `./.venv/bin/python3 -m ablations.refit_detach_figures`.
+
 ## THE K PANEL AND THE RULE WIDTHS — MEASURED 2026-08-21
 
 Nested rule banks at K = 4, 6, 8 — K=4 a subset of K=6 a subset of K=8 — four

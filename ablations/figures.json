@@ -2170,6 +2170,720 @@
         "data_version": "3fb1860415e94151"
       }
     },
+    "detach.aniso_basis_mean": {
+      "value": 0.20362397624735215,
+      "fmt": ".2f",
+      "text": "0.20",
+      "producer": "ablations.refit_detach_figures",
+      "tier": "refit",
+      "note": "free fit under the anisotropic ridge: cross-seed matched-axis agreement, averaged over pairs",
+      "measured": {
+        "at": "2026-09-03T07:21:15Z",
+        "git": "456c2a0cd4e",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "detach.aniso_basis_min": {
+      "value": 0.03484646159738467,
+      "fmt": ".2f",
+      "text": "0.03",
+      "producer": "ablations.refit_detach_figures",
+      "tier": "refit",
+      "note": "the same at each pair's weakest-matched axis",
+      "measured": {
+        "at": "2026-09-03T07:21:15Z",
+        "git": "456c2a0cd4e",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "detach.aniso_effective_dim": {
+      "value": 2.5406888558610987,
+      "fmt": ".1f",
+      "text": "2.5",
+      "producer": "ablations.refit_detach_figures",
+      "tier": "refit",
+      "note": "free fit under the anisotropic ridge: distinct directions among the axes",
+      "measured": {
+        "at": "2026-09-03T07:21:15Z",
+        "git": "456c2a0cd4e",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "detach.aniso_ladder": {
+      "value": 1.3,
+      "fmt": ".2f",
+      "text": "1.30",
+      "producer": "ablations.refit_detach_figures",
+      "tier": "refit",
+      "note": "ratio between consecutive axes' ridge weights in the anisotropic free fit",
+      "measured": {
+        "at": "2026-09-03T07:21:15Z",
+        "git": "456c2a0cd4e",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "detach.aniso_level_sd_mnat": {
+      "value": 1.3206587180311509,
+      "fmt": ".1f",
+      "text": "1.3",
+      "producer": "ablations.refit_detach_figures",
+      "tier": "refit",
+      "note": "run-to-run sd of its held-out-problem level, millinats",
+      "measured": {
+        "at": "2026-09-03T07:21:15Z",
+        "git": "456c2a0cd4e",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "detach.aniso_max_within_r": {
+      "value": 0.9638469076325945,
+      "fmt": ".2f",
+      "text": "0.96",
+      "producer": "ablations.refit_detach_figures",
+      "tier": "refit",
+      "note": "free fit under the anisotropic ridge: its most correlated pair of axes",
+      "measured": {
+        "at": "2026-09-03T07:21:15Z",
+        "git": "456c2a0cd4e",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "detach.aniso_seeds": {
+      "value": 4,
+      "fmt": "d",
+      "text": "4",
+      "producer": "ablations.refit_detach_figures",
+      "tier": "refit",
+      "note": "fits of the anisotropic-ridge free fit",
+      "measured": {
+        "at": "2026-09-03T07:21:15Z",
+        "git": "456c2a0cd4e",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "detach.both_detach_basis_mean": {
+      "value": 0.6403025928300978,
+      "fmt": ".2f",
+      "text": "0.64",
+      "producer": "ablations.refit_detach_figures",
+      "tier": "refit",
+      "note": "both detached: cross-seed matched-axis |correlation|, averaged over all seed pairs",
+      "measured": {
+        "at": "2026-09-03T07:21:15Z",
+        "git": "456c2a0cd4e",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "detach.both_detach_effective_dim": {
+      "value": 1.5745931090157923,
+      "fmt": ".1f",
+      "text": "1.6",
+      "producer": "ablations.refit_detach_figures",
+      "tier": "refit",
+      "note": "both detached: distinct directions among the 7 axes",
+      "measured": {
+        "at": "2026-09-03T07:21:15Z",
+        "git": "456c2a0cd4e",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "detach.both_detach_gain_ci_mnat": {
+      "value": 2.465076707264841,
+      "fmt": ".1f",
+      "text": "2.5",
+      "producer": "ablations.refit_detach_figures",
+      "tier": "refit",
+      "note": "half-width of that gain's 95% t-interval, millinats",
+      "measured": {
+        "at": "2026-09-03T07:21:15Z",
+        "git": "456c2a0cd4e",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "detach.both_detach_gain_mnat": {
+      "value": 2.7975120714732595,
+      "fmt": "+.1f",
+      "text": "+2.8",
+      "producer": "ablations.refit_detach_figures",
+      "tier": "refit",
+      "note": "both detached: shipped level minus this arm's on held-out problems, paired per seed and averaged, millinats; positive = this arm predicts better",
+      "measured": {
+        "at": "2026-09-03T07:21:15Z",
+        "git": "456c2a0cd4e",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "detach.both_detach_gain_p": {
+      "value": 0.031379167947698725,
+      "fmt": ".3f",
+      "text": "0.031",
+      "producer": "ablations.refit_detach_figures",
+      "tier": "refit",
+      "note": "two-sided paired t-test p for that gain",
+      "measured": {
+        "at": "2026-09-03T07:21:15Z",
+        "git": "456c2a0cd4e",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "detach.both_detach_max_within_r": {
+      "value": 0.9926255648976225,
+      "fmt": ".2f",
+      "text": "0.99",
+      "producer": "ablations.refit_detach_figures",
+      "tier": "refit",
+      "note": "both detached: the fit's most correlated pair of axes",
+      "measured": {
+        "at": "2026-09-03T07:21:15Z",
+        "git": "456c2a0cd4e",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "detach.both_detach_rating_gain_mnat": {
+      "value": 2.743944525718689,
+      "fmt": "+.1f",
+      "text": "+2.7",
+      "producer": "ablations.refit_detach_figures",
+      "tier": "refit",
+      "note": "the same paired gain with the axis term zeroed — the rating's share",
+      "measured": {
+        "at": "2026-09-03T07:21:15Z",
+        "git": "456c2a0cd4e",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "detach.both_detach_seeds_better": {
+      "value": 6,
+      "fmt": "d",
+      "text": "6",
+      "producer": "ablations.refit_detach_figures",
+      "tier": "refit",
+      "note": "of 8 seeds, how many this arm beats the shipped fit on",
+      "measured": {
+        "at": "2026-09-03T07:21:15Z",
+        "git": "456c2a0cd4e",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "detach.both_detach_taught_agreement": {
+      "value": 0.11756170501536867,
+      "fmt": ".2f",
+      "text": "0.12",
+      "producer": "ablations.refit_detach_figures",
+      "tier": "refit",
+      "note": "both detached: mean agreement of each axis's taught end with its rule, over the seeds",
+      "measured": {
+        "at": "2026-09-03T07:21:15Z",
+        "git": "456c2a0cd4e",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "detach.level_sd_mnat": {
+      "value": 1.7202869119704678,
+      "fmt": ".1f",
+      "text": "1.7",
+      "producer": "ablations.refit_detach_figures",
+      "tier": "refit",
+      "note": "run-to-run sd of the held-out-problem level, pooled over the eight-seed configurations, millinats",
+      "measured": {
+        "at": "2026-09-03T07:21:15Z",
+        "git": "456c2a0cd4e",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "detach.mutual_basis_mean": {
+      "value": 0.9496751289531202,
+      "fmt": ".2f",
+      "text": "0.95",
+      "producer": "ablations.refit_detach_figures",
+      "tier": "refit",
+      "note": "the taught fit plus a detached mutual-orthogonality penalty: cross-seed matched-axis |correlation|, averaged over all seed pairs",
+      "measured": {
+        "at": "2026-09-03T07:21:15Z",
+        "git": "456c2a0cd4e",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "detach.mutual_effective_dim": {
+      "value": 6.745609051777791,
+      "fmt": ".1f",
+      "text": "6.7",
+      "producer": "ablations.refit_detach_figures",
+      "tier": "refit",
+      "note": "the taught fit plus a detached mutual-orthogonality penalty: distinct directions among the 7 axes",
+      "measured": {
+        "at": "2026-09-03T07:21:15Z",
+        "git": "456c2a0cd4e",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "detach.mutual_gain_ci_mnat": {
+      "value": 1.325637813922779,
+      "fmt": ".1f",
+      "text": "1.3",
+      "producer": "ablations.refit_detach_figures",
+      "tier": "refit",
+      "note": "half-width of that gain's 95% t-interval, millinats",
+      "measured": {
+        "at": "2026-09-03T07:21:15Z",
+        "git": "456c2a0cd4e",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "detach.mutual_gain_mnat": {
+      "value": 1.8996330244200332,
+      "fmt": "+.1f",
+      "text": "+1.9",
+      "producer": "ablations.refit_detach_figures",
+      "tier": "refit",
+      "note": "the taught fit plus a detached mutual-orthogonality penalty: shipped level minus this arm's on held-out problems, paired per seed and averaged, millinats; positive = this arm predicts better",
+      "measured": {
+        "at": "2026-09-03T07:21:15Z",
+        "git": "456c2a0cd4e",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "detach.mutual_gain_p": {
+      "value": 0.01162323714952016,
+      "fmt": ".3f",
+      "text": "0.012",
+      "producer": "ablations.refit_detach_figures",
+      "tier": "refit",
+      "note": "two-sided paired t-test p for that gain",
+      "measured": {
+        "at": "2026-09-03T07:21:15Z",
+        "git": "456c2a0cd4e",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "detach.mutual_max_within_r": {
+      "value": 0.19842630087284205,
+      "fmt": ".2f",
+      "text": "0.20",
+      "producer": "ablations.refit_detach_figures",
+      "tier": "refit",
+      "note": "the taught fit plus a detached mutual-orthogonality penalty: the fit's most correlated pair of axes",
+      "measured": {
+        "at": "2026-09-03T07:21:15Z",
+        "git": "456c2a0cd4e",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "detach.mutual_rating_gain_mnat": {
+      "value": 1.6167238354682922,
+      "fmt": "+.1f",
+      "text": "+1.6",
+      "producer": "ablations.refit_detach_figures",
+      "tier": "refit",
+      "note": "the same paired gain with the axis term zeroed — the rating's share",
+      "measured": {
+        "at": "2026-09-03T07:21:15Z",
+        "git": "456c2a0cd4e",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "detach.mutual_seeds_better": {
+      "value": 7,
+      "fmt": "d",
+      "text": "7",
+      "producer": "ablations.refit_detach_figures",
+      "tier": "refit",
+      "note": "of 8 seeds, how many this arm beats the shipped fit on",
+      "measured": {
+        "at": "2026-09-03T07:21:15Z",
+        "git": "456c2a0cd4e",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "detach.mutual_taught_agreement": {
+      "value": 0.656045959790327,
+      "fmt": ".2f",
+      "text": "0.66",
+      "producer": "ablations.refit_detach_figures",
+      "tier": "refit",
+      "note": "the taught fit plus a detached mutual-orthogonality penalty: mean agreement of each axis's taught end with its rule, over the seeds",
+      "measured": {
+        "at": "2026-09-03T07:21:15Z",
+        "git": "456c2a0cd4e",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "detach.mutual_weight": {
+      "value": 0.25,
+      "fmt": ".2f",
+      "text": "0.25",
+      "producer": "ablations.refit_detach_figures",
+      "tier": "refit",
+      "note": "weight of the detached mutual-orthogonality penalty the taught fit carries in the mutual arms",
+      "measured": {
+        "at": "2026-09-03T07:21:15Z",
+        "git": "456c2a0cd4e",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "detach.ortho_detach_basis_mean": {
+      "value": 0.9487278941075082,
+      "fmt": ".2f",
+      "text": "0.95",
+      "producer": "ablations.refit_detach_figures",
+      "tier": "refit",
+      "note": "the rating-orthogonality penalty detached from the trunk: cross-seed matched-axis |correlation|, averaged over all seed pairs",
+      "measured": {
+        "at": "2026-09-03T07:21:15Z",
+        "git": "456c2a0cd4e",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "detach.ortho_detach_effective_dim": {
+      "value": 4.930955304514049,
+      "fmt": ".1f",
+      "text": "4.9",
+      "producer": "ablations.refit_detach_figures",
+      "tier": "refit",
+      "note": "the rating-orthogonality penalty detached from the trunk: distinct directions among the 7 axes",
+      "measured": {
+        "at": "2026-09-03T07:21:15Z",
+        "git": "456c2a0cd4e",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "detach.ortho_detach_gain_ci_mnat": {
+      "value": 1.7521585480773143,
+      "fmt": ".1f",
+      "text": "1.8",
+      "producer": "ablations.refit_detach_figures",
+      "tier": "refit",
+      "note": "half-width of that gain's 95% t-interval, millinats",
+      "measured": {
+        "at": "2026-09-03T07:21:15Z",
+        "git": "456c2a0cd4e",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "detach.ortho_detach_gain_mnat": {
+      "value": -14.85228219202589,
+      "fmt": "+.1f",
+      "text": "-14.9",
+      "producer": "ablations.refit_detach_figures",
+      "tier": "refit",
+      "note": "the rating-orthogonality penalty detached from the trunk: shipped level minus this arm's on held-out problems, paired per seed and averaged, millinats; positive = this arm predicts better",
+      "measured": {
+        "at": "2026-09-03T07:21:15Z",
+        "git": "456c2a0cd4e",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "detach.ortho_detach_gain_p": {
+      "value": 1.9255679786329574e-07,
+      "fmt": ".3f",
+      "text": "0.000",
+      "producer": "ablations.refit_detach_figures",
+      "tier": "refit",
+      "note": "two-sided paired t-test p for that gain",
+      "measured": {
+        "at": "2026-09-03T07:21:15Z",
+        "git": "456c2a0cd4e",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "detach.ortho_detach_max_within_r": {
+      "value": 0.5541470943960195,
+      "fmt": ".2f",
+      "text": "0.55",
+      "producer": "ablations.refit_detach_figures",
+      "tier": "refit",
+      "note": "the rating-orthogonality penalty detached from the trunk: the fit's most correlated pair of axes",
+      "measured": {
+        "at": "2026-09-03T07:21:15Z",
+        "git": "456c2a0cd4e",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "detach.ortho_detach_rating_gain_mnat": {
+      "value": -15.204988420009613,
+      "fmt": "+.1f",
+      "text": "-15.2",
+      "producer": "ablations.refit_detach_figures",
+      "tier": "refit",
+      "note": "the same paired gain with the axis term zeroed — the rating's share",
+      "measured": {
+        "at": "2026-09-03T07:21:15Z",
+        "git": "456c2a0cd4e",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "detach.ortho_detach_seeds_better": {
+      "value": 0,
+      "fmt": "d",
+      "text": "0",
+      "producer": "ablations.refit_detach_figures",
+      "tier": "refit",
+      "note": "of 8 seeds, how many this arm beats the shipped fit on",
+      "measured": {
+        "at": "2026-09-03T07:21:15Z",
+        "git": "456c2a0cd4e",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "detach.ortho_detach_taught_agreement": {
+      "value": 0.6568505973702754,
+      "fmt": ".2f",
+      "text": "0.66",
+      "producer": "ablations.refit_detach_figures",
+      "tier": "refit",
+      "note": "the rating-orthogonality penalty detached from the trunk: mean agreement of each axis's taught end with its rule, over the seeds",
+      "measured": {
+        "at": "2026-09-03T07:21:15Z",
+        "git": "456c2a0cd4e",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "detach.problems_scored": {
+      "value": 107088,
+      "fmt": "~1000",
+      "text": "107,000",
+      "producer": "ablations.refit_detach_figures",
+      "tier": "refit",
+      "note": "attempted problems the identity figures are measured over",
+      "measured": {
+        "at": "2026-09-03T07:21:15Z",
+        "git": "456c2a0cd4e",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "detach.seeds": {
+      "value": 8,
+      "fmt": "d",
+      "text": "8",
+      "producer": "ablations.refit_detach_figures",
+      "tier": "refit",
+      "note": "fits per paired configuration, at one pinned draw and basis",
+      "measured": {
+        "at": "2026-09-03T07:21:15Z",
+        "git": "456c2a0cd4e",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "detach.shipped_basis_mean": {
+      "value": 0.9322941376219032,
+      "fmt": ".2f",
+      "text": "0.93",
+      "producer": "ablations.refit_detach_figures",
+      "tier": "refit",
+      "note": "the shipped fit: cross-seed matched-axis |correlation|, averaged over all seed pairs",
+      "measured": {
+        "at": "2026-09-03T07:21:15Z",
+        "git": "456c2a0cd4e",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "detach.shipped_effective_dim": {
+      "value": 5.354896553145268,
+      "fmt": ".1f",
+      "text": "5.4",
+      "producer": "ablations.refit_detach_figures",
+      "tier": "refit",
+      "note": "the shipped fit: distinct directions among the 7 axes",
+      "measured": {
+        "at": "2026-09-03T07:21:15Z",
+        "git": "456c2a0cd4e",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "detach.shipped_max_within_r": {
+      "value": 0.4025563010784917,
+      "fmt": ".2f",
+      "text": "0.40",
+      "producer": "ablations.refit_detach_figures",
+      "tier": "refit",
+      "note": "the shipped fit: the fit's most correlated pair of axes",
+      "measured": {
+        "at": "2026-09-03T07:21:15Z",
+        "git": "456c2a0cd4e",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "detach.shipped_taught_agreement": {
+      "value": 0.6621177099831953,
+      "fmt": ".2f",
+      "text": "0.66",
+      "producer": "ablations.refit_detach_figures",
+      "tier": "refit",
+      "note": "the shipped fit: mean agreement of each axis's taught end with its rule, over the seeds",
+      "measured": {
+        "at": "2026-09-03T07:21:15Z",
+        "git": "456c2a0cd4e",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "detach.teach_detach_basis_mean": {
+      "value": 0.25000759749266693,
+      "fmt": ".2f",
+      "text": "0.25",
+      "producer": "ablations.refit_detach_figures",
+      "tier": "refit",
+      "note": "the teaching pull detached from the trunk: cross-seed matched-axis |correlation|, averaged over all seed pairs",
+      "measured": {
+        "at": "2026-09-03T07:21:15Z",
+        "git": "456c2a0cd4e",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "detach.teach_detach_effective_dim": {
+      "value": 2.3534813843663533,
+      "fmt": ".1f",
+      "text": "2.4",
+      "producer": "ablations.refit_detach_figures",
+      "tier": "refit",
+      "note": "the teaching pull detached from the trunk: distinct directions among the 7 axes",
+      "measured": {
+        "at": "2026-09-03T07:21:15Z",
+        "git": "456c2a0cd4e",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "detach.teach_detach_gain_ci_mnat": {
+      "value": 2.7685216996330135,
+      "fmt": ".1f",
+      "text": "2.8",
+      "producer": "ablations.refit_detach_figures",
+      "tier": "refit",
+      "note": "half-width of that gain's 95% t-interval, millinats",
+      "measured": {
+        "at": "2026-09-03T07:21:15Z",
+        "git": "456c2a0cd4e",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "detach.teach_detach_gain_mnat": {
+      "value": 5.996712084327414,
+      "fmt": "+.1f",
+      "text": "+6.0",
+      "producer": "ablations.refit_detach_figures",
+      "tier": "refit",
+      "note": "the teaching pull detached from the trunk: shipped level minus this arm's on held-out problems, paired per seed and averaged, millinats; positive = this arm predicts better",
+      "measured": {
+        "at": "2026-09-03T07:21:15Z",
+        "git": "456c2a0cd4e",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "detach.teach_detach_gain_p": {
+      "value": 0.001365930419266467,
+      "fmt": ".3f",
+      "text": "0.001",
+      "producer": "ablations.refit_detach_figures",
+      "tier": "refit",
+      "note": "two-sided paired t-test p for that gain",
+      "measured": {
+        "at": "2026-09-03T07:21:15Z",
+        "git": "456c2a0cd4e",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "detach.teach_detach_max_within_r": {
+      "value": 0.9073199271614238,
+      "fmt": ".2f",
+      "text": "0.91",
+      "producer": "ablations.refit_detach_figures",
+      "tier": "refit",
+      "note": "the teaching pull detached from the trunk: the fit's most correlated pair of axes",
+      "measured": {
+        "at": "2026-09-03T07:21:15Z",
+        "git": "456c2a0cd4e",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "detach.teach_detach_rating_gain_mnat": {
+      "value": 5.85101917386055,
+      "fmt": "+.1f",
+      "text": "+5.9",
+      "producer": "ablations.refit_detach_figures",
+      "tier": "refit",
+      "note": "the same paired gain with the axis term zeroed — the rating's share",
+      "measured": {
+        "at": "2026-09-03T07:21:15Z",
+        "git": "456c2a0cd4e",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "detach.teach_detach_seeds_better": {
+      "value": 8,
+      "fmt": "d",
+      "text": "8",
+      "producer": "ablations.refit_detach_figures",
+      "tier": "refit",
+      "note": "of 8 seeds, how many this arm beats the shipped fit on",
+      "measured": {
+        "at": "2026-09-03T07:21:15Z",
+        "git": "456c2a0cd4e",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "detach.teach_detach_taught_agreement": {
+      "value": 0.09904913230767963,
+      "fmt": ".2f",
+      "text": "0.10",
+      "producer": "ablations.refit_detach_figures",
+      "tier": "refit",
+      "note": "the teaching pull detached from the trunk: mean agreement of each axis's taught end with its rule, over the seeds",
+      "measured": {
+        "at": "2026-09-03T07:21:15Z",
+        "git": "456c2a0cd4e",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
     "determinism.repeat_files_compared": {
       "value": 143,
       "fmt": "d",
