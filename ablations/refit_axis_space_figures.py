@@ -176,7 +176,7 @@ def load_panel():
 
     # ONE PANEL IS ONE REGIME, read off the arms and not off the trainer's
     # constants: the arms are only ever compared to each other.
-    budget, schedule = panel_regime(arms)
+    budget, schedule = panel_regime(arms, ramp_may_vary=True)
     for arm, r in arms.items():
         require(r["metrics"]["trace"]
                 and r["metrics"]["trace"][-1]["epoch"] == budget,

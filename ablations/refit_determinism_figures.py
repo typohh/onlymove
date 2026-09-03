@@ -89,10 +89,12 @@ def _rows(path):
 
 
 def regime_of(record):
-    """The (budget, schedule) an arm actually ran — what a repeat has to match
-    beyond its config, since one config at two budgets is two experiments."""
+    """The (budget, schedule, opening ramp) an arm actually ran — what a repeat
+    has to match beyond its config, since one config at two budgets is two
+    experiments."""
     metrics = record["metrics"]
-    return int(metrics["epochs"]), str(metrics.get("lr_schedule", "constant"))
+    return (int(metrics["epochs"]), str(metrics.get("lr_schedule", "constant")),
+            int(metrics.get("lr_warmup_epochs", 0)))
 
 
 def load_arms():
@@ -219,13 +221,16 @@ def figures():
 def main():
     m = measure()
     print(f"repeats found: {m['pairs']}  (one machine: {m['gpu']})")
-    for a, b, (budget, schedule) in m["examples"]:
-        print(f"  {a}  vs  {b}   [{budget} epochs, {schedule} rate]")
-    current = (train_mirt.EPOCHS, train_mirt.LR_SCHEDULE)
+    for a, b, (budget, schedule, ramp) in m["examples"]:
+        print(f"  {a}  vs  {b}   [{budget} epochs, {schedule} rate, "
+              f"{ramp}-epoch ramp]")
+    current = (train_mirt.EPOCHS, train_mirt.LR_SCHEDULE,
+               int(getattr(train_mirt, "LR_WARMUP_EPOCHS", 0)))
     if current not in m["regimes"]:
         print(f"  NOTE: no repeat runs the trainer's current regime "
-              f"({current[0]} epochs, {current[1]} rate) — the bitwise claim is "
-              f"so far verified on the previous regime only.")
+              f"({current[0]} epochs, {current[1]} rate, {current[2]}-epoch "
+              f"ramp) — the bitwise claim is so far verified on the previous "
+              f"regime only.")
     print(f"per-problem files: {m['pp_compared'] - m['pp_differing']}"
           f"/{m['pp_compared']} identical  "
           f"({m['problems']} problems per repeat)")

@@ -99,7 +99,7 @@ def load_panel():
         require(cfg.get("stop_unit") == "problem",
                 f"{arm} holds aside rows, not problems")
         arms[arm] = rec
-    budget, schedule = panel_regime(arms)
+    budget, schedule = panel_regime(arms, ramp_may_vary=True)
     for arm, r in arms.items():
         require(r["metrics"]["trace"]
                 and r["metrics"]["trace"][-1]["epoch"] == budget,

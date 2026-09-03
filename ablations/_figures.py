@@ -99,9 +99,11 @@ def require(condition, message):
         raise AblationError(message)
 
 
-def panel_regime(records):
+def panel_regime(records, ramp_may_vary=False):
     """The (epoch budget, learning-rate schedule) a panel's arms share, or a
-    hard failure if they differ. These two are what a BASELINE CHANGE moves.
+    hard failure if they differ — and the opening ramp, which the arms must
+    also share unless the panel is one that SWEEPS it. These are what a
+    BASELINE CHANGE moves.
 
     Producers used to pin the budget to the trainer's current `EPOCHS`, which
     breaks the moment that constant moves: every arm already on disk becomes
@@ -130,6 +132,15 @@ def panel_regime(records):
             f"the panel's arms ran under {sorted(schedules)} schedules — the "
             f"panel straddles a baseline change, and a contrast across it is "
             f"between the schedules as much as between the arms")
+    # THE OPENING RAMP IS PART OF THE REGIME. A record that predates the knob
+    # ran none, which is what the default reads. A panel whose manifest
+    # deliberately declares several lengths reads its arms with its own
+    # producer and says so here; every other panel straddling two ramps is a
+    # panel straddling a baseline change.
+    ramps = {int(r["metrics"].get("lr_warmup_epochs", 0)) for r in records.values()}
+    require(ramp_may_vary or len(ramps) == 1,
+            f"the panel's arms ran opening ramps of {sorted(ramps)} epochs — "
+            f"the panel straddles a baseline change")
     return budgets.pop(), schedules.pop()
 
 
