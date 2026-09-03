@@ -204,6 +204,8 @@ function showDialog() {
         wordBreak: 'break-word', backgroundColor: '#111',
         padding: '10px', margin: '0', fontSize: '12px',
         border: '1px solid #444',
+        // The shell is unselectable (style.css body); a log is for copying.
+        userSelect: 'text', WebkitUserSelect: 'text',
     });
 
     // Repaint the log body and title-count from the ring buffer. Called once

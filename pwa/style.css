@@ -155,6 +155,27 @@ body {
        position in portrait. */
     padding: var(--safe-t) var(--safe-r) var(--safe-b) var(--safe-l);
     box-sizing: border-box;
+    /* The shell is an app, not a document: nothing in it is selectable, so a
+       drag or long-press over the title, a button or the board can't raise the
+       browser's selection toolbar (search, copy, share, look up) in front of
+       it, and iOS's long-press link callout goes with it. Stated ONCE here —
+       user-select's `auto` resolves to the parent's used value, so every
+       descendant is covered without a rule of its own; don't add per-control
+       copies. What the user is meant to take text FROM opts back in below. */
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+}
+
+/* The opt-ins. Form fields: selection inside a field is the caret, and iOS
+   refuses to place one under an unselectable ancestor. The stats modal's
+   content pane: written to be read and copied, and the one part of the app
+   that is a document (its tab bar and Close stay controls). */
+input, textarea, [contenteditable],
+.stats-modal-body {
+    user-select: text;
+    -webkit-user-select: text;
+    -webkit-touch-callout: default;
 }
 
 #main-container {
@@ -348,9 +369,6 @@ body {
     border-radius: var(--radius);
     line-height: 1;
     flex: 0 0 auto;
-    user-select: none;
-    -webkit-user-select: none;
-    -webkit-touch-callout: none;
 }
 
 .menu-toggle:hover {
@@ -990,7 +1008,7 @@ body {
     }
 }
 
-/* --- Selectable-text modal (detailed stats) --- */
+/* --- Detailed stats modal; its content pane is the app's selectable text (see body) --- */
 .stats-modal-backdrop {
     position: fixed;
     inset: 0;
@@ -1154,8 +1172,6 @@ body {
     font: 13px/1.4 ui-monospace, Menlo, Consolas, monospace;
     white-space: pre-wrap;
     word-break: break-word;
-    user-select: text;
-    -webkit-user-select: text;
 }
 
 /* Close is a secondary action (Esc and backdrop-click also dismiss) sitting
@@ -1531,9 +1547,6 @@ body {
 
 .progress-bar-wrapper {
     position: relative;
-    user-select: none;
-    -webkit-user-select: none;
-    -webkit-touch-callout: none;
 }
 
 .progress-bar-wrapper::before {
@@ -1561,9 +1574,6 @@ body {
     color: red;
     animation: blink 1s infinite;
     cursor: pointer;
-    user-select: none;
-    -webkit-user-select: none;
-    -webkit-touch-callout: none;
 }
 
 @keyframes blink {
@@ -1605,9 +1615,6 @@ body {
     text-shadow: 0 0 2px black;
     margin: calc(0.6 * var(--u)) calc(0.5 * var(--u));
     cursor: pointer;
-    user-select: none;
-    -webkit-user-select: none;
-    -webkit-touch-callout: none;
     font-size: 0.85em;
 }
 
@@ -1842,8 +1849,6 @@ body {
     border: 2px solid var(--ui-bubble-border);
     box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
     line-height: 1.35;
-    -webkit-user-select: none;
-    user-select: none;
 }
 /* Arrow = a bordered square rotated 45°, sitting behind the body (z 0) with its
    inner half covered by the body — a border-triangle can't carry an outline, so
@@ -1891,8 +1896,6 @@ body {
     line-height: 1;
     opacity: 0.55;
     cursor: pointer;
-    -webkit-user-select: none;
-    user-select: none;
 }
 .hint-btn:hover,
 .hint-btn:focus-visible {
