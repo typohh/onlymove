@@ -171,11 +171,19 @@ function categories(readings) {
 
 // One serve decision (problem-loader.js), mirrored: a uniform slot draw over
 // the flagged categories, the information slot while the rank is unconverged,
-// and the neutral head. `arm` decides which motif slots are in the draw:
+// and the neutral head. The arm decides which motif slots are in the draw:
 //   shipped   the flagged categories, as the client;
 //   neutral   none — the loop opened, exposure at the pool's own rate;
 //   oracle    the planted axis's weak slot always present, flagged or not —
 //             the loop with zero flag latency, an upper bound on what it can do.
+// Two further arms serve as shipped and change how the RANK is estimated, the
+// candidate corrections for the rank absorbing a motif-heavy diet:
+//   rank_neutral_slots  the rank window holds only attempts the neutral and
+//             information slots served — the pool's own mix by construction;
+//   rank_corrected      every attempt stays, with its difficulty shifted by the
+//             user's own flagged accuracy readings times the loading's distance
+//             from the pool's mean loading at the user's rank — the rank on the
+//             pool's mix, estimated rather than sampled.
 function serve(pool, cats, withInfo, rnd) {
     const slots = cats.length + (withInfo ? 1 : 0) + 1;
     const pick = Math.min(Math.floor(rnd() * slots), slots - 1);
@@ -201,6 +209,14 @@ function serve(pool, cats, withInfo, rnd) {
 
 // One player: true rank, the planted per-axis effect vector, one arm. Reads the
 // planted axis's reading at every checkpoint and every other axis's flag state.
+// Mean loading per axis over a pool: the neutral point a "rank on the pool's
+// own mix" is defined at.
+function poolMeanLoading(pool) {
+    const m = new Array(K).fill(0);
+    for (const g of pool) for (let k = 0; k < K; k++) m[k] += emb[g][k];
+    return m.map((v) => v / pool.length);
+}
+
 function simulate({ trueRank, delta, axis, arm, size, horizon, seed, checkpoints }) {
     const rnd = rng32(seed);
     const history = [], flats = [], excluded = new Set();
@@ -208,12 +224,40 @@ function simulate({ trueRank, delta, axis, arm, size, horizon, seed, checkpoints
     const rows = [];
     let servedTail = 0, servedMotif = 0, servedGap = 0, effectSum = 0;
     let firstFlag = null, everFlagged = false;
+    // The player's rank on the pool's own mix at their true rank: what every
+    // rank error below is measured against. The planted effect makes the rank
+    // loading-dependent, so "true rank" alone is the rank at zero loading.
+    const mixRef = poolMeanLoading(poolAt(size, trueRank, new Set(), payload.pool_size));
+    let mixRank = trueRank;
+    for (let k = 0; k < K; k++) mixRank += delta[k] * mixRef[k];
+    // The previous step's readings, which the corrected estimator reads its
+    // per-axis shifts from (the reading conditions on the rank it is about to
+    // correct, so one step of lag is the loop closing).
+    let prevReadings = null, prevPoolMean = null;
     for (let t = 0; t < horizon; t++) {
         // The rank the readings and the serve are conditioned on: the live
         // estimator over the last WIN_CAP first-time attempts.
-        const est = estimate(flats.slice(-WIN_CAP));
+        let rankFlats;
+        if (arm === 'rank_neutral_slots') {
+            rankFlats = flats.filter((f) => f.slot !== 'motif');
+        } else if (arm === 'rank_corrected' && prevReadings && prevPoolMean) {
+            const beta = new Array(K).fill(0);
+            for (const r of prevReadings) {
+                if (r.strength && isFlagged(r.strength)) beta[r.k] = r.strength.ranks;
+            }
+            rankFlats = flats.map((f) => {
+                let shift = 0;
+                for (let k = 0; k < K; k++) shift += beta[k] * (f.emb[k] - prevPoolMean[k]);
+                return { ...f, x: f.x - shift };
+            });
+        } else {
+            rankFlats = flats;
+        }
+        const est = estimate(rankFlats.slice(-WIN_CAP));
         const theta = est.rank;
         const readings = motifReadings(history, theta, K, curveFor, MODEL_INPUT_HISTORY_LENGTH);
+        prevReadings = readings;
+        prevPoolMean = poolMeanLoading(poolAt(size, theta, new Set(), payload.pool_size));
         let cats;
         if (arm === 'neutral') cats = [];
         else if (arm === 'oracle') cats = [{ k: axis, sign: 1, kind: 'weak' }];
@@ -230,7 +274,7 @@ function simulate({ trueRank, delta, axis, arm, size, horizon, seed, checkpoints
                 if (isFlagged(r.strength)) { falseAny++; if (r.strength.z < 0) falseWeak++; }
             }
             rows.push({
-                t, rank_err: theta - trueRank, rank_se: est.se,
+                t, rank_err: theta - trueRank, rank_err_mix: theta - mixRank, rank_se: est.se,
                 converged: converged(est) ? 1 : 0,
                 est: planted ? planted.ranks : null,
                 se: planted ? planted.se : null,
@@ -262,20 +306,26 @@ function simulate({ trueRank, delta, axis, arm, size, horizon, seed, checkpoints
             problemRating: rating[g], problemSlope: slope[g], problemFloor: floor[g],
             embedding: e,
         });
-        flats.push(flattenAttempt(rating[g], slope[g], floor[g], correct ? 1 : 0, curveFor(size)));
+        flats.push({ ...flattenAttempt(rating[g], slope[g], floor[g], correct ? 1 : 0, curveFor(size)),
+                     slot, emb: e });
     }
-    return { rows, ever_flagged: everFlagged ? 1 : 0, first_flag: firstFlag };
+    return { rows, ever_flagged: everFlagged ? 1 : 0, first_flag: firstFlag, mix_rank: mixRank };
 }
 
 const cfg = payload.sim;
 const out = { motif_z: MOTIF_Z, window: MODEL_INPUT_HISTORY_LENGTH, rank_window: WIN_CAP,
               K, cells: [] };
+// The grid is sharded across processes by the producer: every process walks
+// the whole grid so the cell counter (and with it every seed) is the same in
+// each, and runs only the cells whose index falls to its shard.
+const shard = payload.shard || { index: 0, count: 1 };
 let cell = 0;
 for (const trueRank of cfg.true_ranks) {
     for (const axis of cfg.axes) {
         for (const d of cfg.deltas) {
             const delta = new Array(K).fill(0);
             delta[axis] = d;
+            if (cell % shard.count !== shard.index) { cell++; continue; }
             for (const arm of cfg.arms) {
                 const seeds = [];
                 for (let s = 0; s < cfg.seeds; s++) {

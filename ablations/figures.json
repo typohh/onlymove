@@ -4172,6 +4172,48 @@
         "data_version": "9b77faeb2de0af5a"
       }
     },
+    "loop.corrected_gap_zero_ranks": {
+      "value": 1.0268483021989818,
+      "fmt": ".1f",
+      "text": "1.0",
+      "producer": "ablations.serve_loop_figures",
+      "tier": "methodology",
+      "note": "mean served rank above the true rank under that estimator, no planted effect",
+      "measured": {
+        "at": "2026-09-03T21:16:21Z",
+        "git": "6695532bfce+dirty",
+        "db_max_id": 471436,
+        "data_version": "9b77faeb2de0af5a"
+      }
+    },
+    "loop.corrected_rank_err_strong_ranks": {
+      "value": 1.19662746512476,
+      "fmt": ".1f",
+      "text": "1.2",
+      "producer": "ablations.serve_loop_figures",
+      "tier": "methodology",
+      "note": "the same at 2 ranks per unit",
+      "measured": {
+        "at": "2026-09-03T21:16:21Z",
+        "git": "6695532bfce+dirty",
+        "db_max_id": 471436,
+        "data_version": "9b77faeb2de0af5a"
+      }
+    },
+    "loop.corrected_rank_err_zero_ranks": {
+      "value": 0.9086058236369752,
+      "fmt": ".1f",
+      "text": "0.9",
+      "producer": "ablations.serve_loop_figures",
+      "tier": "methodology",
+      "note": "rank-estimate error when every attempt's difficulty is shifted by the user's own flagged readings, no planted effect",
+      "measured": {
+        "at": "2026-09-03T21:16:21Z",
+        "git": "6695532bfce+dirty",
+        "db_max_id": 471436,
+        "data_version": "9b77faeb2de0af5a"
+      }
+    },
     "loop.false_flag_falls": {
       "value": 1.0,
       "fmt": "d",
@@ -4180,8 +4222,8 @@
       "tier": "methodology",
       "note": "1 when the shipped loop leaves fewer false weakness flags than the opened loop",
       "measured": {
-        "at": "2026-09-03T18:08:46Z",
-        "git": "72c0518082d+dirty",
+        "at": "2026-09-03T21:16:21Z",
+        "git": "6695532bfce+dirty",
         "db_max_id": 471436,
         "data_version": "9b77faeb2de0af5a"
       }
@@ -4194,8 +4236,8 @@
       "tier": "methodology",
       "note": "share of runs flagging a weakness on an axis with NO planted effect, loop opened",
       "measured": {
-        "at": "2026-09-03T18:08:46Z",
-        "git": "72c0518082d+dirty",
+        "at": "2026-09-03T21:16:21Z",
+        "git": "6695532bfce+dirty",
         "db_max_id": 471436,
         "data_version": "9b77faeb2de0af5a"
       }
@@ -4208,8 +4250,8 @@
       "tier": "methodology",
       "note": "the same under the shipped loop",
       "measured": {
-        "at": "2026-09-03T18:08:46Z",
-        "git": "72c0518082d+dirty",
+        "at": "2026-09-03T21:16:21Z",
+        "git": "6695532bfce+dirty",
         "db_max_id": 471436,
         "data_version": "9b77faeb2de0af5a"
       }
@@ -4222,8 +4264,8 @@
       "tier": "methodology",
       "note": "mean reading under the shipped loop over the runs that ever flagged the planted axis, a planted weakness of 1 rank per unit loading (n=573)",
       "measured": {
-        "at": "2026-09-03T18:08:46Z",
-        "git": "72c0518082d+dirty",
+        "at": "2026-09-03T21:16:21Z",
+        "git": "6695532bfce+dirty",
         "db_max_id": 471436,
         "data_version": "9b77faeb2de0af5a"
       }
@@ -4236,8 +4278,8 @@
       "tier": "methodology",
       "note": "the reading under the shipped loop minus the reading with it opened, paired per run and averaged over the non-zero planted sizes — positive is optimistic",
       "measured": {
-        "at": "2026-09-03T18:08:46Z",
-        "git": "72c0518082d+dirty",
+        "at": "2026-09-03T21:16:21Z",
+        "git": "6695532bfce+dirty",
         "db_max_id": 471436,
         "data_version": "9b77faeb2de0af5a"
       }
@@ -4250,8 +4292,8 @@
       "tier": "methodology",
       "note": "standard error of that offset",
       "measured": {
-        "at": "2026-09-03T18:08:46Z",
-        "git": "72c0518082d+dirty",
+        "at": "2026-09-03T21:16:21Z",
+        "git": "6695532bfce+dirty",
         "db_max_id": 471436,
         "data_version": "9b77faeb2de0af5a"
       }
@@ -4264,8 +4306,8 @@
       "tier": "methodology",
       "note": "the offset over its standard error",
       "measured": {
-        "at": "2026-09-03T18:08:46Z",
-        "git": "72c0518082d+dirty",
+        "at": "2026-09-03T21:16:21Z",
+        "git": "6695532bfce+dirty",
         "db_max_id": 471436,
         "data_version": "9b77faeb2de0af5a"
       }
@@ -4278,8 +4320,8 @@
       "tier": "methodology",
       "note": "the same offset with no planted effect",
       "measured": {
-        "at": "2026-09-03T18:08:46Z",
-        "git": "72c0518082d+dirty",
+        "at": "2026-09-03T21:16:21Z",
+        "git": "6695532bfce+dirty",
         "db_max_id": 471436,
         "data_version": "9b77faeb2de0af5a"
       }
@@ -4292,8 +4334,8 @@
       "tier": "methodology",
       "note": "its standard error",
       "measured": {
-        "at": "2026-09-03T18:08:46Z",
-        "git": "72c0518082d+dirty",
+        "at": "2026-09-03T21:16:21Z",
+        "git": "6695532bfce+dirty",
         "db_max_id": 471436,
         "data_version": "9b77faeb2de0af5a"
       }
@@ -4306,8 +4348,8 @@
       "tier": "methodology",
       "note": "the zero-effect offset over its standard error",
       "measured": {
-        "at": "2026-09-03T18:08:46Z",
-        "git": "72c0518082d+dirty",
+        "at": "2026-09-03T21:16:21Z",
+        "git": "6695532bfce+dirty",
         "db_max_id": 471436,
         "data_version": "9b77faeb2de0af5a"
       }
@@ -4320,50 +4362,50 @@
       "tier": "methodology",
       "note": "1 when the zero-latency loop cuts the standard error more than the shipped one",
       "measured": {
-        "at": "2026-09-03T18:08:46Z",
-        "git": "72c0518082d+dirty",
+        "at": "2026-09-03T21:16:21Z",
+        "git": "6695532bfce+dirty",
         "db_max_id": 471436,
         "data_version": "9b77faeb2de0af5a"
       }
     },
     "loop.rank_absorb_neutral_ranks": {
-      "value": 0.31004208822675977,
+      "value": -0.07345791177324035,
       "fmt": ".1f",
-      "text": "0.3",
+      "text": "-0.1",
       "producer": "ablations.serve_loop_figures",
       "tier": "methodology",
-      "note": "rank-estimate error for a planted weakness of 2 ranks per unit loading, loop opened",
+      "note": "rank-estimate error against the rank on the pool's own mix, for a planted weakness of 2 ranks per unit loading, loop opened",
       "measured": {
-        "at": "2026-09-03T18:08:46Z",
-        "git": "72c0518082d+dirty",
+        "at": "2026-09-03T21:16:21Z",
+        "git": "6695532bfce+dirty",
         "db_max_id": 471436,
         "data_version": "9b77faeb2de0af5a"
       }
     },
     "loop.rank_absorb_oracle_ranks": {
-      "value": -2.847305769167425,
+      "value": -3.2308057691674246,
       "fmt": ".1f",
-      "text": "-2.8",
+      "text": "-3.2",
       "producer": "ablations.serve_loop_figures",
       "tier": "methodology",
       "note": "the same under the zero-latency loop",
       "measured": {
-        "at": "2026-09-03T18:08:46Z",
-        "git": "72c0518082d+dirty",
+        "at": "2026-09-03T21:16:21Z",
+        "git": "6695532bfce+dirty",
         "db_max_id": 471436,
         "data_version": "9b77faeb2de0af5a"
       }
     },
     "loop.rank_absorb_shipped_ranks": {
-      "value": -1.3965714043646875,
+      "value": -1.7800714043646875,
       "fmt": ".1f",
-      "text": "-1.4",
+      "text": "-1.8",
       "producer": "ablations.serve_loop_figures",
       "tier": "methodology",
       "note": "the same under the shipped loop",
       "measured": {
-        "at": "2026-09-03T18:08:46Z",
-        "git": "72c0518082d+dirty",
+        "at": "2026-09-03T21:16:21Z",
+        "git": "6695532bfce+dirty",
         "db_max_id": 471436,
         "data_version": "9b77faeb2de0af5a"
       }
@@ -4376,8 +4418,8 @@
       "tier": "methodology",
       "note": "the same for a loop serving the planted motif's slot from the first attempt — zero flag latency",
       "measured": {
-        "at": "2026-09-03T18:08:46Z",
-        "git": "72c0518082d+dirty",
+        "at": "2026-09-03T21:16:21Z",
+        "git": "6695532bfce+dirty",
         "db_max_id": 471436,
         "data_version": "9b77faeb2de0af5a"
       }
@@ -4390,8 +4432,8 @@
       "tier": "methodology",
       "note": "share of the accuracy reading's standard error the shipped serve loop removes against the loop opened (no motif slots), paired per run, a planted weakness of 1 rank per unit loading (simulated players at 4 true ranks, one planted axis at a time over all 7, 24 seeded runs per cell, 500 first-time attempts on the shipped 9×9 corpus, read at attempt 499)",
       "measured": {
-        "at": "2026-09-03T18:08:46Z",
-        "git": "72c0518082d+dirty",
+        "at": "2026-09-03T21:16:21Z",
+        "git": "6695532bfce+dirty",
         "db_max_id": 471436,
         "data_version": "9b77faeb2de0af5a"
       }
@@ -4404,8 +4446,8 @@
       "tier": "methodology",
       "note": "the reading's standard error in ranks per unit loading with the loop opened, a planted weakness of 1 rank per unit loading",
       "measured": {
-        "at": "2026-09-03T18:08:46Z",
-        "git": "72c0518082d+dirty",
+        "at": "2026-09-03T21:16:21Z",
+        "git": "6695532bfce+dirty",
         "db_max_id": 471436,
         "data_version": "9b77faeb2de0af5a"
       }
@@ -4418,8 +4460,120 @@
       "tier": "methodology",
       "note": "the same under the shipped loop",
       "measured": {
-        "at": "2026-09-03T18:08:46Z",
-        "git": "72c0518082d+dirty",
+        "at": "2026-09-03T21:16:21Z",
+        "git": "6695532bfce+dirty",
+        "db_max_id": 471436,
+        "data_version": "9b77faeb2de0af5a"
+      }
+    },
+    "loop.shipped_abs_err_strong_ranks": {
+      "value": 2.1387650078830456,
+      "fmt": ".2f",
+      "text": "2.14",
+      "producer": "ablations.serve_loop_figures",
+      "tier": "methodology",
+      "note": "the shipped estimator's, same players",
+      "measured": {
+        "at": "2026-09-03T21:16:21Z",
+        "git": "6695532bfce+dirty",
+        "db_max_id": 471436,
+        "data_version": "9b77faeb2de0af5a"
+      }
+    },
+    "loop.shipped_abs_err_unit_ranks": {
+      "value": 1.2366883643840418,
+      "fmt": ".2f",
+      "text": "1.24",
+      "producer": "ablations.serve_loop_figures",
+      "tier": "methodology",
+      "note": "the shipped estimator's, same players",
+      "measured": {
+        "at": "2026-09-03T21:16:21Z",
+        "git": "6695532bfce+dirty",
+        "db_max_id": 471436,
+        "data_version": "9b77faeb2de0af5a"
+      }
+    },
+    "loop.slots_abs_err_strong_ranks": {
+      "value": 1.4432652483238944,
+      "fmt": ".2f",
+      "text": "1.44",
+      "producer": "ablations.serve_loop_figures",
+      "tier": "methodology",
+      "note": "the slot-filtered estimator's mean absolute rank error at 2 ranks per unit",
+      "measured": {
+        "at": "2026-09-03T21:16:21Z",
+        "git": "6695532bfce+dirty",
+        "db_max_id": 471436,
+        "data_version": "9b77faeb2de0af5a"
+      }
+    },
+    "loop.slots_abs_err_unit_ranks": {
+      "value": 1.3519000669328471,
+      "fmt": ".2f",
+      "text": "1.35",
+      "producer": "ablations.serve_loop_figures",
+      "tier": "methodology",
+      "note": "its mean absolute rank error, a planted weakness of 1 rank per unit loading",
+      "measured": {
+        "at": "2026-09-03T21:16:21Z",
+        "git": "6695532bfce+dirty",
+        "db_max_id": 471436,
+        "data_version": "9b77faeb2de0af5a"
+      }
+    },
+    "loop.slots_better_at_strong": {
+      "value": 1.0,
+      "fmt": "d",
+      "text": "1",
+      "producer": "ablations.serve_loop_figures",
+      "tier": "methodology",
+      "note": "1 when it is below the shipped one's at the strong effect",
+      "measured": {
+        "at": "2026-09-03T21:16:21Z",
+        "git": "6695532bfce+dirty",
+        "db_max_id": 471436,
+        "data_version": "9b77faeb2de0af5a"
+      }
+    },
+    "loop.slots_rank_err_strong_ranks": {
+      "value": 0.22185313405951426,
+      "fmt": ".1f",
+      "text": "0.2",
+      "producer": "ablations.serve_loop_figures",
+      "tier": "methodology",
+      "note": "rank-estimate error against the pool-mix rank when the rank window holds only neutral- and information-slot attempts, 2 ranks per unit",
+      "measured": {
+        "at": "2026-09-03T21:16:21Z",
+        "git": "6695532bfce+dirty",
+        "db_max_id": 471436,
+        "data_version": "9b77faeb2de0af5a"
+      }
+    },
+    "loop.slots_rank_se_pct": {
+      "value": 0.3565889128381696,
+      "fmt": "%.0f",
+      "text": "36",
+      "producer": "ablations.serve_loop_figures",
+      "tier": "methodology",
+      "note": "how much wider that estimator's rank standard error is than the shipped one's, paired, a planted weakness of 1 rank per unit loading",
+      "measured": {
+        "at": "2026-09-03T21:16:21Z",
+        "git": "6695532bfce+dirty",
+        "db_max_id": 471436,
+        "data_version": "9b77faeb2de0af5a"
+      }
+    },
+    "loop.slots_worse_at_unit": {
+      "value": 1.0,
+      "fmt": "d",
+      "text": "1",
+      "producer": "ablations.serve_loop_figures",
+      "tier": "methodology",
+      "note": "1 when the slot-filtered estimator's absolute rank error exceeds the shipped one's at the unit effect",
+      "measured": {
+        "at": "2026-09-03T21:16:21Z",
+        "git": "6695532bfce+dirty",
         "db_max_id": 471436,
         "data_version": "9b77faeb2de0af5a"
       }
@@ -4432,8 +4586,8 @@
       "tier": "methodology",
       "note": "share of served problems in the planted motif's tail with the loop opened — the pool's own rate",
       "measured": {
-        "at": "2026-09-03T18:08:46Z",
-        "git": "72c0518082d+dirty",
+        "at": "2026-09-03T21:16:21Z",
+        "git": "6695532bfce+dirty",
         "db_max_id": 471436,
         "data_version": "9b77faeb2de0af5a"
       }
@@ -4446,8 +4600,8 @@
       "tier": "methodology",
       "note": "the same under the zero-latency loop",
       "measured": {
-        "at": "2026-09-03T18:08:46Z",
-        "git": "72c0518082d+dirty",
+        "at": "2026-09-03T21:16:21Z",
+        "git": "6695532bfce+dirty",
         "db_max_id": 471436,
         "data_version": "9b77faeb2de0af5a"
       }
@@ -4460,8 +4614,8 @@
       "tier": "methodology",
       "note": "the same under the shipped loop",
       "measured": {
-        "at": "2026-09-03T18:08:46Z",
-        "git": "72c0518082d+dirty",
+        "at": "2026-09-03T21:16:21Z",
+        "git": "6695532bfce+dirty",
         "db_max_id": 471436,
         "data_version": "9b77faeb2de0af5a"
       }
@@ -4474,8 +4628,8 @@
       "tier": "methodology",
       "note": "shipped minus opened share of runs flagging the planted weakness",
       "measured": {
-        "at": "2026-09-03T18:08:46Z",
-        "git": "72c0518082d+dirty",
+        "at": "2026-09-03T21:16:21Z",
+        "git": "6695532bfce+dirty",
         "db_max_id": 471436,
         "data_version": "9b77faeb2de0af5a"
       }
@@ -4488,8 +4642,8 @@
       "tier": "methodology",
       "note": "share of runs flagging a planted weakness of 1 rank per unit loading at the gate, loop opened",
       "measured": {
-        "at": "2026-09-03T18:08:46Z",
-        "git": "72c0518082d+dirty",
+        "at": "2026-09-03T21:16:21Z",
+        "git": "6695532bfce+dirty",
         "db_max_id": 471436,
         "data_version": "9b77faeb2de0af5a"
       }
@@ -4502,8 +4656,8 @@
       "tier": "methodology",
       "note": "the same under the shipped loop",
       "measured": {
-        "at": "2026-09-03T18:08:46Z",
-        "git": "72c0518082d+dirty",
+        "at": "2026-09-03T21:16:21Z",
+        "git": "6695532bfce+dirty",
         "db_max_id": 471436,
         "data_version": "9b77faeb2de0af5a"
       }

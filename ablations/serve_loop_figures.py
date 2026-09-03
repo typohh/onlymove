@@ -46,7 +46,7 @@ CHECKPOINTS = (50, 100, 200, 300, 499)
 TRUE_RANKS = (-15.0, -8.0, -3.0, 1.5)
 # Planted effect in ranks per unit loading; 0 is the false-flag arm.
 DELTAS = (0.0, -0.5, -1.0, -2.0)
-ARMS = ("shipped", "neutral", "oracle")
+ARMS = ("shipped", "neutral", "oracle", "rank_neutral_slots", "rank_corrected")
 SEEDS = 24
 
 
@@ -95,17 +95,40 @@ def run_helper(corpus, axes, seeds=SEEDS, true_ranks=TRUE_RANKS, deltas=DELTAS,
                 "checkpoints": list(checkpoints),
             },
         }
-        payload_path = os.path.join(tmp, "payload.json")
-        with open(payload_path, "w") as f:
-            json.dump(payload, f)
-        proc = subprocess.run([node, HELPER, payload_path], cwd=PROJECT_ROOT,
-                              capture_output=True, text=True)
-        require(proc.returncode == 0,
-                f"serve_loop.mjs failed ({proc.returncode}):\n{proc.stderr.strip()}")
-        try:
-            return json.loads(proc.stdout)
-        except json.JSONDecodeError as e:
-            raise AblationError(f"serve_loop.mjs wrote no JSON: {e}") from None
+        # One node process per shard of the cell grid: the cells are independent
+        # and every process derives the same seed per cell, so the result is the
+        # single-process one in grid order.
+        cells = len(true_ranks) * len(axes) * len(deltas)
+        shards = max(1, min(os.cpu_count() or 1, cells))
+        procs = []
+        for i in range(shards):
+            payload_path = os.path.join(tmp, f"payload.{i}.json")
+            with open(payload_path, "w") as f:
+                json.dump({**payload, "shard": {"index": i, "count": shards}}, f)
+            procs.append(subprocess.Popen([node, HELPER, payload_path], cwd=PROJECT_ROOT,
+                                          stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                          text=True))
+        outs = []
+        for proc in procs:
+            stdout, stderr = proc.communicate()
+            require(proc.returncode == 0,
+                    f"serve_loop.mjs failed ({proc.returncode}):\n{stderr.strip()}")
+            try:
+                outs.append(json.loads(stdout))
+            except json.JSONDecodeError as e:
+                raise AblationError(f"serve_loop.mjs wrote no JSON: {e}") from None
+    merged = {**outs[0], "cells": []}
+    by_key = {}
+    for o in outs:
+        for c in o["cells"]:
+            by_key[(c["true_rank"], c["axis"], c["delta"], c["arm"])] = c
+    for r in true_ranks:
+        for a in axes:
+            for d in deltas:
+                for arm in arms:
+                    merged["cells"].append(by_key[(r, a, d, arm)])
+    require(len(merged["cells"]) == cells * len(arms), "a shard dropped cells")
+    return merged
 
 
 def summarize(out):
@@ -128,14 +151,14 @@ def summarize(out):
                 "flag": mean("flagged_weak"),
                 "other_weak": float(np.sum([r["other_weak"] for r in rs]) / max(1, np.sum([r["other_testable"] for r in rs]))),
                 "tail": mean("served_tail"), "motif_slot": mean("served_motif"),
-                "gap": mean("served_gap"), "rank_err": mean("rank_err"),
+                "gap": mean("served_gap"), "rank_err": mean("rank_err_mix"), "rank_se": mean("rank_se"),
                 "conv": mean("converged"),
             })
     return rows
 
 
 def print_table(rows, labels):
-    hdr = ("rank  axis           delta  arm      t    est     se   |z|  flag  other  tail  mslot   gap  rkerr")
+    hdr = ("rank  axis           delta  arm                 t    est     se   |z|  flag  other  tail  mslot   gap  rkerr  rkse")
     print(hdr)
     last = None
     for r in rows:
@@ -144,9 +167,9 @@ def print_table(rows, labels):
             print()
         last = key
         print(f"{r['true_rank']:5.1f}  {labels[r['axis']]['positive'][:13]:13s} {r['delta']:5.1f}  "
-              f"{r['arm']:8s}{r['t']:4d}  {r['est']:5.2f}  {r['se']:5.2f}  {r['abs_z']:4.2f}  "
+              f"{r['arm']:19s}{r['t']:4d}  {r['est']:5.2f}  {r['se']:5.2f}  {r['abs_z']:4.2f}  "
               f"{r['flag']:4.2f}  {r['other_weak']:5.2f}  {r['tail']:4.2f}  {r['motif_slot']:5.2f}  "
-              f"{r['gap']:5.2f}  {r['rank_err']:5.2f}")
+              f"{r['gap']:5.2f}  {r['rank_err']:5.2f}  {r['rank_se']:5.2f}")
 
 
 def _cells(out, delta, arm, t):
@@ -201,7 +224,23 @@ def measure(out=None):
 
     z0n, z0s = arm(0.0, "neutral"), arm(0.0, "shipped")
     strong = DELTAS[-1]
+
+    # The two candidate corrections for the absorption, each serving as shipped.
+    def abs_err(rows):
+        return float(np.mean([abs(r["rank_err_mix"]) for r in rows]))
+    def paired_ratio(a, b, key):
+        return float(np.mean([x[key] for x in a]) / np.mean([y[key] for y in b]))
+    slots_unit, slots_strong = arm(unit, "rank_neutral_slots"), arm(strong, "rank_neutral_slots")
+    corr_zero, corr_strong = arm(0.0, "rank_corrected"), arm(strong, "rank_corrected")
+    shipped_strong = arm(strong, "shipped")
     return {
+        "slots_rank_err_strong": mean(slots_strong, "rank_err_mix"),
+        "slots_rank_se_ratio": paired_ratio(slots_unit, shipped, "rank_se"),
+        "slots_abs_err_unit": abs_err(slots_unit), "shipped_abs_err_unit": abs_err(shipped),
+        "slots_abs_err_strong": abs_err(slots_strong), "shipped_abs_err_strong": abs_err(shipped_strong),
+        "corrected_rank_err_zero": mean(corr_zero, "rank_err_mix"),
+        "corrected_rank_err_strong": mean(corr_strong, "rank_err_mix"),
+        "corrected_gap_zero": mean(corr_zero, "served_gap"),
         "t": t, "unit": unit, "strong": strong,
         "se_neutral": mean(neutral, "se"), "se_shipped": mean(shipped, "se"),
         "se_oracle": mean(oracle, "se"),
@@ -214,9 +253,12 @@ def measure(out=None):
         "false_flag_neutral": mean(z0n, "flagged_weak"), "false_flag_shipped": mean(z0s, "flagged_weak"),
         "offset": off_mean, "offset_se": off_se, "offset_zero": zero_mean, "offset_zero_se": zero_se,
         "flagged_recovery": float(np.mean(flagged)), "flagged_n": len(flagged),
-        "rank_absorb_neutral": mean(arm(strong, "neutral"), "rank_err"),
-        "rank_absorb_shipped": mean(arm(strong, "shipped"), "rank_err"),
-        "rank_absorb_oracle": mean(arm(strong, "oracle"), "rank_err"),
+        # Rank error against the rank on the pool's own mix at the true rank —
+        # the quantity an estimator should recover once the effect makes the
+        # rank loading-dependent.
+        "rank_absorb_neutral": mean(arm(strong, "neutral"), "rank_err_mix"),
+        "rank_absorb_shipped": mean(arm(strong, "shipped"), "rank_err_mix"),
+        "rank_absorb_oracle": mean(arm(strong, "oracle"), "rank_err_mix"),
         "K": out["K"],
     }
 
@@ -261,8 +303,8 @@ def figures(out=None):
                f"mean reading under the shipped loop over the runs that ever flagged the planted "
                f"axis, {unit} (n={m['flagged_n']})"),
         Figure("loop.rank_absorb_neutral_ranks", m["rank_absorb_neutral"], ".1f",
-               f"rank-estimate error for a planted weakness of {-m['strong']:g} ranks per unit "
-               "loading, loop opened"),
+               f"rank-estimate error against the rank on the pool's own mix, for a planted "
+               f"weakness of {-m['strong']:g} ranks per unit loading, loop opened"),
         Figure("loop.rank_absorb_shipped_ranks", m["rank_absorb_shipped"], ".1f",
                "the same under the shipped loop"),
         Figure("loop.rank_absorb_oracle_ranks", m["rank_absorb_oracle"], ".1f",
@@ -279,6 +321,32 @@ def figures(out=None):
                "the offset over its standard error"),
         Figure("loop.offset_zero_z", m["offset_zero"] / m["offset_zero_se"], ".1f",
                "the zero-effect offset over its standard error"),
+        # The two candidate corrections, both serving as shipped.
+        Figure("loop.slots_rank_err_strong_ranks", m["slots_rank_err_strong"], ".1f",
+               f"rank-estimate error against the pool-mix rank when the rank window holds "
+               f"only neutral- and information-slot attempts, {-m['strong']:g} ranks per unit"),
+        Figure("loop.slots_rank_se_pct", m["slots_rank_se_ratio"] - 1, "%.0f",
+               f"how much wider that estimator's rank standard error is than the shipped "
+               f"one's, paired, {unit}"),
+        Figure("loop.slots_abs_err_unit_ranks", m["slots_abs_err_unit"], ".2f",
+               f"its mean absolute rank error, {unit}"),
+        Figure("loop.shipped_abs_err_unit_ranks", m["shipped_abs_err_unit"], ".2f",
+               "the shipped estimator's, same players"),
+        Figure("loop.slots_abs_err_strong_ranks", m["slots_abs_err_strong"], ".2f",
+               f"the slot-filtered estimator's mean absolute rank error at {-m['strong']:g} ranks per unit"),
+        Figure("loop.shipped_abs_err_strong_ranks", m["shipped_abs_err_strong"], ".2f",
+               "the shipped estimator's, same players"),
+        Figure("loop.slots_worse_at_unit", float(m["slots_abs_err_unit"] > m["shipped_abs_err_unit"]), "d",
+               "1 when the slot-filtered estimator's absolute rank error exceeds the shipped one's at the unit effect"),
+        Figure("loop.slots_better_at_strong", float(m["slots_abs_err_strong"] < m["shipped_abs_err_strong"]), "d",
+               "1 when it is below the shipped one's at the strong effect"),
+        Figure("loop.corrected_rank_err_zero_ranks", m["corrected_rank_err_zero"], ".1f",
+               "rank-estimate error when every attempt's difficulty is shifted by the user's "
+               "own flagged readings, no planted effect"),
+        Figure("loop.corrected_rank_err_strong_ranks", m["corrected_rank_err_strong"], ".1f",
+               f"the same at {-m['strong']:g} ranks per unit"),
+        Figure("loop.corrected_gap_zero_ranks", m["corrected_gap_zero"], ".1f",
+               "mean served rank above the true rank under that estimator, no planted effect"),
     ]
 
 
