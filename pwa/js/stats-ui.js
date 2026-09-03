@@ -3,9 +3,9 @@
 // The detailed-stats modal ORCHESTRATOR: gathers the merged full history,
 // computes the shared numeric inputs once (the recall model's statsResults,
 // the rank decomposition), builds every tab pane, and shows the tabbed modal
-// (Weaknesses / Rank / Time / Activity / Community). The panes live in sibling
+// (Weaknesses / Tendencies / Rank / Time / Activity). The panes live in sibling
 // modules — stats-weaknesses.js, stats-rank-pane.js, stats-time-chart.js,
-// stats-activity-chart.js, stats-community.js — built on the shared SVG/chart
+// stats-activity-chart.js — built on the shared SVG/chart
 // primitives in chart-svg.js and the pure-numeric helpers in stats-compute.js.
 // recall-model.js holds the numeric recall model + stats computation; the dependency
 // is one-directional: this module consumes the model's exported helpers;
@@ -15,7 +15,7 @@ import { captureException } from "@sentry/browser";
 import { state, setStatsResults, getMergedAnswerHistory, getMergedFullAnswerHistory, getTailEvictionStatus } from './state.js';
 import { MODEL_INPUT_HISTORY_LENGTH } from './constants.js';
 import { getTerm } from './i18n.js';
-import { computeRankDecomposition, flattenAttempts } from './rank-decomposition.js';
+import { computeRankDecomposition } from './rank-decomposition.js';
 import { showLoading, hideLoading, showConfirm } from './overlays.js';
 import {
     refreshHistoryFromServer,
@@ -26,7 +26,6 @@ import { buildMotifPane } from './stats-weaknesses.js';
 import { buildRankSummaryText, buildRatingHistoryChart } from './stats-rank-pane.js';
 import { buildTimeUsageChart } from './stats-time-chart.js';
 import { buildProblemsPerDayChart } from './stats-activity-chart.js';
-import { buildServerStatsPane } from './stats-community.js';
 import {
     getRecallCandidates,
     prepareTrainingData,
@@ -98,9 +97,8 @@ export async function showDetailedStats() {
         // the timing-probability text and the freshly-failed window summary; they
         // need a trained model + attempts. When they're missing (a brand-new
         // device with few/no attempts) we skip those blocks and still render
-        // whatever panes have data: Community is server-wide and always
-        // available, and every chart builder returns null below its own data
-        // threshold, so showStatsModal just drops the now-empty tabs. No gate —
+        // whatever panes have data: every chart builder returns null below its
+        // own data threshold, so showStatsModal just drops the now-empty tabs. No gate —
         // opening stats with very few or zero attempts is a no-op-safe path.
         if (state.modelParams && !state.statsResults) {
             const validHistory = merged.filter(p => p.problemRank !== undefined && p.timeTaken !== undefined && p.date !== undefined);
@@ -214,17 +212,6 @@ export async function showDetailedStats() {
         // summary text.
         const activityPane = combineChartWithText(buildProblemsPerDayChart(merged), resultText);
 
-        // Community/server-wide stats (null if the endpoint isn't ready or the
-        // fetch fails — the tab is then dropped). The rank histogram's "you"
-        // marker is placed from the rank the user is actually SHOWN and the
-        // count of first-time attempts backing it — the same two quantities the
-        // Worker gates and stores per player, so the marker lands in the frame
-        // the bars are drawn in (see computeUserCommunityBuckets).
-        const serverPane = await buildServerStatsPane(merged, {
-            shownRank: state.displayRank,
-            usableAttempts: flattenAttempts(merged).length,
-        });
-
         // The Rank and Time charts are the heavy part (rank decomposition +
         // kernel smoothing + bootstrap CI), but they're built eagerly here —
         // under the "constructing charts" overlay shown above — so the modal
@@ -251,16 +238,14 @@ export async function showDetailedStats() {
         const makeTimePane = () => combineChartWithText(buildTimeUsageChart(merged), timingText);
         const makeActivityPane = () => combineChartWithText(buildProblemsPerDayChart(merged), resultText);
 
-        // Weaknesses is the default (first) page; Community is last. Empty panes
-        // (no weaknesses, too little data for a chart, server stats unavailable)
-        // are dropped by showStatsModal.
+        // Weaknesses is the default (first) page. Empty panes (no weaknesses, too
+        // little data for a chart) are dropped by showStatsModal.
         showStatsModal([
             { label: getTerm('statsTabWeaknesses'), content: weaknessPane },
             { label: getTerm('statsTabTendencies'), content: tendencyPane },
             { label: getTerm('statsTabRank'), content: makeRankPane(), make: makeRankPane },
             { label: getTerm('statsTabTime'), content: makeTimePane(), make: makeTimePane },
             { label: getTerm('statsTabActivity'), content: activityPane, make: makeActivityPane },
-            { label: getTerm('statsTabCommunity'), content: serverPane },
         ]);
 
     } catch (error) {

@@ -1,8 +1,8 @@
 // js/stats-compute.js
 //
 // Pure-numeric helpers consumed by the detailed-stats pane modules
-// (stats-community.js, stats-rank-pane.js, stats-time-chart.js,
-// stats-weaknesses.js) — no DOM, no rendering. Split out of the stats UI so
+// (stats-rank-pane.js, stats-time-chart.js, stats-weaknesses.js) and by the
+// Statistics menu link — no DOM, no rendering. Split out of the stats UI so
 // those modules are rendering-only and the numeric work (community-bucket
 // mirroring, the kernel smoothers, the weakness-example selector) sits with
 // the rest of the model math.
@@ -10,47 +10,33 @@
 import { MODEL_INPUT_HISTORY_LENGTH } from './constants.js';
 import { rankToLabel, rankBand, clampRankBand } from '../shared/rank-math.js';
 import { RANK_START_MIN } from '../shared/rank-window.js';
+import { TIME_BINS } from '../shared/community-bins.js';
 import { normCdf, weightedQuantile, gaussianWeight, lowerBound } from './math-utils.js';
 import { SHIPPED_K } from './data-version.js';
 
-// Display bins in SECONDS over the server's fine-bucket histogram (the
-// Community pane's solving/review-time bar lists). Solving time is log-normal
-// (the hump sits at ~5–20s), so the low end is split finely and the long tail
-// coarsely — this reveals the bell instead of collapsing it into one tall
-// "0–10s" bar. Every edge is a multiple of the server's bucket width, so a
-// bucket maps cleanly to exactly one display bin.
-export const TIME_BINS = [
-    { lo: 0, hi: 5, label: '0–5s' },
-    { lo: 5, hi: 10, label: '5–10s' },
-    { lo: 10, hi: 15, label: '10–15s' },
-    { lo: 15, hi: 20, label: '15–20s' },
-    { lo: 20, hi: 30, label: '20–30s' },
-    { lo: 30, hi: 45, label: '30–45s' },
-    { lo: 45, hi: 60, label: '45–60s' },
-    { lo: 60, hi: 90, label: '1–1.5m' },
-    { lo: 90, hi: 120, label: '1.5–2m' },
-    { lo: 120, hi: 180, label: '2–3m' },
-    { lo: 180, hi: 300, label: '3–5m' },
-    { lo: 300, hi: Infinity, label: '5m+' },
-];
-
-// Fold a server fine-bucket histogram ([{bucket, n}] rows, bucket width
-// `bucketSec` seconds) into the TIME_BINS display bins.
-export function binHist(hist, bucketSec) {
-    const rows = TIME_BINS.map(b => ({ label: b.label, value: 0 }));
-    for (const r of (hist || [])) {
-        const sec = r.bucket * bucketSec;   // lower edge of the server bucket
-        const i = TIME_BINS.findIndex(b => sec >= b.lo && sec < b.hi);
-        if (i >= 0) rows[i].value += r.n;
+// The URL fragment the app's Statistics menu link carries so the standalone
+// /statistics page (src/handlers/statistics-page.js) can mark the reader's own
+// bar in each community distribution: the bin indices computeUserCommunityBuckets
+// finds — only those it could determine — and the rank LABEL, keyed the way the
+// page reads them. '' when nothing is determinable. A fragment never reaches
+// the server, and a link shared without one shows the plain community data.
+export function communityYouFragment(history, rankContext) {
+    const you = computeUserCommunityBuckets(history, TIME_BINS, rankContext);
+    const p = new URLSearchParams();
+    for (const [key, field] of [['apd', 'attemptsPerDay'], ['solve', 'solve'], ['review', 'review'], ['recall', 'recall']]) {
+        if (you[field] >= 0) p.set(key, String(you[field]));
     }
-    return rows;
+    if (you.rankLabel != null) p.set('rank', you.rankLabel);
+    return p.toString();
 }
 
-// Locate the current user within each Community distribution, reproducing the
+// Locate the current user within each community distribution, reproducing the
 // Worker's per-user bucketing (computeServerStats in src/server-stats.js) on the
 // client's own last-7-day merged history. Returns a bin index per bar-list
 // category (-1 when not determinable) plus the rank label to mark.
-// `timeBins` is the seconds-based display-bin table from the caller (TIME_BINS).
+// `timeBins` is the seconds-based display-bin table (TIME_BINS in
+// shared/community-bins.js — the SAME table the Worker folds the page's bars
+// into, so a median lands in the bin its bar is drawn in).
 // `rankContext` carries the rank half, which is NOT derived here — see the rank
 // block at the bottom: `shownRank` is state.displayRank (the badge's own number)
 // and `usableAttempts` is the flattened first-time count that gates it.

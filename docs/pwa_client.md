@@ -301,8 +301,8 @@ The track also carries **thin ticks at `MOTIF_Z` and `TONE_STRONG_Z` standard er
 
 ## The statistics modal
 
-`showDetailedStats` → `showStatsModal(tabs)` renders Summary / Weaknesses / Rank / Time / Community pages; a pane with no content is dropped, and the tab bar is omitted when only one remains. `stats-ui.js` holds the rendering, `recall-model.js` holds only the numeric model and its statistics — the dependency is one-directional, UI → model.
+`showDetailedStats` → `showStatsModal(tabs)` renders Weaknesses / Tendencies / Rank / Time / Activity pages; a pane with no content is dropped, and the tab bar is omitted when only one remains. `stats-ui.js` holds the rendering, `recall-model.js` holds only the numeric model and its statistics — the dependency is one-directional, UI → model.
 
 Both charts derive their `viewBox` height from the visible modal area (`chartViewBoxHeight`) so each fits whole when scrolled. The Time chart is a Gaussian-kernel-smoothed daily solving and review-time trend — a no-data gap **breaks the line** rather than reading as zero — with a multiplier bootstrap confidence band (empirical, robust to idle-tab outliers) and daily problem-count bars on a secondary right axis.
 
-The hamburger menu (`index.html` plus `updateMenuItems` in `ui.js`) is grouped into Practice / Review / More; the Review group shows only in analysis mode.
+The hamburger menu (`index.html` plus `updateMenuItems` in `ui.js`) is grouped into Practice / Review / Community / More; the Review group shows only in analysis mode. Community holds the two standalone Worker pages (`/leaderboard`, `/statistics`) and the Discord invite; the Statistics link's fragment carries the reader's own community bins, written at click time (`leaderboard_and_community_stats.md`).

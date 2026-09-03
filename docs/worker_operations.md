@@ -23,6 +23,7 @@ CLAUDE.md carries the short form and points here.
 | `POST /google/signin`, `POST /google/link`, `POST /google/unlink` | Google sign-in. `signin` only RESOLVES which code a verified Google account is bound to and writes nothing. See `client_sync_and_cache.md`. |
 | `GET /profile` | The federation binding, the `hidden_profiles` flag and a `google` boolean, `no-store` — the Account dialog's whole panel in one read. Its URL is the userId and nothing else, so it **belongs in the service worker's dynamic-GET bypass list**. |
 | `GET /server-stats` | Serves the cached community-stats blob. |
+| `GET /statistics` | The community statistics page, server-rendered from that blob on the shared page shell; `no-store`, because the requester's edge geo-IP country is stamped into it for the country chart's own bar. |
 | `scheduled()` | Cron-driven: walks `recall_schedule` to deliver due Web Push notifications, **and** recomputes `server_stats` when it is ≥23 h old or the version changed. |
 
 ## D1 schema

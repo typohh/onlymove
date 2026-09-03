@@ -65,8 +65,8 @@ The `lib/` bundles (WGo.js and JSZip) are loaded as classic scripts from `index.
 │   │
 │   ├── ui.js, overlays.js   # DOM updates; transient informational overlays
 │   ├── stats-ui.js          # Detailed-stats modal: tabbed panes
-│   ├── stats-compute.js     # Stats aggregation shared by the panes
-│   ├── stats-rank-pane.js, stats-weaknesses.js, stats-community.js
+│   ├── stats-compute.js     # Stats aggregation shared by the panes; the Statistics link's fragment
+│   ├── stats-rank-pane.js, stats-weaknesses.js
 │   ├── stats-time-chart.js, stats-activity-chart.js, chart-svg.js
 │   ├── motif-bubble.js      # Review-time motif surfacing
 │   ├── onboarding.js, audio.js, i18n.js, share.js
@@ -79,7 +79,8 @@ The `lib/` bundles (WGo.js and JSZip) are loaded as classic scripts from `index.
 │   ├── rank-math.js         # The single internal rank scale: interp, labels, bands
 │   ├── rank-window.js       # The window rank estimator and per-attempt flatten
 │   ├── sync-digest.js       # Row hashing for the sync digest
-│   └── flag.js              # Country code → flag
+│   ├── flag.js              # Country code → flag
+│   └── community-bins.js    # Display bins of the community time histograms
 │
 ├── src/                     # Cloudflare Worker
 │   ├── index.js             # Thin router over the write endpoints + scheduled() cron
@@ -88,10 +89,10 @@ The `lib/` bundles (WGo.js and JSZip) are loaded as classic scripts from `index.
 │   ├── handlers/            # One module per route, NAMED FOR THE ROUTE (report,
 │   │                        #   report-backfill, sync, push, schedule, rank-survey,
 │   │                        #   share-event, profile, register, leaderboard-page,
-│   │                        #   tournament-page, invite-tool)
+│   │                        #   statistics-page, tournament-page, invite-tool)
 │   ├── leaderboard.js       # Leaderboard buffer maintenance + row resolution
 │   ├── attempt-insert.js    # The shared INSERT (maintains the per-profile digest)
-│   ├── server-stats.js      # /server-stats compute + cache
+│   ├── server-stats.js      # The community-stats blob: compute + cache (/server-stats, /statistics)
 │   ├── recall-notifications.js  # The Web Push recall cron
 │   ├── aga.js               # AGA rating refresh
 │   └── version.js           # Build-stamped APP_VERSION (written by build.mjs)
@@ -181,7 +182,7 @@ Served data is cache-busted by a separate content-addressed `DATA_VERSION` rathe
 
 ### 4.9. Cloudflare Worker (`src/`)
 
-`src/index.js` is a thin router over a route table plus a `scheduled()` cron handler; handlers and aggregation live in sibling modules. Beyond the two headline responsibilities below it serves account sync (`/sync`), the offline outbox (`/report-backfill`), Web Push (`/push/*`), the recall schedule (`/schedule`), surveys and analytics (`/rank-survey`, `/share-event`), profile visibility (`/profile/hide`), registration (`/register`), the cached community stats (`/server-stats`), and the server-rendered `/leaderboard` and `/tournament` pages. The cron delivers due recall reminders and refreshes the cached stats and the external rating heartbeats. `CLAUDE.md` carries the full route and D1-schema reference.
+`src/index.js` is a thin router over a route table plus a `scheduled()` cron handler; handlers and aggregation live in sibling modules. Beyond the two headline responsibilities below it serves account sync (`/sync`), the offline outbox (`/report-backfill`), Web Push (`/push/*`), the recall schedule (`/schedule`), surveys and analytics (`/rank-survey`, `/share-event`), profile visibility (`/profile/hide`), registration (`/register`), the cached community stats (`/server-stats`, and as the server-rendered `/statistics` page), and the server-rendered `/leaderboard` and `/tournament` pages. The cron delivers due recall reminders and refreshes the cached stats and the external rating heartbeats. `CLAUDE.md` carries the full route and D1-schema reference.
 
 - **`POST /report`** — validates and inserts an attempt row into the D1 `tsumego_reports` table (binding: `DB`), returning the row id, the per-profile attempt count and the sync digest. `OPTIONS` returns CORS headers.
 - **SPA fallback** — for navigation requests that don't match a static asset, serves `index.html` while preserving the URL so the front-end can read the size hint (`/9`, `/13`) from `window.location.pathname`. Non-navigation misses return a real 404 so a stale Service Worker cache can invalidate cleanly.

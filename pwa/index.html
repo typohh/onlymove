@@ -144,8 +144,10 @@
 
     <!-- Hamburger-driven menu, grouped into categories. Category labels and
          per-item / per-group visibility are set context-dependently in ui.js
-         (updateMenuItems): Practice + More are always shown; the Review group
-         only appears in analysis mode. -->
+         (updateMenuItems): Practice, Community and More are always shown; the
+         Review group only appears in analysis mode. Community holds the two
+         standalone Worker pages and the Discord invite; the Statistics link's
+         fragment is written at click time (main.js). -->
     <div id="menu-overlay" class="menu-overlay menu-overlay-hidden">
       <div id="menu-panel">
         <div class="menu-category">
@@ -159,12 +161,16 @@
           <a href="#" id="menu-ignore" class="menu-item btn" role="button" tabindex="0"></a>
         </div>
         <div class="menu-category">
+          <div class="menu-category-label" id="menu-cat-community"></div>
+          <a href="/leaderboard" id="menu-leaderboard" class="menu-item btn" target="_blank" rel="noopener"></a>
+          <a href="/statistics" id="menu-statistics" class="menu-item btn" target="_blank" rel="noopener"></a>
+          <a href="https://discord.gg/ZU7jJNnkbB" id="menu-discord" class="menu-item btn" target="_blank" rel="noopener"></a>
+        </div>
+        <div class="menu-category">
           <div class="menu-category-label" id="menu-cat-more"></div>
           <a href="#" id="menu-stats" class="menu-item btn" role="button" tabindex="0"></a>
           <a href="#" id="menu-account" class="menu-item btn" role="button" tabindex="0"></a>
-          <a href="/leaderboard" id="menu-leaderboard" class="menu-item btn" target="_blank" rel="noopener"></a>
           <a href="about.html" id="menu-about" class="menu-item btn" target="_blank" rel="noopener"></a>
-          <a href="https://discord.gg/ZU7jJNnkbB" id="menu-discord" class="menu-item btn" target="_blank" rel="noopener"></a>
         </div>
       </div>
     </div>

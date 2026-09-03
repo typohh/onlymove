@@ -74,7 +74,7 @@ const SPA_ROUTES = ['/', '/9', '/13'];
 const STATIC_ROUTES = ['/index.html', '/about.html', '/changelog.html', '/privacy.html',
                        '/manifest.json', '/sw.js', '/lookup.txt'];
 // Worker-rendered pages (not assets), so they need the navigation headers too.
-const PAGE_ROUTES = ['/leaderboard'];
+const PAGE_ROUTES = ['/leaderboard', '/statistics'];
 // Packaged data the client Range-fetches at runtime. Must be present.
 const SERVED_DATA = ['/tsumegos/lookup.embeddings.bin', '/tsumegos/problem_params.bin'];
 // Compiled into the bundle instead of shipped — see note 2 above.

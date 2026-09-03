@@ -78,7 +78,8 @@ function showBoardSizePicker({ dismissable = false } = {}) {
 import { advanceToNextProblem, redisplayCurrentProblem, returnToChallenge, loadTsumegoById, resumeCurrentProblem, isExampleReviewActive, endExampleReview, showDueRecall } from './problem-loader.js';
 import { backfillMissingEmbeddings, stampVersionsForFreshHistory } from './backfill.js';
 import { maybeShowRatingsCorrectionNotice } from './corrections-notice.js';
-import { loadRatingRankMap, reanchorRank } from './rank-decomposition.js';
+import { loadRatingRankMap, reanchorRank, flattenAttempts } from './rank-decomposition.js';
+import { communityYouFragment } from './stats-compute.js';
 import { loadPopulationConstants } from './population-constants.js';
 import { enterAnalysisMode, undoLastMove } from './analysis.js';
 import { initMotifBubble } from './motif-bubble.js';
@@ -261,6 +262,23 @@ function wireMenu() {
     // menu-leaderboard is a real anchor to the standalone /leaderboard page
     // (target=_blank); let the browser navigate.
     document.getElementById('menu-leaderboard').addEventListener('click', () => {
+        closeMenu();
+    });
+    // menu-statistics is a real anchor to the standalone /statistics page
+    // (target=_blank). Its fragment carries the reader's own bins for that page's
+    // "you are here" markers, written here from the local working-set history at
+    // click time — the browser reads the href after the listeners run, and a
+    // fragment never reaches the server. The rank marker is placed from the rank
+    // the user is actually SHOWN and the count of first-time attempts backing it,
+    // the same two quantities the Worker gates and stores per player, so the
+    // marker lands in the frame the bars are drawn in (computeUserCommunityBuckets).
+    document.getElementById('menu-statistics').addEventListener('click', (e) => {
+        const merged = getMergedAnswerHistory();
+        const frag = communityYouFragment(merged, {
+            shownRank: state.displayRank,
+            usableAttempts: flattenAttempts(merged).length,
+        });
+        e.currentTarget.href = '/statistics' + (frag ? '#' + frag : '');
         closeMenu();
     });
     // menu-about is a real anchor (target=_blank); let the browser navigate.

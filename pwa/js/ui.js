@@ -533,6 +533,7 @@ const updateMenuItems = () => {
     // Category headers — static labels, set here so they follow the active language.
     document.getElementById('menu-cat-practice').textContent = getTerm('menuCatPractice');
     document.getElementById('menu-cat-review').textContent = getTerm('menuCatReview');
+    document.getElementById('menu-cat-community').textContent = getTerm('menuCatCommunity');
     document.getElementById('menu-cat-more').textContent = getTerm('menuCatMore');
 
     // Practice group — always available.
@@ -546,7 +547,7 @@ const updateMenuItems = () => {
     document.getElementById('menu-audio').textContent =
         getTerm(state.audioEnabled ? 'disableSound' : 'enableSound');
 
-    // More group — Stats and About are always available, in every mode.
+    // More group — My stats and About are always available, in every mode.
     statsItem.textContent = getTerm('stats');
     statsItem.classList.remove('disabled');
     // Account appears only once the one-off history backfill has confirmed
@@ -556,7 +557,9 @@ const updateMenuItems = () => {
     const accountItem = document.getElementById('menu-account');
     accountItem.style.display = localStorage.getItem(HISTORY_BACKFILL_DONE_KEY) ? '' : 'none';
     accountItem.textContent = getTerm('menuAccount');
+    // Community group — the two standalone Worker pages and the Discord invite.
     document.getElementById('menu-leaderboard').textContent = getTerm('leaderboard');
+    document.getElementById('menu-statistics').textContent = getTerm('statistics');
     aboutItem.textContent = getTerm('about');
     aboutItem.classList.remove('disabled');
     document.getElementById('menu-discord').textContent = getTerm('discord');

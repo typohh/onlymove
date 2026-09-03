@@ -11,6 +11,7 @@ import { handleServerStats, maybeComputeServerStats } from './server-stats.js';
 import { runRecallNotifications } from './recall-notifications.js';
 import { handleLink, handleUnlink } from './handlers/link.js';
 import { handleLeaderboard } from './handlers/leaderboard-page.js';
+import { handleStatistics } from './handlers/statistics-page.js';
 import { handleTournament } from './handlers/tournament-page.js';
 import { handleProfileHide, handleProfile } from './handlers/profile.js';
 import { handleGoogleSignIn, handleGoogleLink, handleGoogleUnlink } from './handlers/google.js';
@@ -70,6 +71,9 @@ const GET_ROUTES = [
   { path: '/server-stats', handler: (request, env) => handleServerStats(env, request) },
   // Standalone EGD leaderboard page (HTML).
   { path: '/leaderboard', handler: (request, env) => handleLeaderboard(env) },
+  // Standalone community statistics page (HTML), rendered from the cached
+  // server_stats blob; /server-stats above is its JSON form.
+  { path: '/statistics', handler: (request, env) => handleStatistics(env, request) },
   // Static FINAL-RESULTS page for the concluded 2026 tournament (baked-in
   // standings, no D1 read).
   { path: '/tournament', handler: () => handleTournament() },

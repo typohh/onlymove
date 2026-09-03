@@ -28,7 +28,7 @@ This file is the always-loaded operating layer: what to run, what breaks, and wh
 | `docs/motif_axes_workflow.md` | The axis shipping contract, tail agreement, the naming workflow, the published embedding layout. |
 | `docs/pwa_client.md` | Client state, storage, re-derivation generations, the three ranks, the serve draw, recall, motif readings. |
 | `docs/client_sync_and_cache.md` | Account sync, Google sign-in, precache ownership, served-data cache freshness. |
-| `docs/leaderboard_and_community_stats.md` | The `/leaderboard` resolver and the Community stats aggregation. |
+| `docs/leaderboard_and_community_stats.md` | The `/leaderboard` resolver, the Community stats aggregation and the `/statistics` page. |
 | `docs/worker_operations.md` | Write-endpoint guards, the maintenance freeze, `pipeline.fetch_database`. |
 | `docs/db_surgery_runbook.md` | The freeze-and-apply procedure for snapshot-relative DB operations. |
 

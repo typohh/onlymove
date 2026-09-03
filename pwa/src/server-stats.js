@@ -18,19 +18,26 @@ function computeServerStatsOnce(env) {
   return computeInFlight;
 }
 
-// Serve the cached server-wide stats. Lazily (re)computes when nothing is
-// cached yet OR the cache was produced by an older code version (so a deploy
+// The cached server-wide stats, as an object. Lazily (re)computes when nothing
+// is cached yet OR the cache was produced by an older code version (so a deploy
 // that changes the computation refreshes on the next read, not 24h later); the
-// cron keeps it fresh by age thereafter.
+// cron keeps it fresh by age thereafter. Read by the JSON endpoint below and by
+// the /statistics page (handlers/statistics-page.js).
+export async function loadServerStats(env) {
+  const row = await env.DB.prepare(`SELECT data FROM server_stats WHERE key = 'latest'`).first();
+  let cached = null;
+  if (row && row.data) {
+    try { cached = JSON.parse(row.data); } catch { cached = null; }
+  }
+  if (cached && cached.version === APP_VERSION) return cached;
+  return computeServerStatsOnce(env);
+}
+
+// Serve the cached server-wide stats as JSON.
 export async function handleServerStats(env, request) {
   try {
     if (!env.DB) return jsonResponse({ error: 'Database not configured' }, 500);
-    const row = await env.DB.prepare(`SELECT data FROM server_stats WHERE key = 'latest'`).first();
-    let stale = true;
-    if (row && row.data) {
-      try { stale = JSON.parse(row.data).version !== APP_VERSION; } catch { stale = true; }
-    }
-    const body = stale ? JSON.stringify(await computeServerStatsOnce(env)) : row.data;
+    const body = JSON.stringify(await loadServerStats(env));
     // Echo the requester's edge geo-IP country so the Community country chart can
     // mark the "you" bar — the blob is community-wide (per-request identity can't
     // live in the cached body), and the client has no other read of its own geo.
