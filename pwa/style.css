@@ -1430,11 +1430,11 @@ input, textarea, [contenteditable],
     opacity: 0.62;
 }
 
-/* One tick per whole standard error either side of the neutral mark. INSET
-   and quieter than the neutral mark, which runs the track's full height: at
-   equal weight a row of identical lines has no anchor, and the reader has to
-   count inwards to find which one is the centre. Ticks from the full-colour
-   threshold outward are the firmer ones. */
+/* Unit ticks (ranks, or share of errors) either side of the neutral mark.
+   INSET and quieter than the neutral mark, which runs the track's full
+   height: at equal weight a row of identical lines has no anchor, and the
+   reader has to count inwards to find which one is the centre. Every fourth
+   tick is the firmer one. */
 .wk-sd {
     position: absolute;
     top: 25%;

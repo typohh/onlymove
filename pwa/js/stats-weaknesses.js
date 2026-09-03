@@ -63,6 +63,10 @@ const SCALE_MARGIN = 1.1;
 // Fallback scales for a pane whose rows carry no interval at all.
 const RANK_FULL_SCALE = 2.0;
 const TENDENCY_FULL_SCALE = 0.25;
+// Tick spacing on each track, in the track's own units: ranks for strength,
+// share of errors for tendency.
+const RANK_TICK = 0.25;
+const TENDENCY_TICK = 0.02;
 // Colour comes in TWO STEPS rather than a continuous ramp: nothing below the
 // MOTIF_Z gate, a muted shade from there to twice it, the full shade beyond. The
 // steps are readable as a legend — a row's shade names which side of 2 SE it
@@ -205,23 +209,20 @@ function buildHeaderRow(kind) {
 
 const clamp01 = (v) => Math.max(0, Math.min(1, v));
 
-// The posterior's own scale, drawn on the track: thin ticks either side of the
-// neutral mark at every whole standard error, as far as the track reaches.
-// That gives the track a unit: without them the dot's distance from centre is
-// only readable against the printed value, and how far out it is IN STANDARD
-// ERRORS — the thing the row is actually a claim about — is not on the
-// picture at all. Ticks from TONE_STRONG_Z outward are drawn firmer, marking
-// where toneWeight steps to full.
-function sdTicks(rawFrac, neutral, se) {
-    if (!(se > 0)) return [];
+// Thin ticks either side of the neutral mark at every `step` of the track's
+// own unit (ranks, or share of errors), as far as the track reaches. They give
+// the track a scale: without them the dot's distance from centre is only
+// readable against the printed value. Every fourth tick is drawn firmer so a
+// reader can count in whole ranks / whole eighths without counting lines.
+function unitTicks(rawFrac, neutral, step) {
     const ticks = [];
     for (let level = 1; ; level++) {
         let onTrack = false;
         for (const dir of [-1, 1]) {
-            const frac = rawFrac(neutral + dir * level * se);
+            const frac = rawFrac(neutral + dir * level * step);
             if (frac > 0 && frac < 1) {
                 onTrack = true;
-                ticks.push({ frac, strong: level >= TONE_STRONG_Z });
+                ticks.push({ frac, strong: level % 4 === 0 });
             }
         }
         if (!onTrack) break;
@@ -329,7 +330,7 @@ function cellFor(kind, row, scale) {
             frac: rankFrac(g.ranks),
             loFrac: rankFrac(g.lo),
             hiFrac: rankFrac(g.hi),
-            ticks: sdTicks(rawRankFrac, 0, g.se),
+            ticks: unitTicks(rawRankFrac, 0, RANK_TICK),
             valueText: getTerm('statsMotifRanks', { value: fmtRank(g.ranks) }),
             tone: g.z < 0 ? 'weak' : 'strong',
             weight: toneWeight(g.z),
@@ -345,7 +346,7 @@ function cellFor(kind, row, scale) {
         frac: leanFrac(t.share),
         loFrac: leanFrac(t.lo),
         hiFrac: leanFrac(t.hi),
-        ticks: sdTicks(rawLeanFrac, t.nullShare, t.se),
+        ticks: unitTicks(rawLeanFrac, t.nullShare, TENDENCY_TICK),
         valueText: fmtLean(t.share, t.nullShare),
         tone: t.z > 0 ? 'over' : 'under',
         weight: toneWeight(t.z),
