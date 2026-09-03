@@ -217,6 +217,22 @@ SHALLOW_SAMPLES = 20000
 # weights — so what binds is the shape of the TARGET, not the strength of the
 # pull; see docs/mirt_benchmark.md.
 TEACH_WEIGHT = 0.25
+# MUTUAL ORTHOGONALITY, ON THE DETACHED READOUT. The pull fixes which direction
+# each axis is and prices nothing about two axes carrying one direction; the
+# ridge on the positions rewards exactly that, being isotropic over axes that
+# are each unit-RMS, so a direction split over two axes at half the position
+# each makes every prediction one axis would and pays half the ridge. This term
+# asks the batch correlation matrix of the loadings to be the identity. It reads
+# loadings computed from a DETACHED copy of the trunk output — the same values,
+# with no path back into the network the rating shares — so it can only
+# re-weight what the axes read out of the representation and never reshape the
+# representation itself. The detachment is what makes it affordable: reaching
+# the trunk, the same term costs the rating held-out likelihood; detached, it
+# buys distinct axes at a slightly better level with identity unchanged
+# (docs/mirt_benchmark.md, the detach panel). The weight is the one point
+# measured and is unswept.
+ORTHO_AXES = 0.25
+ORTHO_AXES_DETACH = True
 # IDENTIFIABILITY, the only inclusion rule. Under the 4PL an all-correct record's
 # likelihood rises monotonically to (1-lambda)^n as ability grows without bound,
 # and an all-wrong one to (1-c)^n as it falls, so neither has an interior
@@ -388,8 +404,9 @@ class JointMIRT(nn.Module):
         """The last batch's loadings computed from a DETACHED copy of the trunk
         output: identical values, but a penalty on them reaches the axis readout
         alone and never the network the rating shares. No second trunk pass and
-        no gauge update. An ablation path; the shipped terms read `forward`'s
-        loadings, whose gradient does reach the trunk."""
+        no gauge update. The shipped mutual term reads this; the pull and the
+        rating-orthogonality term read `forward`'s loadings, whose gradient
+        does reach the trunk, and both are measured to need it."""
         return self.g_lin(self._last_h.detach()) / self._last_rms
 
     def forward(self, uid, feat):
@@ -564,8 +581,9 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         teach_weight=TEACH_WEIGHT, stop_row_frac=STOP_ROW_FRAC,
         pca_dim=PCA_DIM, blocks=PRODUCTION_BLOCKS, stop_unit="row",
         split_seed=None, pca_seed=None, lr_schedule=LR_SCHEDULE,
-        lr_warmup_epochs=0, ortho_axes=0.0,
-        teach_detach=False, ortho_detach=False, ortho_axes_detach=False,
+        lr_warmup_epochs=0, ortho_axes=ORTHO_AXES,
+        teach_detach=False, ortho_detach=False,
+        ortho_axes_detach=ORTHO_AXES_DETACH,
         v_ridge_ladder=1.0,
         k_axes=K_AXES, dropout=DROPOUT, input_dropout=INPUT_DROPOUT,
         weight_decay=0.0, weight_decay_fields=None,
@@ -787,10 +805,13 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
             # happens to be widest. The targets are DETACHED, so this can only
             # push the axes off the rating side and never degrade the rating to
             # satisfy itself.
-            # DETACHED READOUTS, ablation paths: each of the three terms on the
-            # loadings can be pointed at the readout alone, so that it steers
-            # which directions of the trunk's representation the axes read out
-            # without reshaping the representation the rating also reads.
+            # DETACHED READOUTS: each of the three terms on the loadings can be
+            # pointed at the readout alone, so that it steers which directions
+            # of the trunk's representation the axes read out without reshaping
+            # the representation the rating also reads. The mutual term ships
+            # that way; the pull and the rating-orthogonality penalty are
+            # measured to need the trunk, and their detachments are ablation
+            # paths.
             gh_d = m.detached_loadings() if (teach_detach or ortho_detach
                                              or ortho_axes_detach) else None
             gh_o = gh_d if ortho_detach else gh
@@ -830,15 +851,12 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
                 loss = loss + ortho_rating * (W.T @ tz).pow(2).sum()
             elif ortho_mode != "off":
                 raise ValueError(f"unknown ortho_mode {ortho_mode!r}")
-            # MUTUAL ORTHOGONALITY — OFF IN THE SHIPPED FIT, an ablation knob.
-            # Nothing above asks the axes to differ from EACH OTHER: the ridge on
-            # positions is isotropic and every axis is normalized to unit scale,
-            # so splitting one direction over two axes halves the ridge cost at
-            # identical predictions, and a fit with the pull off spends its axes
-            # on duplicates. The pull is what keeps the shipped axes apart. This
-            # term asks the batch correlation matrix of the loadings to be the
-            # identity — whole-axis, since a duplicated axis IS a whole-axis
-            # correlation of one, with or without a sign.
+            # MUTUAL ORTHOGONALITY, on the detached readout in the shipped fit
+            # (ORTHO_AXES / ORTHO_AXES_DETACH above). Nothing above asks the
+            # axes to differ from EACH OTHER, and the pull alone does not hold
+            # seven distinct directions. Whole-axis, unlike the rating term: a
+            # duplicated axis IS a whole-axis correlation of one, with or
+            # without a sign, so the linear statistic is the right one here.
             if ortho_axes > 0:
                 Wm = gh_m - gh_m.mean(dim=0, keepdim=True)
                 Wm = Wm / (Wm.norm(dim=0, keepdim=True) + 1e-9)

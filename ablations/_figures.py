@@ -99,11 +99,12 @@ def require(condition, message):
         raise AblationError(message)
 
 
-def panel_regime(records, ramp_may_vary=False):
+def panel_regime(records, ramp_may_vary=False, mutual_may_vary=False):
     """The (epoch budget, learning-rate schedule) a panel's arms share, or a
-    hard failure if they differ — and the opening ramp, which the arms must
-    also share unless the panel is one that SWEEPS it. These are what a
-    BASELINE CHANGE moves.
+    hard failure if they differ — and the opening ramp and the mutual-
+    orthogonality term (weight, detachment), which the arms must also share
+    unless the panel is one that SWEEPS them. These are what a BASELINE CHANGE
+    moves.
 
     Producers used to pin the budget to the trainer's current `EPOCHS`, which
     breaks the moment that constant moves: every arm already on disk becomes
@@ -141,6 +142,18 @@ def panel_regime(records, ramp_may_vary=False):
     require(ramp_may_vary or len(ramps) == 1,
             f"the panel's arms ran opening ramps of {sorted(ramps)} epochs — "
             f"the panel straddles a baseline change")
+    # THE MUTUAL TERM IS PART OF THE REGIME, as (weight, detached). A record
+    # that predates the knob ran none, which is what the defaults read; a
+    # weight of zero has no detachment to speak of. The panels that sweep the
+    # term by design (`detach`, `axis_space`) say so and read it off their own
+    # records.
+    mutual = set()
+    for r in records.values():
+        w = float(r["metrics"].get("ortho_axes", 0.0))
+        mutual.add((w, w > 0 and bool(r["metrics"].get("ortho_axes_detach", False))))
+    require(mutual_may_vary or len(mutual) == 1,
+            f"the panel's arms ran mutual-orthogonality terms of {sorted(mutual)} "
+            f"(weight, detached) — the panel straddles a baseline change")
     return budgets.pop(), schedules.pop()
 
 

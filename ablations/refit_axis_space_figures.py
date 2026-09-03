@@ -176,7 +176,7 @@ def load_panel():
 
     # ONE PANEL IS ONE REGIME, read off the arms and not off the trainer's
     # constants: the arms are only ever compared to each other.
-    budget, schedule = panel_regime(arms, ramp_may_vary=True)
+    budget, schedule = panel_regime(arms, ramp_may_vary=True, mutual_may_vary=True)
     for arm, r in arms.items():
         require(r["metrics"]["trace"]
                 and r["metrics"]["trace"][-1]["epoch"] == budget,
@@ -243,7 +243,18 @@ def load_panel():
         require(len(ws) == 1, f"{cfg}'s arms ran different mutual penalties {ws}")
         w = ws.pop()
         require((w > 0) == (cfg == "untaught_ortho"),
-                f"{cfg} recorded a mutual-orthogonality weight of {w}")
+                f"{cfg} recorded a mutual-orthogonality weight of {w} — this "
+                f"panel's fits carry the term only in `untaught_ortho`; under "
+                f"a baseline that carries it, every other arm needs "
+                f"`ortho_axes 0` declared in the manifest")
+        # The term here is the UNDETACHED one — its gradient reaching the
+        # trunk is the cost this panel measures — and a baseline that detaches
+        # it by default would run the manifest's arm as a different fit.
+        require(not any(arms[pat.format(s)]["metrics"].get("ortho_axes_detach", False)
+                        for s in SEEDS),
+                f"{cfg} ran its mutual penalty detached; this panel's mutual arm "
+                f"is the undetached term, so the manifest must declare "
+                f"`ortho_axes_detach 0`")
         if cfg == "untaught_ortho":
             ortho_w = w
     for cfg, warm_cfg in WARM_OF.items():

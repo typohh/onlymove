@@ -106,7 +106,10 @@ def snapshot_pins(cfg=None):
         # that sweeps either is pinned to what it ran with, and a record written
         # under a previous baseline carries the one it was measured against —
         # its config is `{}` either way, which is exactly why the config alone
-        # cannot tell a stale shipped arm from a current one.
+        # cannot tell a stale shipped arm from a current one. The regime's third
+        # component, the mutual term's weight and detachment, is read off the
+        # metrics (`panel_regime`), where run() records every arm's effective
+        # value.
         "epochs": int(cfg.get("epochs", train_mirt.EPOCHS)),
         "lr_schedule": str(cfg.get("lr_schedule", train_mirt.LR_SCHEDULE)),
         "torch": torch.__version__,
@@ -181,12 +184,12 @@ def main(argv=None):
                          "rating alone, which is the displacement arm; off "
                          "removes the term")
     ap.add_argument("--ortho-axes", type=float, default=None,
-                    help="a MUTUAL orthogonality penalty on the axes — the "
+                    help="the MUTUAL orthogonality penalty on the axes — the "
                          "squared off-diagonal of the loadings' batch "
-                         "correlation matrix (production 0: nothing in the "
-                         "shipped fit asks the axes to differ from each other; "
-                         "the teaching pull is what keeps them apart). The "
-                         "knob exists for the axis-space panel's free fits")
+                         f"correlation matrix (production {train_mirt.ORTHO_AXES}, "
+                         "on the detached readout); 0 removes the term. Part "
+                         "of the regime: its weight and detachment are pinned "
+                         "on every record")
     ap.add_argument("--teach-detach", type=int, default=None,
                     help="1 = the teaching pull acts on loadings computed from "
                          "a detached copy of the trunk output, so it steers the "
@@ -197,7 +200,9 @@ def main(argv=None):
                          "is detached from the trunk the same way (production 0)")
     ap.add_argument("--ortho-axes-detach", type=int, default=None,
                     help="1 = the mutual penalty (--ortho-axes) is detached from "
-                         "the trunk the same way")
+                         "the trunk the same way (production "
+                         f"{int(train_mirt.ORTHO_AXES_DETACH)}); 0 lets its "
+                         "gradient reach the trunk")
     ap.add_argument("--v-ridge-ladder", type=float, default=None,
                     help="ratio between consecutive axes' ridge weights on the "
                          "user positions (production 1.0, isotropic); above 1 "

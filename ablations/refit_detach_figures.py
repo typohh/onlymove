@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 """Which terms on the axis loadings need to reach the shared trunk (methodology
-§1.5, §1.14), read from the `detach` refit panel: the shipped fit against the
-same fit with one term's path into the trunk closed — the teaching pull, the
-rating-orthogonality penalty, both — plus a taught fit carrying a detached
-mutual penalty, and a free fit under an anisotropic ridge.
+§1.5, §1.14), read from the `detach` refit panel: the panel's baseline — the
+taught fit WITHOUT a mutual penalty, called `shipped` in its manifest and its
+figure keys — against the same fit with one term's path into the trunk closed
+(the teaching pull, the rating-orthogonality penalty, both), plus that fit
+carrying a detached mutual penalty, and a free fit under an anisotropic ridge.
+The mutual arm is what ships; the panel is defined against the fit without it,
+so its `shipped` arms declare `{}` and cannot be re-run under a baseline that
+carries the term without the manifest first pinning `ortho_axes 0`.
 
 A refit-tier producer never trains: it reads the arm records a panel run wrote
 under `dev_runs/<panel>/` and hard-fails when the panel is missing, short of
@@ -81,7 +85,7 @@ CONFIGS = {
 }
 ANISO = ("aniso_s{}", {"v_ridge_ladder": None})   # any ratio above one
 CFG_NOUN = {
-    "shipped": "the shipped fit",
+    "shipped": "the taught fit without a mutual penalty (the panel's baseline)",
     "teach_detach": "the teaching pull detached from the trunk",
     "ortho_detach": "the rating-orthogonality penalty detached from the trunk",
     "both_detach": "both detached",
@@ -109,7 +113,7 @@ def load_panel():
                 f"{arm} ran {rec['config']!r}, the manifest declares {cfg!r}")
         require(cfg.get("stop_unit") == "problem", f"{arm} holds aside rows")
         arms[arm] = rec
-    budget, schedule = panel_regime(arms)
+    budget, schedule = panel_regime(arms, mutual_may_vary=True)
     for arm, r in arms.items():
         require(r["metrics"]["trace"]
                 and r["metrics"]["trace"][-1]["epoch"] == budget,
@@ -140,7 +144,10 @@ def load_panel():
                         f"{pat.format(s)} records {k}={m.get(k)}")
             require((m.get("ortho_axes", 0.0) > 0) == (cfg == "mutual"),
                     f"{pat.format(s)} records a mutual weight of "
-                    f"{m.get('ortho_axes')}")
+                    f"{m.get('ortho_axes')} — this panel is defined against "
+                    f"the taught fit WITHOUT the term; under a baseline that "
+                    f"carries it, every non-mutual arm needs `ortho_axes 0` "
+                    f"declared in the manifest")
             require(float(m.get("v_ridge_ladder", 1.0)) == 1.0,
                     f"{pat.format(s)} carries an anisotropic ridge")
             require(int(m.get("lr_warmup_epochs", 0)) == 0,
