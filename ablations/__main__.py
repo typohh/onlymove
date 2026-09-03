@@ -40,6 +40,7 @@ PRODUCERS = (
     "recall_figures",
     "client_estimator_figures",
     "motif_findings_figures",
+    "serve_loop_figures",
     "rank_map_arm_figures",
     "rank_calibration_figures",
     "published_params_figures",
