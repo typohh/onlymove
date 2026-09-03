@@ -187,6 +187,22 @@ def main(argv=None):
                          "shipped fit asks the axes to differ from each other; "
                          "the teaching pull is what keeps them apart). The "
                          "knob exists for the axis-space panel's free fits")
+    ap.add_argument("--teach-detach", type=int, default=None,
+                    help="1 = the teaching pull acts on loadings computed from "
+                         "a detached copy of the trunk output, so it steers the "
+                         "axis readout alone and never the network the rating "
+                         "shares (production 0: the pull reaches the trunk)")
+    ap.add_argument("--ortho-detach", type=int, default=None,
+                    help="1 = the rating-orthogonality penalty's loadings side "
+                         "is detached from the trunk the same way (production 0)")
+    ap.add_argument("--ortho-axes-detach", type=int, default=None,
+                    help="1 = the mutual penalty (--ortho-axes) is detached from "
+                         "the trunk the same way")
+    ap.add_argument("--v-ridge-ladder", type=float, default=None,
+                    help="ratio between consecutive axes' ridge weights on the "
+                         "user positions (production 1.0, isotropic); above 1 "
+                         "the prior is anisotropic and the objective is no "
+                         "longer indifferent to rotating the axis space")
     ap.add_argument("--teach-weight", type=float, default=None,
                     help="the pull toward the taught rule columns (production "
                          f"{train_mirt.TEACH_WEIGHT}); 0 frees the basis")
@@ -257,7 +273,8 @@ def main(argv=None):
     cfg = {}
     for flag in ("seed", "epochs", "shallow_w", "shallow_tau", "lr_net",
                  "lr_field", "ortho_rating", "ortho_mode", "ortho_axes",
-                 "teach_weight",
+                 "teach_weight", "teach_detach", "ortho_detach",
+                 "ortho_axes_detach", "v_ridge_ladder",
                  "pca_dim", "blocks", "stop_unit", "k_axes",
                  "dropout", "input_dropout", "weight_decay",
                  "weight_decay_fields",

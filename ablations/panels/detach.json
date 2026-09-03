@@ -1,0 +1,326 @@
+{
+  "panel": "detach",
+  "description": "methodology 1.5 / 1.14 — which of the terms on the axis loadings need to reach the shared trunk, and what the alternatives to a taught target buy. The axis_space panel put the teaching pull's cost at 4.5 mnat on held-out problems, paired at every seed and entirely in the rating's own outputs; the pull, the rating-orthogonality penalty and any mutual penalty all act on loadings the trunk computes, so each has a path into the parameters the rating reads, and none of them has been measured with that path closed. EVERY ARM IS THE SHIPPED FIT WITH ONE PATH DETACHED: the loadings a term acts on are computed from a detached copy of the trunk output (same values, no second trunk pass, no gauge update), so the term steers which directions of the representation the axes read out and cannot reshape the representation. teach_detach closes the pull's path; ortho_detach closes the rating-orthogonality penalty's; both_detach closes both — the arm that would ship if each helps alone. mutual adds a mutual-orthogonality penalty to the TAUGHT fit, detached and at a quarter of the weight the free fits carried, because the taught axes hold 5.3 distinct directions with their worst pair at 0.41 and the only fits whose axes were worth more to long-history users were the ones forced to seven; the question is whether distinctness and identity can be had together without the rating paying. aniso is the free fit under an ANISOTROPIC ridge on the user positions — a geometric ladder over the axis index, ratio 1.3 — the one in-objective candidate for identity without a taught target: a distinct ridge per axis makes the objective prefer one basis, the least-penalized axis taking the direction of largest between-user variance. It does not price duplication, so its effective dimension is read beside its cross-seed agreement. EIGHT SEEDS for every arm paired against the shipped fit, at one pinned draw (split_seed 0) and feature basis (pca_seed 0), because the contrasts asked about are the size of the run-to-run spread and four seeds cannot resolve them; four seeds for aniso, whose figures are within-family agreement rather than a paired level. What a detachment may not do is lose identity: every arm is read for agreement with the taught rule ends and for cross-seed agreement beside its level.",
+  "arms": {
+    "shipped_s0": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 0
+    },
+    "teach_detach_s0": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 0,
+      "teach_detach": 1
+    },
+    "ortho_detach_s0": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 0,
+      "ortho_detach": 1
+    },
+    "both_detach_s0": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 0,
+      "teach_detach": 1,
+      "ortho_detach": 1
+    },
+    "mutual_s0": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 0,
+      "ortho_axes": 0.25,
+      "ortho_axes_detach": 1
+    },
+    "shipped_s1": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 1
+    },
+    "teach_detach_s1": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 1,
+      "teach_detach": 1
+    },
+    "ortho_detach_s1": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 1,
+      "ortho_detach": 1
+    },
+    "both_detach_s1": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 1,
+      "teach_detach": 1,
+      "ortho_detach": 1
+    },
+    "mutual_s1": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 1,
+      "ortho_axes": 0.25,
+      "ortho_axes_detach": 1
+    },
+    "shipped_s2": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 2
+    },
+    "teach_detach_s2": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 2,
+      "teach_detach": 1
+    },
+    "ortho_detach_s2": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 2,
+      "ortho_detach": 1
+    },
+    "both_detach_s2": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 2,
+      "teach_detach": 1,
+      "ortho_detach": 1
+    },
+    "mutual_s2": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 2,
+      "ortho_axes": 0.25,
+      "ortho_axes_detach": 1
+    },
+    "shipped_s3": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 3
+    },
+    "teach_detach_s3": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 3,
+      "teach_detach": 1
+    },
+    "ortho_detach_s3": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 3,
+      "ortho_detach": 1
+    },
+    "both_detach_s3": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 3,
+      "teach_detach": 1,
+      "ortho_detach": 1
+    },
+    "mutual_s3": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 3,
+      "ortho_axes": 0.25,
+      "ortho_axes_detach": 1
+    },
+    "shipped_s4": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 4
+    },
+    "teach_detach_s4": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 4,
+      "teach_detach": 1
+    },
+    "ortho_detach_s4": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 4,
+      "ortho_detach": 1
+    },
+    "both_detach_s4": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 4,
+      "teach_detach": 1,
+      "ortho_detach": 1
+    },
+    "mutual_s4": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 4,
+      "ortho_axes": 0.25,
+      "ortho_axes_detach": 1
+    },
+    "shipped_s5": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 5
+    },
+    "teach_detach_s5": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 5,
+      "teach_detach": 1
+    },
+    "ortho_detach_s5": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 5,
+      "ortho_detach": 1
+    },
+    "both_detach_s5": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 5,
+      "teach_detach": 1,
+      "ortho_detach": 1
+    },
+    "mutual_s5": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 5,
+      "ortho_axes": 0.25,
+      "ortho_axes_detach": 1
+    },
+    "shipped_s6": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 6
+    },
+    "teach_detach_s6": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 6,
+      "teach_detach": 1
+    },
+    "ortho_detach_s6": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 6,
+      "ortho_detach": 1
+    },
+    "both_detach_s6": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 6,
+      "teach_detach": 1,
+      "ortho_detach": 1
+    },
+    "mutual_s6": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 6,
+      "ortho_axes": 0.25,
+      "ortho_axes_detach": 1
+    },
+    "shipped_s7": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 7
+    },
+    "teach_detach_s7": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 7,
+      "teach_detach": 1
+    },
+    "ortho_detach_s7": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 7,
+      "ortho_detach": 1
+    },
+    "both_detach_s7": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 7,
+      "teach_detach": 1,
+      "ortho_detach": 1
+    },
+    "mutual_s7": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 7,
+      "ortho_axes": 0.25,
+      "ortho_axes_detach": 1
+    },
+    "aniso_s0": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 0,
+      "teach_weight": 0.0,
+      "v_ridge_ladder": 1.3
+    },
+    "aniso_s1": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 1,
+      "teach_weight": 0.0,
+      "v_ridge_ladder": 1.3
+    },
+    "aniso_s2": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 2,
+      "teach_weight": 0.0,
+      "v_ridge_ladder": 1.3
+    },
+    "aniso_s3": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 3,
+      "teach_weight": 0.0,
+      "v_ridge_ladder": 1.3
+    }
+  }
+}

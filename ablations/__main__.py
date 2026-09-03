@@ -60,6 +60,7 @@ PRODUCERS = (
     "refit_schedule_figures",
     "refit_axis_space_figures",
     "refit_ramp_figures",
+    "refit_detach_figures",
 )
 
 

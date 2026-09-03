@@ -359,6 +359,10 @@ class JointMIRT(nn.Module):
         cap = 1.0 - 2.0 * lam
         c = cap * torch.sigmoid(o[:, 2])
         g = self.g_lin(h)
+        # Kept for `detached_loadings`: the same representation and, below, the
+        # same divisor this batch's loadings use, so a detached readout is the
+        # batch's loadings exactly, minus the path back into the trunk.
+        self._last_h = h
         # The axis gauge, run exactly like the difficulty one above: the batch's
         # own per-axis RMS while training, its EMA at eval. Eval is what makes it
         # a gauge rather than a side effect — the divisor stops depending on what
@@ -377,7 +381,16 @@ class JointMIRT(nn.Module):
                 self.g_rms.mul_(1 - GAUGE_MOM).add_(GAUGE_MOM * rms)
         else:
             rms = self.g_rms
+        self._last_rms = rms
         return b, a, c, g / rms
+
+    def detached_loadings(self):
+        """The last batch's loadings computed from a DETACHED copy of the trunk
+        output: identical values, but a penalty on them reaches the axis readout
+        alone and never the network the rating shares. No second trunk pass and
+        no gauge update. An ablation path; the shipped terms read `forward`'s
+        loadings, whose gradient does reach the trunk."""
+        return self.g_lin(self._last_h.detach()) / self._last_rms
 
     def forward(self, uid, feat):
         b, a, c, g = self.problem_params(feat)
@@ -552,6 +565,8 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         pca_dim=PCA_DIM, blocks=PRODUCTION_BLOCKS, stop_unit="row",
         split_seed=None, pca_seed=None, lr_schedule=LR_SCHEDULE,
         lr_warmup_epochs=0, ortho_axes=0.0,
+        teach_detach=False, ortho_detach=False, ortho_axes_detach=False,
+        v_ridge_ladder=1.0,
         k_axes=K_AXES, dropout=DROPOUT, input_dropout=INPUT_DROPOUT,
         weight_decay=0.0, weight_decay_fields=None,
         out_dir=OUT_DIR, axes_dir=AXES_DIR):
@@ -725,7 +740,20 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
             # be: the gradient along it is analytically zero, and it stays at
             # ~0.002-0.009 over a full run against a per-axis spread an order of
             # magnitude larger.
-            loss = loss + v_ridge * (m.user_axis(tu[bi]) ** 2).sum() / len(bi)
+            if v_ridge_ladder == 1.0:
+                loss = loss + v_ridge * (m.user_axis(tu[bi]) ** 2).sum() / len(bi)
+            else:
+                # ANISOTROPIC, an ablation path: a distinct ridge per axis,
+                # geometric in the axis index, breaks the objective's
+                # indifference to rotating the axis space — the least-penalized
+                # axis takes the direction of largest between-user variance —
+                # which is the one in-objective candidate for identity without
+                # a taught target. It does not price duplication: two axes
+                # sharing a direction still pay less than one carrying it
+                # unless their ridges differ threefold.
+                ladder = v_ridge * v_ridge_ladder ** torch.arange(
+                    k_axes, device=device, dtype=torch.float32)
+                loss = loss + (ladder * m.user_axis(tu[bi]) ** 2).sum() / len(bi)
             # DECORRELATE THE AXES FROM DIFFICULTY. Nothing else does: centring
             # v (user_axis) removes only the POPULATION mean, which blocks an
             # axis acting as a global difficulty shift but not one tracking
@@ -759,6 +787,15 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
             # happens to be widest. The targets are DETACHED, so this can only
             # push the axes off the rating side and never degrade the rating to
             # satisfy itself.
+            # DETACHED READOUTS, ablation paths: each of the three terms on the
+            # loadings can be pointed at the readout alone, so that it steers
+            # which directions of the trunk's representation the axes read out
+            # without reshaping the representation the rating also reads.
+            gh_d = m.detached_loadings() if (teach_detach or ortho_detach
+                                             or ortho_axes_detach) else None
+            gh_o = gh_d if ortho_detach else gh
+            gh_m = gh_d if ortho_axes_detach else gh
+            gh_t = gh_d if teach_detach else gh
             tz = rsf - rsf.mean(dim=0, keepdim=True)
             tz = tz / (tz.norm(dim=0, keepdim=True) + 1e-9)
             # PER TAIL, not whole-axis. A whole-axis correlation is a LINEAR
@@ -780,7 +817,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
                 # which is the whole reason the penalty names all three.
                 tgt = tz if ortho_mode == "per_tail" else tz[:, :1]
                 for _sg in (1.0, -1.0):
-                    W = _tail_w(torch, _sg * gh, TAIL_HINGE)
+                    W = _tail_w(torch, _sg * gh_o, TAIL_HINGE)
                     W = W - W.mean(dim=0, keepdim=True)
                     W = W / (W.norm(dim=0, keepdim=True) + 1e-9)
                     loss = loss + ortho_rating * (W.T @ tgt).pow(2).sum()
@@ -788,7 +825,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
                 # The whole-axis form, kept ONLY as a comparison arm: a linear
                 # statistic that a symmetric tail dependence satisfies at zero,
                 # which is the failure the per-tail form above exists to close.
-                W = gh - gh.mean(dim=0, keepdim=True)
+                W = gh_o - gh_o.mean(dim=0, keepdim=True)
                 W = W / (W.norm(dim=0, keepdim=True) + 1e-9)
                 loss = loss + ortho_rating * (W.T @ tz).pow(2).sum()
             elif ortho_mode != "off":
@@ -803,7 +840,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
             # identity — whole-axis, since a duplicated axis IS a whole-axis
             # correlation of one, with or without a sign.
             if ortho_axes > 0:
-                Wm = gh - gh.mean(dim=0, keepdim=True)
+                Wm = gh_m - gh_m.mean(dim=0, keepdim=True)
                 Wm = Wm / (Wm.norm(dim=0, keepdim=True) + 1e-9)
                 Cm = Wm.T @ Wm
                 loss = loss + ortho_axes * (
@@ -835,7 +872,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
                 # bank, which costs nothing downstream — problem_params
                 # divides by g_rms, so any residual scale is removed before
                 # anything reads a loading, and v absorbs the rest.
-                gz = (gh - gh.mean(0)) / (gh.std(0) + 1e-6)
+                gz = (gh_t - gh_t.mean(0)) / (gh_t.std(0) + 1e-6)
                 loss = loss + teach_weight * (
                     (gz[mk] - t_tgt[tp[bi]][mk]) ** 2).mean()
             m.train(False)          # the barrier reads corpus rows, dropout off
@@ -1042,6 +1079,10 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         "lr_schedule": str(lr_schedule),
         "lr_warmup_epochs": int(lr_warmup_epochs),
         "ortho_axes": float(ortho_axes),
+        "teach_detach": bool(teach_detach),
+        "ortho_detach": bool(ortho_detach),
+        "ortho_axes_detach": bool(ortho_axes_detach),
+        "v_ridge_ladder": float(v_ridge_ladder),
         "lr_integral_epochs": round(lr_epochs, 3),
         "split_seed": int(seed if split_seed is None else split_seed),
         "pca_seed": int(seed if pca_seed is None else pca_seed),
