@@ -1,6 +1,6 @@
 // js/game-logic.js
 
-import * as Sentry from "@sentry/browser";
+import { addBreadcrumb } from "@sentry/browser";
 
 import { state, setAcceptClicks, setAppMode, setReviewStartTime } from './state.js';
 import { getCurrentNode, getLegalMoveNode, playMoveByIndex, playNextMove } from './board.js';
@@ -101,7 +101,7 @@ const handleCorrectAnswer = async (x, y) => {
 }
 
 async function _handleIncorrectMoveSequence(moveIndex, x, y, variationNodes) {
-    Sentry.addBreadcrumb({
+    addBreadcrumb({
         category: 'flow',
         message: '_handleIncorrectMoveSequence started',
         level: 'info',

@@ -1,5 +1,5 @@
 // js/main.js
-import * as Sentry from "@sentry/browser";
+import { captureMessage, init, setUser } from "@sentry/browser";
 import { initDebugLog } from './debug-log.js';
 
 // Capture console messages early so the hidden viewer (5 taps on the title)
@@ -14,7 +14,7 @@ registerAcceptClicksHook(maybeShowRankSurvey);
 
 try {
     // Initialize Sentry
-    Sentry.init({
+    init({
         dsn: 'https://50b747ee522c1bc41c8243563ce7adc1@o4510091105665024.ingest.de.sentry.io/4510091110187088',
         // Tag every event with the build version (the same git-hash string the
         // Worker stamps on X-App-Version), so errors bucket by deploy. APP_VERSION
@@ -25,8 +25,10 @@ try {
         // "zaloJSV2 is not defined".
         ignoreErrors: [/zaloJSV2/],
     });
-    window.Sentry = Sentry; // Make Sentry globally available
-    Sentry.setUser({ id: state.userId });
+    // The console global is built from the named imports on purpose: a
+    // namespace import assigned here keeps every integration in the bundle.
+    window.Sentry = { captureMessage, setUser };
+    setUser({ id: state.userId });
 } catch (error) {
     console.error("Sentry initialization failed:", error);
 }
@@ -174,7 +176,7 @@ async function performIgnore() {
         addIgnoredProblem(problemId);
         updateAnswerHistory(answerHistory);
     } else {
-        Sentry.captureMessage("Ignore button: last answer does not match problem.", {
+        captureMessage("Ignore button: last answer does not match problem.", {
             extra: {
                 lastAnswer,
                 problemId
@@ -421,13 +423,13 @@ function loadRequiredAssetsOrThrow() {
     const ratingRankMap = loadRatingRankMap();
     if (!ratingRankMap) {
         const msg = 'rating_to_rank.json (rating→rank map M) missing/empty in bundle; cannot continue.';
-        try { Sentry.captureMessage(msg, { level: 'fatal' }); } catch (_) {}
+        try { captureMessage(msg, { level: 'fatal' }); } catch (_) {}
         throw new Error(msg);
     }
     const populationConstants = loadPopulationConstants();
     if (!populationConstants) {
         const msg = 'population_constants.json (model constants) missing/empty in bundle; cannot continue.';
-        try { Sentry.captureMessage(msg, { level: 'fatal' }); } catch (_) {}
+        try { captureMessage(msg, { level: 'fatal' }); } catch (_) {}
         throw new Error(msg);
     }
 }
@@ -620,7 +622,7 @@ function recoverBoardIfNeeded() {
             redraw();
             return true;
         } catch (e) {
-            Sentry.captureMessage('Board recovery failed: ' + e.message, 'error');
+            captureMessage('Board recovery failed: ' + e.message, 'error');
             return false;
         }
     }
@@ -667,7 +669,7 @@ function wireLifecycleRecovery() {
             if (recoveredThisResume) return;
             recoveredThisResume = true;
             if (!recoverBoardIfNeeded()) {
-                Sentry.captureMessage(`Canvas recovery failed on ${source}, reloading...`, 'error');
+                captureMessage(`Canvas recovery failed on ${source}, reloading...`, 'error');
                 location.reload();
             }
         }));

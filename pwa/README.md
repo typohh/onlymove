@@ -15,7 +15,6 @@ The codebase is vanilla JavaScript (ES modules), bundled with esbuild and shippe
 | Frontend       | HTML, CSS, JavaScript (ES modules)          | Application structure, styling, and logic.                        |
 | Libraries      | WGo.js                                      | Board rendering and SGF parsing.                                  |
 |                | JSZip                                       | Reading zipped tsumego archives client-side.                      |
-|                | math.js                                     | Matrix algebra for the client-side model fits.                    |
 |                | Sentry (browser)                            | Error reporting.                                                  |
 | Storage        | localStorage + IndexedDB                    | Recent attempt history and models; the older history tail.        |
 | Build          | Node.js, npm, esbuild                       | Dependency management and bundling.                               |
@@ -24,7 +23,7 @@ The codebase is vanilla JavaScript (ES modules), bundled with esbuild and shippe
 |                | Cloudflare D1 (`tsumego-reports`)           | Attempt log, push subscriptions, schedules, surveys, leaderboard. |
 |                | Web Push (VAPID)                            | Recall reminders, delivered from the cron handler.                |
 
-The three `lib/` bundles are loaded as classic scripts from `index.html` and used as globals; everything under `js/` is an ES module bundled by esbuild.
+The `lib/` bundles (WGo.js and JSZip) are loaded as classic scripts from `index.html` and used as globals; everything under `js/` is an ES module bundled by esbuild.
 
 ## 3. Project structure
 
@@ -98,7 +97,7 @@ The three `lib/` bundles are loaded as classic scripts from `index.html` and use
 │   └── version.js           # Build-stamped APP_VERSION (written by build.mjs)
 │
 ├── migrations/              # Dated D1 migrations, applied manually
-├── lib/                     # Bundled third-party libs (WGo.js, JSZip, math.js).
+├── lib/                     # Bundled third-party libs (WGo.js, JSZip).
 │                            #   Copied wholesale into dist/ and SHIPPED, so keep
 │                            #   non-runtime files out; WGo.js's own API reference
 │                            #   is docs/vendor/WGo.js.html.

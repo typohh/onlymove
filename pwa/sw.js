@@ -16,7 +16,6 @@ const PRECACHE_URLS = [
     '/lib/wgo/wgo.min.js',
     '/lib/wgo/wgo.player.min.js',
     '/lib/jszip.min.js',
-    '/lib/math.min.js',
     '/manifest.json',
     '/sound/stone.wav',
     // Decorative ink-wash corner masks. Fixed filenames (not content-hashed),

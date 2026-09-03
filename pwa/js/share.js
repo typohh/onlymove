@@ -5,7 +5,7 @@
 // and offers link / image / both via the Web Share API with clipboard and
 // toast fallbacks. Pulled out of main.js so the entry point stays wiring-only.
 
-import * as Sentry from "@sentry/browser";
+import { captureMessage } from "@sentry/browser";
 import { state } from './state.js';
 import { tsumegoIdOf } from './sgf.js';
 import { getTerm } from './i18n.js';
@@ -152,7 +152,7 @@ export function performShare() {
     const reportShareRefusal = (action, err) => {
         try {
             const act = navigator.userActivation;
-            Sentry.captureMessage('Web Share refused', {
+            captureMessage('Web Share refused', {
                 level: 'warning',
                 extra: {
                     action,

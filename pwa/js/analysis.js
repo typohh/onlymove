@@ -1,6 +1,6 @@
 // js/analysis.js
 
-import * as Sentry from "@sentry/browser";
+import { addBreadcrumb } from "@sentry/browser";
 
 import { state, setAppMode, setAcceptClicks, setInitialAnalysisNode, setGhostMove, setReviewStartTime, setAnalysisHintMove, setCandidateMoves } from './state.js';
 import { fetchAnalysis } from './analysis-api.js';
@@ -55,7 +55,7 @@ function subtreeReachesConclusion(node) {
  * Initializes and enters the analysis mode.
  */
 export function enterAnalysisMode() {
-    Sentry.addBreadcrumb({
+    addBreadcrumb({
         category: 'flow',
         message: 'enterAnalysisMode started',
         level: 'info'

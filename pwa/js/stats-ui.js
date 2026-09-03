@@ -11,7 +11,7 @@
 // is one-directional: this module consumes the model's exported helpers;
 // recall-model.js never reaches back into the UI.
 
-import * as Sentry from "@sentry/browser";
+import { captureException } from "@sentry/browser";
 import { state, setStatsResults, getMergedAnswerHistory, getMergedFullAnswerHistory, getTailEvictionStatus } from './state.js';
 import { MODEL_INPUT_HISTORY_LENGTH } from './constants.js';
 import { getTerm } from './i18n.js';

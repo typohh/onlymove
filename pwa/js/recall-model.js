@@ -10,7 +10,7 @@
 // and stores the fit. It reads "stats" because the output lands in
 // state.statsResults.
 
-import * as Sentry from "@sentry/browser";
+import { captureException, captureMessage } from "@sentry/browser";
 import { state, setStatsResults, setModelParams, getMergedAnswerHistory, getAnswerHistoryForSize } from './state.js';
 // The population's central rank — the stand-in for a GENERIC problem's difficulty when
 // a caller has none to give. A different job from the state slots' cold start (which is
@@ -18,7 +18,7 @@ import { state, setStatsResults, setModelParams, getMergedAnswerHistory, getAnsw
 import { PRIOR_MEAN } from '../shared/rank-window.js';
 import { MODEL_INPUT_HISTORY_LENGTH, RECALL_CANDIDATE_HISTORY_LENGTH } from './constants.js';
 import { tsumegoIdOf } from './sgf.js';
-import { sigmoid, normCdf } from './math-utils.js';
+import { sigmoid, normCdf, invertMatrix } from './math-utils.js';
 import { clearKappa, clampFloor, clearSpan } from './irt.js';
 import { ratingPerRank } from './rank-decomposition.js';
 import { newtonBlockStep } from './optimizer.js';
@@ -809,14 +809,14 @@ export function calculateAndStoreStatsResults() {
             setStatsResults(finalResults);
         } else {
             console.error("Model training resulted in non-numeric weights. Wiping model state.");
-            Sentry.captureMessage("Model training resulted in non-numeric weights.");
+            captureMessage("Model training resulted in non-numeric weights.");
             setModelParams(null);
             setStatsResults(null);
         }
 
     } catch (error) {
         console.error('Unified model training failed:', error);
-        Sentry.captureException(error);
+        captureException(error);
     }
 }
 
@@ -1120,9 +1120,9 @@ export function calculateResultsAndStdErrors(finalParams, trainingData) {
     // columns stay zero; the ridge guard keeps the matrix invertible (large unused
     // SE there). This is the same information the correctness block steps on.
     //
-    // Accumulated straight into the (np × np) array rather than as Dᵀ·W·D through
-    // math.js: W is a DIAGONAL of per-row weights, and materializing it as a dense
-    // n × n matrix made this step — not the fit — the dominant cost of a retrain.
+    // Accumulated straight into the (np × np) array rather than as Dᵀ·W·D: W is a
+    // DIAGONAL of per-row weights, and materializing it as a dense n × n matrix
+    // made this step — not the fit — the dominant cost of a retrain.
     const logitIdx = [M.INTERCEPT, M.TIME_SOLVING, M.REVIEW_TIME, M.PROBLEM_DIFFICULTY, M.SIZE_IS_13];
     const info = Array.from({ length: np }, () => new Array(np).fill(0));
     for (let i = 0; i < n; i++) {
@@ -1139,8 +1139,8 @@ export function calculateResultsAndStdErrors(finalParams, trainingData) {
         }
     }
     for (let j = 0; j < np; j++) info[j][j] += RIDGE_GUARD;
-    const varCovarMatrix = math.inv(math.matrix(info));
-    const stdErrors = math.map(math.diag(varCovarMatrix), math.sqrt).toArray();
+    const varCovarMatrix = invertMatrix(info);
+    const stdErrors = varCovarMatrix.map((row, j) => Math.sqrt(row[j]));
 
     const results = [];
     for (let i = 1; i < Object.keys(MODEL_INDICES).length; i++) {

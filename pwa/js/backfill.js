@@ -28,7 +28,7 @@
 // for every supported size on every app load; each size short-circuits
 // when both versions match.
 
-import * as Sentry from "@sentry/browser";
+import { captureException } from "@sentry/browser";
 import {
     state,
     getAnswerHistoryForSize, setAnswerHistoryForSize,
@@ -393,7 +393,7 @@ async function verifyStoredVectorsOnce() {
             }
         } catch (err) {
             console.warn(`vector audit[${size}] failed:`, err);
-            try { Sentry.captureException(err); } catch (_) {}
+            try { captureException(err); } catch (_) {}
             return;   // leave un-flagged; the next load retries
         }
     }
@@ -504,7 +504,7 @@ async function repopulateMissingFields() {
             }
         } catch (err) {
             console.warn(`repopulate[${size}] failed:`, err);
-            try { Sentry.captureException(err); } catch (_) {}
+            try { captureException(err); } catch (_) {}
             return;   // the next load retries
         }
     }
@@ -999,7 +999,7 @@ async function backfillForSize(size, { embeddingsChanged, ratingsChanged, curveC
         return { count: totalFilled + totalFilledPicked + totalRatingsUpdated + curveRankUpdated, ok: true };
     } catch (err) {
         console.error(`backfill[${size}] failed`, err);
-        try { Sentry.captureException(err); } catch (_) {}
+        try { captureException(err); } catch (_) {}
         return { count: 0, ok: false };
     }
 }
@@ -1356,7 +1356,7 @@ export async function fillSyncedHistoryFields(sizes, { includeTail = false } = {
             total += await fillSyncedForSize(size, problemParams);
         } catch (err) {
             console.error(`synced-fill[${size}] failed`, err);
-            try { Sentry.captureException(err); } catch (_) {}
+            try { captureException(err); } catch (_) {}
         }
     }
     if (includeTail) {
@@ -1579,7 +1579,7 @@ export async function fillSyncedTailFields(sizes, problemParams = null) {
             ok = ok && r.ok;
         } catch (err) {
             console.warn(`synced-tail-fill[${size}] failed:`, err);
-            try { Sentry.captureException(err); } catch (_) {}
+            try { captureException(err); } catch (_) {}
             ok = false;
         }
     }

@@ -1,6 +1,6 @@
 // js/problem-loader.js
 
-import * as Sentry from "@sentry/browser";
+import { captureException, captureMessage } from "@sentry/browser";
 
 import { state, zipCache, embeddingsIndexCache, setAcceptClicks, setChallengeProblem, setCurrentProblem, setPreviousProblem, setAppMode, setCurrentSolvingStartTime, resetAccumulatedSolvingTime, setBoardSize, getResumeProblem, getMergedAnswerHistory } from './state.js';
 import { loadSgf } from './board.js';
@@ -369,7 +369,7 @@ async function doLoadZipProblems(zipFilename) {
             const reloadThreshold = 30000; // 30 seconds
             const hasRecentReload = lastReloadTime && (now - parseInt(lastReloadTime)) < reloadThreshold;
             if (state.userHasInteracted && !hasRecentReload) {
-                Sentry.captureMessage('Reloading due to missing zip file', {
+                captureMessage('Reloading due to missing zip file', {
                     level: 'warning',
                     extra: { zipFilename }
                 });
@@ -691,7 +691,7 @@ function reportLoadError(error, attempt) {
     // An AbortError from navigating away mid-fetch is benign noise — skip Sentry.
     if (!error.aborted) {
         try {
-            Sentry.captureException(error, {
+            captureException(error, {
                 extra: { attempt: attempt + 1, failedProblemId: error.failedProblemId, boardSize: state.boardSize },
             });
         } catch (_) {}
@@ -707,7 +707,7 @@ function handleLoadFailure(lastError) {
     const lastReload = parseInt(localStorage.getItem('lastReloadTime') || '0', 10);
     const recentlyReloaded = Date.now() - lastReload < RELOAD_COOLDOWN_MS;
     if (state.userHasInteracted && !recentlyReloaded) {
-        try { Sentry.captureMessage('Reloading after repeated tsumego load failures', { level: 'warning' }); } catch (_) {}
+        try { captureMessage('Reloading after repeated tsumego load failures', { level: 'warning' }); } catch (_) {}
         localStorage.setItem('lastReloadTime', String(Date.now()));
         displayOverlay('Error loading problem. Reloading…', 1500);
         setTimeout(() => location.reload(), 1500);
