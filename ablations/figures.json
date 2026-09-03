@@ -4228,6 +4228,482 @@
         "data_version": "f6fba7b749bc0ecb"
       }
     },
+    "ramp.best_at_boundary": {
+      "value": 0,
+      "fmt": "d",
+      "text": "0",
+      "producer": "ablations.refit_ramp_figures",
+      "tier": "refit",
+      "note": "1 if the best length is the longest tried — a boundary, not an optimum, and the sweep has to be extended",
+      "measured": {
+        "at": "2026-09-03T02:38:55Z",
+        "git": "b05f75da402",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "ramp.best_length": {
+      "value": 250,
+      "fmt": "d",
+      "text": "250",
+      "producer": "ablations.refit_ramp_figures",
+      "tier": "refit",
+      "note": "the length with the best mean held-out-problem level",
+      "measured": {
+        "at": "2026-09-03T02:38:55Z",
+        "git": "b05f75da402",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "ramp.l0_basis_mean": {
+      "value": 0.9322941376219032,
+      "fmt": ".2f",
+      "text": "0.93",
+      "producer": "ablations.refit_ramp_figures",
+      "tier": "refit",
+      "note": "0-epoch ramp: cross-seed matched-axis |correlation|, averaged over all seed pairs",
+      "measured": {
+        "at": "2026-09-03T02:38:55Z",
+        "git": "b05f75da402",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "ramp.l0_taught_agreement": {
+      "value": 0.6621177099831953,
+      "fmt": ".2f",
+      "text": "0.66",
+      "producer": "ablations.refit_ramp_figures",
+      "tier": "refit",
+      "note": "0-epoch ramp: mean agreement of each axis's taught end with its rule, over the seeds",
+      "measured": {
+        "at": "2026-09-03T02:38:55Z",
+        "git": "b05f75da402",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "ramp.l0_work_epochs": {
+      "value": 3500,
+      "fmt": "d",
+      "text": "3500",
+      "producer": "ablations.refit_ramp_figures",
+      "tier": "refit",
+      "note": "constant-rate epochs of work a 0-epoch ramp delivers",
+      "measured": {
+        "at": "2026-09-03T02:38:55Z",
+        "git": "b05f75da402",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "ramp.l1000_basis_mean": {
+      "value": 0.9408446014890287,
+      "fmt": ".2f",
+      "text": "0.94",
+      "producer": "ablations.refit_ramp_figures",
+      "tier": "refit",
+      "note": "1000-epoch ramp: cross-seed matched-axis |correlation|, averaged over all seed pairs",
+      "measured": {
+        "at": "2026-09-03T02:38:55Z",
+        "git": "b05f75da402",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "ramp.l1000_gain_ci_mnat": {
+      "value": 2.2341941534116443,
+      "fmt": ".1f",
+      "text": "2.2",
+      "producer": "ablations.refit_ramp_figures",
+      "tier": "refit",
+      "note": "half-width of that gain's 95% t-interval, millinats",
+      "measured": {
+        "at": "2026-09-03T02:38:55Z",
+        "git": "b05f75da402",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "ramp.l1000_gain_mnat": {
+      "value": 0.34867706043377467,
+      "fmt": "+.1f",
+      "text": "+0.3",
+      "producer": "ablations.refit_ramp_figures",
+      "tier": "refit",
+      "note": "no-ramp level minus the 1000-epoch ramp's, paired per seed on held-out problems and averaged, millinats; positive = the ramp predicts better",
+      "measured": {
+        "at": "2026-09-03T02:38:55Z",
+        "git": "b05f75da402",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "ramp.l1000_gain_p": {
+      "value": 0.7230128334056674,
+      "fmt": ".3f",
+      "text": "0.723",
+      "producer": "ablations.refit_ramp_figures",
+      "tier": "refit",
+      "note": "two-sided paired t-test p for that gain",
+      "measured": {
+        "at": "2026-09-03T02:38:55Z",
+        "git": "b05f75da402",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "ramp.l1000_rating_gain_mnat": {
+      "value": 0.29370933771133423,
+      "fmt": "+.1f",
+      "text": "+0.3",
+      "producer": "ablations.refit_ramp_figures",
+      "tier": "refit",
+      "note": "the same paired gain with the axis term zeroed — the rating's share of it",
+      "measured": {
+        "at": "2026-09-03T02:38:55Z",
+        "git": "b05f75da402",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "ramp.l1000_seeds_better": {
+      "value": 6,
+      "fmt": "d",
+      "text": "6",
+      "producer": "ablations.refit_ramp_figures",
+      "tier": "refit",
+      "note": "of 8 seeds, how many the 1000-epoch ramp beats no ramp on",
+      "measured": {
+        "at": "2026-09-03T02:38:55Z",
+        "git": "b05f75da402",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "ramp.l1000_taught_agreement": {
+      "value": 0.6648022980203636,
+      "fmt": ".2f",
+      "text": "0.66",
+      "producer": "ablations.refit_ramp_figures",
+      "tier": "refit",
+      "note": "1000-epoch ramp: mean agreement of each axis's taught end with its rule, over the seeds",
+      "measured": {
+        "at": "2026-09-03T02:38:55Z",
+        "git": "b05f75da402",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "ramp.l1000_work_epochs": {
+      "value": 3005,
+      "fmt": "d",
+      "text": "3005",
+      "producer": "ablations.refit_ramp_figures",
+      "tier": "refit",
+      "note": "constant-rate epochs of work a 1000-epoch ramp delivers",
+      "measured": {
+        "at": "2026-09-03T02:38:55Z",
+        "git": "b05f75da402",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "ramp.l250_basis_mean": {
+      "value": 0.9395189224662799,
+      "fmt": ".2f",
+      "text": "0.94",
+      "producer": "ablations.refit_ramp_figures",
+      "tier": "refit",
+      "note": "250-epoch ramp: cross-seed matched-axis |correlation|, averaged over all seed pairs",
+      "measured": {
+        "at": "2026-09-03T02:38:55Z",
+        "git": "b05f75da402",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "ramp.l250_gain_ci_mnat": {
+      "value": 2.3516273308054823,
+      "fmt": ".1f",
+      "text": "2.4",
+      "producer": "ablations.refit_ramp_figures",
+      "tier": "refit",
+      "note": "half-width of that gain's 95% t-interval, millinats",
+      "measured": {
+        "at": "2026-09-03T02:38:55Z",
+        "git": "b05f75da402",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "ramp.l250_gain_mnat": {
+      "value": 0.4819828484739358,
+      "fmt": "+.1f",
+      "text": "+0.5",
+      "producer": "ablations.refit_ramp_figures",
+      "tier": "refit",
+      "note": "no-ramp level minus the 250-epoch ramp's, paired per seed on held-out problems and averaged, millinats; positive = the ramp predicts better",
+      "measured": {
+        "at": "2026-09-03T02:38:55Z",
+        "git": "b05f75da402",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "ramp.l250_gain_p": {
+      "value": 0.6427239874012283,
+      "fmt": ".3f",
+      "text": "0.643",
+      "producer": "ablations.refit_ramp_figures",
+      "tier": "refit",
+      "note": "two-sided paired t-test p for that gain",
+      "measured": {
+        "at": "2026-09-03T02:38:55Z",
+        "git": "b05f75da402",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "ramp.l250_rating_gain_mnat": {
+      "value": 0.44898688793182373,
+      "fmt": "+.1f",
+      "text": "+0.4",
+      "producer": "ablations.refit_ramp_figures",
+      "tier": "refit",
+      "note": "the same paired gain with the axis term zeroed — the rating's share of it",
+      "measured": {
+        "at": "2026-09-03T02:38:55Z",
+        "git": "b05f75da402",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "ramp.l250_seeds_better": {
+      "value": 6,
+      "fmt": "d",
+      "text": "6",
+      "producer": "ablations.refit_ramp_figures",
+      "tier": "refit",
+      "note": "of 8 seeds, how many the 250-epoch ramp beats no ramp on",
+      "measured": {
+        "at": "2026-09-03T02:38:55Z",
+        "git": "b05f75da402",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "ramp.l250_taught_agreement": {
+      "value": 0.665832939100237,
+      "fmt": ".2f",
+      "text": "0.67",
+      "producer": "ablations.refit_ramp_figures",
+      "tier": "refit",
+      "note": "250-epoch ramp: mean agreement of each axis's taught end with its rule, over the seeds",
+      "measured": {
+        "at": "2026-09-03T02:38:55Z",
+        "git": "b05f75da402",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "ramp.l250_work_epochs": {
+      "value": 3376,
+      "fmt": "d",
+      "text": "3376",
+      "producer": "ablations.refit_ramp_figures",
+      "tier": "refit",
+      "note": "constant-rate epochs of work a 250-epoch ramp delivers",
+      "measured": {
+        "at": "2026-09-03T02:38:55Z",
+        "git": "b05f75da402",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "ramp.l500_basis_mean": {
+      "value": 0.9438372859995645,
+      "fmt": ".2f",
+      "text": "0.94",
+      "producer": "ablations.refit_ramp_figures",
+      "tier": "refit",
+      "note": "500-epoch ramp: cross-seed matched-axis |correlation|, averaged over all seed pairs",
+      "measured": {
+        "at": "2026-09-03T02:38:55Z",
+        "git": "b05f75da402",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "ramp.l500_gain_ci_mnat": {
+      "value": 1.198727946435261,
+      "fmt": ".1f",
+      "text": "1.2",
+      "producer": "ablations.refit_ramp_figures",
+      "tier": "refit",
+      "note": "half-width of that gain's 95% t-interval, millinats",
+      "measured": {
+        "at": "2026-09-03T02:38:55Z",
+        "git": "b05f75da402",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "ramp.l500_gain_mnat": {
+      "value": 0.4195342106478456,
+      "fmt": "+.1f",
+      "text": "+0.4",
+      "producer": "ablations.refit_ramp_figures",
+      "tier": "refit",
+      "note": "no-ramp level minus the 500-epoch ramp's, paired per seed on held-out problems and averaged, millinats; positive = the ramp predicts better",
+      "measured": {
+        "at": "2026-09-03T02:38:55Z",
+        "git": "b05f75da402",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "ramp.l500_gain_p": {
+      "value": 0.43521138347292965,
+      "fmt": ".3f",
+      "text": "0.435",
+      "producer": "ablations.refit_ramp_figures",
+      "tier": "refit",
+      "note": "two-sided paired t-test p for that gain",
+      "measured": {
+        "at": "2026-09-03T02:38:55Z",
+        "git": "b05f75da402",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "ramp.l500_rating_gain_mnat": {
+      "value": 0.34736841917037964,
+      "fmt": "+.1f",
+      "text": "+0.3",
+      "producer": "ablations.refit_ramp_figures",
+      "tier": "refit",
+      "note": "the same paired gain with the axis term zeroed — the rating's share of it",
+      "measured": {
+        "at": "2026-09-03T02:38:55Z",
+        "git": "b05f75da402",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "ramp.l500_seeds_better": {
+      "value": 6,
+      "fmt": "d",
+      "text": "6",
+      "producer": "ablations.refit_ramp_figures",
+      "tier": "refit",
+      "note": "of 8 seeds, how many the 500-epoch ramp beats no ramp on",
+      "measured": {
+        "at": "2026-09-03T02:38:55Z",
+        "git": "b05f75da402",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "ramp.l500_taught_agreement": {
+      "value": 0.6608412346749113,
+      "fmt": ".2f",
+      "text": "0.66",
+      "producer": "ablations.refit_ramp_figures",
+      "tier": "refit",
+      "note": "500-epoch ramp: mean agreement of each axis's taught end with its rule, over the seeds",
+      "measured": {
+        "at": "2026-09-03T02:38:55Z",
+        "git": "b05f75da402",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "ramp.l500_work_epochs": {
+      "value": 3251,
+      "fmt": "d",
+      "text": "3251",
+      "producer": "ablations.refit_ramp_figures",
+      "tier": "refit",
+      "note": "constant-rate epochs of work a 500-epoch ramp delivers",
+      "measured": {
+        "at": "2026-09-03T02:38:55Z",
+        "git": "b05f75da402",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "ramp.lengths": {
+      "value": 4,
+      "fmt": "d",
+      "text": "4",
+      "producer": "ablations.refit_ramp_figures",
+      "tier": "refit",
+      "note": "ramp lengths swept: 0, 250, 500, 1000 epochs (0 = no ramp)",
+      "measured": {
+        "at": "2026-09-03T02:38:55Z",
+        "git": "b05f75da402",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "ramp.level_sd_mnat": {
+      "value": 2.58112255091439,
+      "fmt": ".1f",
+      "text": "2.6",
+      "producer": "ablations.refit_ramp_figures",
+      "tier": "refit",
+      "note": "run-to-run sd of the held-out-problem level, pooled over lengths, millinats",
+      "measured": {
+        "at": "2026-09-03T02:38:55Z",
+        "git": "b05f75da402",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "ramp.problems_scored": {
+      "value": 107088,
+      "fmt": "~1000",
+      "text": "107,000",
+      "producer": "ablations.refit_ramp_figures",
+      "tier": "refit",
+      "note": "attempted problems the identity figures are measured over",
+      "measured": {
+        "at": "2026-09-03T02:38:55Z",
+        "git": "b05f75da402",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "ramp.seeds": {
+      "value": 8,
+      "fmt": "d",
+      "text": "8",
+      "producer": "ablations.refit_ramp_figures",
+      "tier": "refit",
+      "note": "fits per length, differing only in initialization and batch order — held-out draw and feature basis pinned across the panel",
+      "measured": {
+        "at": "2026-09-03T02:38:55Z",
+        "git": "b05f75da402",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
+    "ramp.shipped_length": {
+      "value": 0,
+      "fmt": "d",
+      "text": "0",
+      "producer": "ablations.refit_ramp_figures",
+      "tier": "refit",
+      "note": "the ramp production runs, read from the trainer",
+      "measured": {
+        "at": "2026-09-03T02:38:55Z",
+        "git": "b05f75da402",
+        "db_max_id": 457114,
+        "data_version": "3fb1860415e94151"
+      }
+    },
     "rank.dan_mae": {
       "value": 1.1762487564573891,
       "fmt": ".1f",
