@@ -51,15 +51,17 @@ import { hideStatsModal, restoreStatsModal, discardStatsModal } from './stats-ui
 // shard load — the second activation would nest a begin inside the first.
 let exampleOpenInFlight = false;
 
-// Full-scale of the ranks track each way — the bar's clamp, not a statistic.
-// The numeric value is always printed beside the bar, so a clamp costs the bar's
-// precision and nothing else.
+// The track's full scale each way is SHARED across a pane's rows and fitted to
+// them: the widest interval in the pane sits inside the track with this much
+// margin, so every row is drawn on the same axis and nothing is clamped. The
+// tendency track is drawn in DEVIATION space (share − null share) so the
+// availability null is always the visual centre: the null share varies per
+// axis and per user, and a neutral mark wandering along the track makes the
+// row unreadable — the reader has to relocate "balanced" on every row before
+// the dot means anything.
+const SCALE_MARGIN = 1.1;
+// Fallback scales for a pane whose rows carry no interval at all.
 const RANK_FULL_SCALE = 2.0;
-// Same for the tendency track, in lean units (share − null share). The track is
-// drawn in DEVIATION space so the availability null is always the visual
-// centre: the null share varies per axis and per user, and a neutral mark
-// wandering along the track makes the row unreadable — the reader has to
-// relocate "balanced" on every row before the dot means anything.
 const TENDENCY_FULL_SCALE = 0.25;
 // Colour comes in TWO STEPS rather than a continuous ramp: nothing below the
 // MOTIF_Z gate, a muted shade from there to twice it, the full shade beyond. The
@@ -144,7 +146,8 @@ export function buildMotifPane(kind, history = state.answerHistory) {
     // Problems currently in the user's recall window — withhold their links so a
     // glance at the examples panel can't be used to ace an imminent recall.
     const recallSet = new Set(getRecallCandidates({ history }).map(c => c.problemId));
-    for (const row of rows) table.appendChild(buildMotifRow(kind, row, recallSet, history));
+    const scale = paneScale(kind, rows);
+    for (const row of rows) table.appendChild(buildMotifRow(kind, row, recallSet, history, scale));
     root.appendChild(table);
     root.appendChild(buildIntervalNote());
 
@@ -160,8 +163,21 @@ function buildIntervalNote() {
     note.className = 'wk-note';
     note.textContent = getTerm('statsMotifCiNote',
         { z: MOTIF_Z, pct: Math.round((2 * normCdf(MOTIF_Z) - 1) * 100) })
-        + ' ' + getTerm('statsMotifSdNote', { z1: MOTIF_Z, z2: TONE_STRONG_Z });
     return note;
+}
+
+// One axis per pane: the largest deviation any row's interval reaches from its
+// own neutral point, padded by SCALE_MARGIN.
+function paneScale(kind, rows) {
+    let widest = 0;
+    for (const row of rows) {
+        const r = row[kind];
+        if (!r) continue;
+        const neutral = kind === 'strength' ? 0 : r.nullShare;
+        widest = Math.max(widest, Math.abs(r.lo - neutral), Math.abs(r.hi - neutral));
+    }
+    if (widest > 0) return widest * SCALE_MARGIN;
+    return kind === 'strength' ? RANK_FULL_SCALE : TENDENCY_FULL_SCALE;
 }
 
 // The two poles of the reading this pane shows, each at its own end of the track
@@ -188,29 +204,27 @@ function buildHeaderRow(kind) {
 }
 
 const clamp01 = (v) => Math.max(0, Math.min(1, v));
-// Unclamped first: the SE ticks below have to know when a position falls OFF
-// the track, which a clamped fraction can no longer say.
-const rawRankFrac = (r) => 0.5 + r / (2 * RANK_FULL_SCALE);
-const rankFrac = (r) => clamp01(rawRankFrac(r));
 
 // The posterior's own scale, drawn on the track: thin ticks either side of the
-// neutral mark at the gate's width and at twice it — the SAME two thresholds
-// toneWeight steps at, taken from those constants rather than restated, so a
-// reader can see WHY a row is uncoloured, muted or full instead of holding the
-// legend in the note. That also gives the track a unit: without them the dot's
-// distance from centre is only readable against the printed value, and how far
-// out it is IN STANDARD ERRORS — the thing the row is actually a claim about —
-// is not on the picture at all. A tick landing outside the track is DROPPED
-// rather than clamped: parked on the end it would claim a threshold at a place
-// the scale does not reach.
+// neutral mark at every whole standard error, as far as the track reaches.
+// That gives the track a unit: without them the dot's distance from centre is
+// only readable against the printed value, and how far out it is IN STANDARD
+// ERRORS — the thing the row is actually a claim about — is not on the
+// picture at all. Ticks from TONE_STRONG_Z outward are drawn firmer, marking
+// where toneWeight steps to full.
 function sdTicks(rawFrac, neutral, se) {
     if (!(se > 0)) return [];
     const ticks = [];
-    for (const level of [MOTIF_Z, TONE_STRONG_Z]) {
+    for (let level = 1; ; level++) {
+        let onTrack = false;
         for (const dir of [-1, 1]) {
             const frac = rawFrac(neutral + dir * level * se);
-            if (frac > 0 && frac < 1) ticks.push({ frac, strong: level === TONE_STRONG_Z });
+            if (frac > 0 && frac < 1) {
+                onTrack = true;
+                ticks.push({ frac, strong: level >= TONE_STRONG_Z });
+            }
         }
+        if (!onTrack) break;
     }
     return ticks;
 }
@@ -264,7 +278,7 @@ function buildMetricCell({ frac, loFrac, hiFrac, ticks = [] }) {
 
     // The neutral mark sits at the track's centre on every pane: each reading
     // is drawn as its deviation from its own neutral point (the tendency
-    // pane's availability null included — see TENDENCY_FULL_SCALE).
+    // pane's availability null included — see paneScale).
     const mid = document.createElement('span');
     mid.className = 'wk-mid';
     track.appendChild(mid);
@@ -305,10 +319,12 @@ const EMPTY_CELL = { frac: 0.5, loFrac: 0, hiFrac: 1, tone: 'none', weight: 0 };
 // player has and could train away, so both take ONE colour and the direction is
 // carried by the dot's side of the centre mark alone. A two-hue pair there read
 // as a valence the reading does not have.
-function cellFor(kind, row) {
+function cellFor(kind, row, scale) {
     if (kind === 'strength') {
         const g = row.strength;
         if (!g) return null;
+        const rawRankFrac = (r) => 0.5 + r / (2 * scale);
+        const rankFrac = (r) => clamp01(rawRankFrac(r));
         return {
             frac: rankFrac(g.ranks),
             loFrac: rankFrac(g.lo),
@@ -323,7 +339,7 @@ function cellFor(kind, row) {
     if (!t) return null;
     // Deviation space: the dot's distance from the centre IS the printed lean,
     // and the centre IS the availability null, on every row.
-    const rawLeanFrac = (v) => 0.5 + (v - t.nullShare) / (2 * TENDENCY_FULL_SCALE);
+    const rawLeanFrac = (v) => 0.5 + (v - t.nullShare) / (2 * scale);
     const leanFrac = (v) => clamp01(rawLeanFrac(v));
     return {
         frac: leanFrac(t.share),
@@ -336,11 +352,11 @@ function cellFor(kind, row) {
     };
 }
 
-function buildMotifRow(kind, row, recallSet, history) {
+function buildMotifRow(kind, row, recallSet, history, scale) {
     const el = document.createElement('div');
     el.className = 'wk-row';
 
-    const spec = cellFor(kind, row);
+    const spec = cellFor(kind, row, scale);
     // Tone and weight go on the ROW, not on the track: the value line and the
     // track are siblings and both read them, so the number cannot end up
     // disagreeing with the bar underneath it.
