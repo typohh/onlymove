@@ -16,7 +16,6 @@ import {
     hideOverlappingYTicks, observeResize,
     makeChartFrame, buildYAxis, buildPlotRow, chartViewBoxHeight,
 } from './chart-svg.js';
-import { getLogitPerRank, MODEL_INDICES } from './recall-model.js';
 
 // medianNovelSolveMinutes + the TIME_ADJUST_* feature constants + the scalar
 // timeAdjustDeltaRating live in population-constants.js (one definition, shared with
@@ -66,25 +65,6 @@ export function buildRankSummaryText(history, decomp) {
                     upper: summary.sigmaMUpper.toFixed(2),
                 }) + '\n';
         }
-    }
-
-    // Relative 13x13 skill. The recall model's SIZE_IS_13 coefficient is the
-    // logit offset for 13x13 at equal internal-rank difficulty (9x9 is the
-    // baseline), so coeff / logit-per-rank is the skill gap in ranks. Only
-    // shown once both sizes have enough non-repeat data to identify it.
-    const results = state.statsResults?.results || [];
-    const MIN_SIZE_COMPARISON = 20;
-    const count9 = history.filter(p => !p.isRepeat && p.size === 9 && p.problemRank !== undefined).length;
-    const count13 = history.filter(p => !p.isRepeat && p.size === 13 && p.problemRank !== undefined).length;
-    const sizeResult = results.find(r => r.varIndex === MODEL_INDICES.SIZE_IS_13);
-    if (sizeResult && count9 >= MIN_SIZE_COMPARISON && count13 >= MIN_SIZE_COMPARISON
-        && Number.isFinite(sizeResult.coeff) && Number.isFinite(sizeResult.se) && sizeResult.se > 0) {
-        const logitPerRank = getLogitPerRank(state.statsResults);
-        const ranksDiff = sizeResult.coeff / logitPerRank;   // + = stronger on 13x13
-        const seRanks = sizeResult.se / logitPerRank;
-        rankText += getTerm(ranksDiff >= 0 ? 'statsSizeStronger' : 'statsSizeWeaker')
-            .replace('{amount}', Math.abs(ranksDiff).toFixed(1))
-            .replace('{se}', seRanks.toFixed(1)) + '\n';
     }
 
     return rankText;
@@ -301,18 +281,27 @@ export function buildRatingHistoryChart(history = state.answerHistory, decomp) {
 
         // Focus the y-range on the skill band — not the (far wider) spread of
         // problem difficulties. Dots outside this window are dropped below.
+        const Y_RANGE_SKIP_FRACTION = 0.1;
+        // The first tenth of the attempts is the initial climb from the prior:
+        // it stays on the x-axis but is left out of the y-range, or the climb
+        // alone would set the scale. The cut is by attempt COUNT, applied as a
+        // time threshold since the decomposition sits on a time grid.
+        const tScale = entries[Math.floor(entries.length * Y_RANGE_SKIP_FRACTION)].date;
         let bandMin = Infinity, bandMax = -Infinity;
-        for (const g of gd) { bandMin = Math.min(bandMin, g.dn); bandMax = Math.max(bandMax, g.up); }
+        for (const g of gd) {
+            if (g.t < tScale) continue;
+            bandMin = Math.min(bandMin, g.dn); bandMax = Math.max(bandMax, g.up);
+        }
         // The front-page line deliberately does NOT widen the y-range — the window
         // focuses on the skill band, and the front-page line clips at the chart
         // edge where it wanders outside it.
         if (!Number.isFinite(bandMin)) {
             // No decomposition — fall back to the scatter range.
-            const ys = dots.map(d => d.y).slice().sort((a, b) => a - b);
+            const ys = dots.filter(d => d.t >= tScale).map(d => d.y).sort((a, b) => a - b);
             bandMin = ys.length ? ys[0] : 0;
             bandMax = ys.length ? ys[ys.length - 1] : 1;
         }
-        const Y_PAD = 1; // exactly one rank beyond the outer CI band
+        const Y_PAD = 0.25; // a quarter rank beyond the outer CI band
         let yHigh = bandMax + Y_PAD;
         let yLow = bandMin - Y_PAD;
         if (yHigh <= yLow) yHigh = yLow + 1;
