@@ -1520,18 +1520,24 @@ input, textarea, [contenteditable],
     left: 0;
     right: 0;
     height: calc(0.5 * var(--u));
-    background-color: #555; /* Background of the bar */
+    /* Fill and background in one gradient, so the second pseudo-element is
+       free for the marker below. */
+    background: linear-gradient(to right, #888 var(--progress, 0%), #555 var(--progress, 0%));
+    transition: background 0.5s ease-in-out;
 }
 
+/* A vertical marker at the fill's edge, taller than the bar, so a full and an
+   empty bar read differently at a glance. */
 .progress-bar-wrapper::after {
     content: '';
     position: absolute;
-    bottom: calc(1 * var(--u));
-    left: 0;
-    height: calc(0.5 * var(--u)); /* Thin bar */
-    width: var(--progress, 0%);
-    background-color: #888; /* Foreground of the bar */
-    transition: width 0.5s ease-in-out;
+    bottom: calc(0.5 * var(--u));
+    left: var(--progress, 0%);
+    width: 2px;
+    height: calc(1.5 * var(--u));
+    transform: translateX(-50%);
+    background-color: #ccc;
+    transition: left 0.5s ease-in-out;
 }
 
 .unreliable {
