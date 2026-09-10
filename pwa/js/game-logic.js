@@ -75,7 +75,10 @@ const handleCorrectAnswer = async (x, y) => {
     setAppMode(APP_MODES.SOLVING);
     const at = Date.now();
     sendReport(buildReportPayload(true, x, y, at));
-    const stats = await updateUserStats(true, { at });
+    // isCorrect is set here rather than trusted from updateUserStats: a linked
+    // or cross-tab-dropped attempt returns {} (nothing recorded), and the
+    // overlay's "Correct!" line must still show for it.
+    const stats = { ...(await updateUserStats(true, { at })), isCorrect: true };
 
     // Move the solved problem into the previous slot and — if it was the standing
     // challenge — start reselecting one NOW, but do NOT await it: the reselection

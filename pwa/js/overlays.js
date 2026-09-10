@@ -55,6 +55,19 @@ function createOverlayContent(stats, message, textColor) {
         textAlign: 'center',
     });
 
+    // The "Correct!" line stands above whatever the answer changed. It keys off
+    // the verdict alone, so a linked or dropped attempt — which records nothing
+    // and so has no rank or recall line — still gets it.
+    if (stats && stats.isCorrect) {
+        const banner = document.createElement('div');
+        Object.assign(banner.style, {
+            fontSize: `calc(var(--board-side) / 12)`,
+            marginBottom: '20px',
+        });
+        banner.textContent = getTerm('correctBanner');
+        container.appendChild(banner);
+    }
+
     if (stats && stats.recallImpactPromise) {
         // Recall (repeat) attempt: the rank barely moves, so show how this answer
         // shifted the time until first repeat of a generic problem instead (one
