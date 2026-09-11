@@ -89,10 +89,16 @@ THE MODEL — a latent CONSENSUS rank, every server (EGF included) a coupling of
         coupling at once, a dilation scales them all. The curve pins nothing: its
         steepness (log β) is free and its shape prior is deliberately gentle.
       - GAUGE_WEIGHT then pins the one direction spacings are blind to, a rigid
-        TRANSLATION: a VERY WEAK penalty on the reliability-weighted (by declaration
-        count) mean coupling offset toward identity. Weak because the likelihood is flat
-        along it, so the location has no motivation to drift — a strong pin is unneeded
-        and would shrink the real per-server offsets.
+        TRANSLATION: a VERY WEAK penalty on the mean coupling offset toward identity,
+        where the mean runs over DECLARATIONS — each weighs the offset at the two
+        boundaries of its declared band, across all servers in one sum, so a
+        data-rich server counts for its declarations and a padded threshold nobody
+        declared near counts for nothing. Averaging over threshold positions instead
+        let the spacing prior's extrapolated tails steer the location (measured: it
+        put the consensus a rank below eight of nine servers at 1d, balanced by OGS
+        alone). Weak because the likelihood is flat along it, so the location has no
+        motivation to drift — a strong pin is unneeded and would shrink the real
+        per-server offsets.
     Both are soft: they select a preferred point on a flat manifold rather than removing
     the freedom. The data-rich servers set the scale, which lands ≈ EGF, so the headline
     barely moves from the previous EGF-anchored rank.
@@ -307,8 +313,22 @@ def _bucket(decls):
             "rating": np.array([r for r, _, _, _ in rows], float),
             "T": np.array([t for _, _, t, _ in rows], float),
             "w": np.array([w for _, _, _, w in rows], float),
-            "k": np.array([max(0, min(N - 1, g - g_min)) for _, g, _, _ in rows], int)}
+            "k": np.array([max(0, min(N - 1, g - g_min)) for _, g, _, _ in rows], int),
+            "thr_w": _threshold_mass(rows, g_min, K)}
     return blocks
+
+
+def _threshold_mass(rows, g_min, K):
+    """Declaration mass beside each of the K thresholds: a declaration in band g sits
+    between the boundaries at g and g+1 and lends half its weight to each. This is
+    the weight the gauge pin uses, so the pin reads the coupling where players
+    actually sit and never at the padded thresholds the spacing prior extrapolates."""
+    tw = np.zeros(K)
+    for _, g, _, w in rows:
+        for i in (g - g_min - 1, g - g_min):
+            if 0 <= i < K:
+                tw[i] += 0.5 * w
+    return tw
 
 
 def fit_consensus(decls, identity_servers=()):
@@ -376,9 +396,9 @@ def fit_consensus(decls, identity_servers=()):
                                    eps=EPS_CONTAMINATION)
             if st is not None:
                 pen += SERVER_LAMBDA * float(np.sum(params[st + 1:st + n] ** 2))
-            w = float(np.sum(blk["w"]))     # reliability weight = declaration weight
-            w_off += w * float(np.mean(thr - blk["identity"]))
-            w_tot += w
+            # gauge: every declaration weighs the offset at its own two boundaries
+            w_off += float(np.sum(blk["thr_w"] * (thr - blk["identity"])))
+            w_tot += float(np.sum(blk["thr_w"]))
         if nseg:
             pen += LAMBDA_SHAPE * float(np.sum(params[2:2 + nseg] ** 2))
         pen += LAMBDA_TIME * float(alpha ** 2)

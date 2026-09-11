@@ -70,7 +70,7 @@ if PROJECT_ROOT not in sys.path:
 from pipeline.map_rating_to_rank import (  # noqa: E402
     EPS_CONTAMINATION, GAUGE_WEIGHT, LAMBDA_SHAPE, LAMBDA_TIME, MIN_ATTEMPTS,
     MIN_SERVER_SAMPLES, RANK_PADDING, EXTEND_TO, SERVER_LAMBDA, SIZES,
-    _curve_arrays, fit_consensus,
+    _curve_arrays, _threshold_mass, fit_consensus,
     load_floors, load_ratings, load_slopes, load_user_median_solve_minutes,
 )
 from utils.paths import DB_SQLITE  # noqa: E402
@@ -219,7 +219,8 @@ def _bucket_w(decls):
             "T": np.array([t for _, _, t, _, _ in rows], float),
             "se": np.array([s for _, _, _, s, _ in rows], float),
             "w": np.array([w for _, _, _, _, w in rows], float),
-            "k": np.array([max(0, min(N - 1, g - g_min)) for _, g, _, _, _ in rows], int)}
+            "k": np.array([max(0, min(N - 1, g - g_min)) for _, g, _, _, _ in rows], int),
+            "thr_w": _threshold_mass([(r, g, t, w) for r, g, t, _, w in rows], g_min, K)}
     return blocks
 
 
@@ -284,9 +285,8 @@ def fit_consensus_cv(decls, eps=0.0):
                 p = (1.0 - eps) * p + eps / (K + 1)
             nll += -float(np.sum(blk["w"] * np.log(np.clip(p, 1e-12, 1.0))))
             pen += SERVER_LAMBDA * float(np.sum(params[st + 1:st + n] ** 2))
-            wsrv = float(np.sum(blk["w"]))
-            w_off += wsrv * float(np.mean(thr - blk["identity"]))
-            w_tot += wsrv
+            w_off += float(np.sum(blk["thr_w"] * (thr - blk["identity"])))
+            w_tot += float(np.sum(blk["thr_w"]))
         if nseg:
             pen += LAMBDA_SHAPE * float(np.sum(params[2:2 + nseg] ** 2))
         pen += LAMBDA_TIME * float(alpha ** 2)
