@@ -1296,38 +1296,38 @@
       "tier": "about",
       "note": "axes with an untaught tail, i.e. taught by a single rule; the 0 two-sided axes have no untaught end and are excluded",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "axistail.taught_never_max": {
-      "value": 0.47,
+      "value": 0.381,
       "fmt": "%.0f",
-      "text": "47",
+      "text": "38",
       "producer": "ablations.corpus_claim_figures",
       "tier": "about",
       "note": "largest never-attempted share among the axes' taught, named tails (1000 most extreme problems each)",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "axistail.taught_never_min": {
-      "value": 0.202,
+      "value": 0.165,
       "fmt": "%.0f",
-      "text": "20",
+      "text": "16",
       "producer": "ablations.corpus_claim_figures",
       "tier": "about",
       "note": "smallest never-attempted share among the axes' taught, named tails (1000 most extreme problems each)",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "axistail.untaught_exceeds_taught_axes": {
@@ -1338,38 +1338,38 @@
       "tier": "about",
       "note": "axes whose UNTAUGHT tail holds the larger never-attempted share of the two, over each tail's 1000 most extreme problems",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "axistail.untaught_never_max": {
-      "value": 0.535,
+      "value": 0.448,
       "fmt": "%.0f",
-      "text": "54",
+      "text": "45",
       "producer": "ablations.corpus_claim_figures",
       "tier": "about",
       "note": "largest never-attempted share among the axes' untaught tails (1000 most extreme problems each)",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "axistail.untaught_never_min": {
-      "value": 0.341,
+      "value": 0.273,
       "fmt": "%.0f",
-      "text": "34",
+      "text": "27",
       "producer": "ablations.corpus_claim_figures",
       "tier": "about",
       "note": "smallest never-attempted share among the axes' untaught tails (1000 most extreme problems each)",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "barrier.off_rating_high": {
@@ -1877,31 +1877,31 @@
       }
     },
     "community.gate_shift_ranks": {
-      "value": 2.6100331842477784,
+      "value": 3.473744793524782,
       "fmt": ".1f",
-      "text": "2.6",
+      "text": "3.5",
       "producer": "ablations.client_estimator_figures",
       "tier": "about",
       "note": "ranks the mean shown rank moves when every player active in the 7-day window is counted instead of those carrying a rank (30+ valid buffered attempts)",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "community.gate_shift_signed": {
-      "value": -2.6100331842477784,
+      "value": -3.473744793524782,
       "fmt": ".1f",
-      "text": "-2.6",
+      "text": "-3.5",
       "producer": "ablations.client_estimator_figures",
       "tier": "about",
       "note": "the same shift with its sign — negative when dropping the gate moves the mean toward the weaker end",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "corpus.expected_id_collisions": {
@@ -1912,10 +1912,10 @@
       "tier": "about",
       "note": "expected accidental id collisions among the published problems, n(n-1)/2^33 — each one a silently discarded candidate, never a corrupted record",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "corpus.id_rejection_odds": {
@@ -1926,24 +1926,24 @@
       "tier": "about",
       "note": "one-in-N odds that a fresh candidate's id is already taken, 2^32/n",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "corpus.never_attempted_pct": {
-      "value": 0.4988229317391127,
+      "value": 0.4797993314070842,
       "fmt": "%.1f",
-      "text": "49.9",
+      "text": "48.0",
       "producer": "ablations.corpus_claim_figures",
       "tier": "about",
       "note": "share of the published problems with no first-time human attempt in the attempt log",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "corpus.pass_not_last_13_pct": {
@@ -1954,10 +1954,10 @@
       "tier": "about",
       "note": "share of published 13×13 problems whose pass variation is not the last one, so the placeholder row it gets in the per-cell block is what keeps every later row on its own variation",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "corpus.pass_not_last_9_pct": {
@@ -1968,10 +1968,10 @@
       "tier": "about",
       "note": "share of published 9×9 problems whose pass variation is not the last one, so the placeholder row it gets in the per-cell block is what keeps every later row on its own variation",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "corpus.problems_13": {
@@ -1982,10 +1982,10 @@
       "tier": "about",
       "note": "published 13×13 problems, to the nearest thousand",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "corpus.problems_9": {
@@ -1996,10 +1996,10 @@
       "tier": "about",
       "note": "published 9×9 problems, to the nearest thousand",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "corpus.problems_total": {
@@ -2010,52 +2010,52 @@
       "tier": "about",
       "note": "problems in the published index, to the nearest thousand",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "curve.dan_vs_cheapest_max": {
-      "value": 7.050143680710342,
+      "value": 7.608253157756383,
       "fmt": ".1f",
-      "text": "7.1",
+      "text": "7.6",
       "producer": "ablations.curve_shape_figures",
       "tier": "about",
       "note": "widest dan-range segment ÷ the curve's cheapest segment",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "curve.dan_vs_cheapest_min": {
-      "value": 5.024037925168403,
+      "value": 5.328995057936127,
       "fmt": ".1f",
-      "text": "5.0",
+      "text": "5.3",
       "producer": "ablations.curve_shape_figures",
       "tier": "about",
       "note": "cheapest dan-range segment ÷ the curve's cheapest segment",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "curve.first_second_gradient_ratio": {
-      "value": 3.3374668545844406,
+      "value": 4.32064950678301,
       "fmt": ".1f",
-      "text": "3.3",
+      "text": "4.3",
       "producer": "ablations.curve_shape_figures",
       "tier": "about",
       "note": "the curve's SECOND segment ÷ its FIRST in rank per rating unit — how far a rank-space slope jumps across that one knot",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "curve.knot_rank_strong": {
@@ -2066,10 +2066,10 @@
       "tier": "about",
       "note": "strongest knot of the published rating→rank curve, in internal rank (the strong edge of the strongest band it covers)",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "curve.knot_rank_weak": {
@@ -2080,38 +2080,38 @@
       "tier": "about",
       "note": "weakest knot of the published rating→rank curve, in internal rank (integers are band edges, so this is the weak edge of that band)",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "curve.knot_rating_span": {
-      "value": 4.141507264615685,
+      "value": 3.8191274269759954,
       "fmt": ".1f",
-      "text": "4.1",
+      "text": "3.8",
       "producer": "ablations.curve_shape_figures",
       "tier": "about",
       "note": "rating distance between the curve's outermost knots",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "curve.rating_per_rank_cheapest": {
-      "value": 0.04440640356414516,
+      "value": 0.03751817905140953,
       "fmt": ".3f",
-      "text": "0.044",
+      "text": "0.038",
       "producer": "ablations.curve_shape_figures",
       "tier": "about",
       "note": "rating units one rank costs on the curve's CHEAPEST segment",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "curve.rating_per_rank_cheapest_at": {
@@ -2122,52 +2122,52 @@
       "tier": "about",
       "note": "band the cheapest segment spans (its weak-edge knot)",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "curve.rating_per_rank_dan_max": {
-      "value": 0.31307152547083117,
+      "value": 0.2854478042411559,
       "fmt": ".2f",
-      "text": "0.31",
+      "text": "0.29",
       "producer": "ablations.curve_shape_figures",
       "tier": "about",
       "note": "widest segment through the dan range — segments starting in [+0, +9) in internal rank, the 1d…9d bands",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "curve.rating_per_rank_dan_min": {
-      "value": 0.2230994556265986,
+      "value": 0.19993419074772412,
       "fmt": ".2f",
-      "text": "0.22",
+      "text": "0.20",
       "producer": "ablations.curve_shape_figures",
       "tier": "about",
       "note": "cheapest segment through the dan range — segments starting in [+0, +9) in internal rank, the 1d…9d bands",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "curve.rating_per_rank_weak_edge": {
-      "value": 0.27844355260128784,
+      "value": 0.27079238786266735,
       "fmt": ".2f",
-      "text": "0.28",
+      "text": "0.27",
       "producer": "ablations.curve_shape_figures",
       "tier": "about",
       "note": "rating units one rank costs on the outermost weak-side segment",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "detach.aniso_basis_mean": {
@@ -2969,59 +2969,59 @@
       }
     },
     "draw.info_argmax_enrichment": {
-      "value": 4.150889569208821,
+      "value": 4.108755910877454,
       "fmt": ".1f",
-      "text": "4.2",
+      "text": "4.1",
       "producer": "ablations.client_estimator_figures",
       "tier": "about",
       "note": "on the worst named motif tail (opening), how much more often the top-information candidate of a pool of 50 sits in that tail than the pool itself does, over rank-prior-weighted pools on both board sizes",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "draw.info_best_over_pool": {
-      "value": 1.2277798833351292,
+      "value": 1.219520170258186,
       "fmt": ".1f",
       "text": "1.2",
       "producer": "ablations.client_estimator_figures",
       "tier": "about",
       "note": "the best candidate's Fisher information over the pool's mean, averaged over the same pools",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "draw.info_fifth_advantage": {
-      "value": 0.6812396285711015,
+      "value": 0.6816016056997585,
       "fmt": ".2f",
       "text": "0.68",
       "producer": "ablations.client_estimator_figures",
       "tier": "about",
       "note": "the fifth-best candidate's share of the best candidate's advantage over the pool mean, over the same pools",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "draw.info_slice_over_best": {
-      "value": 0.9439790809019885,
+      "value": 0.945776735485991,
       "fmt": ".2f",
-      "text": "0.94",
+      "text": "0.95",
       "producer": "ablations.client_estimator_figures",
       "tier": "about",
       "note": "the information a uniform draw from the top 20% of the pool carries against the top candidate's own — what the slot gives up by not argmaxing",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "features.pca128_holdout_bce": {
@@ -3249,787 +3249,787 @@
       }
     },
     "findings.first100.mean_1sd": {
-      "value": 3.3043478260869565,
+      "value": 3.308467741935484,
       "fmt": ".1f",
       "text": "3.3",
       "producer": "ablations.motif_findings_figures",
       "tier": "about",
       "note": "findings per user clearing the gate (|z| > 1), both readings over all axes, on the shipped readings run over each account's first 100 attempts, one window per account",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "findings.first100.mean_2sd": {
-      "value": 0.5486542443064182,
+      "value": 0.5524193548387096,
       "fmt": ".1f",
-      "text": "0.5",
+      "text": "0.6",
       "producer": "ablations.motif_findings_figures",
       "tier": "about",
       "note": "the same at twice the gate (|z| > 2)",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "findings.first100.null_1sd": {
-      "value": 3.079817103232591,
+      "value": 3.1065722302062726,
       "fmt": ".1f",
       "text": "3.1",
       "producer": "ablations.motif_findings_figures",
       "tier": "about",
       "note": "findings a user with nothing behind any reading would collect there: the readings that exist times the gate's chance pass share",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "findings.first100.null_2sd": {
-      "value": 0.44162574978494484,
+      "value": 0.44546226104983183,
       "fmt": ".1f",
       "text": "0.4",
       "producer": "ablations.motif_findings_figures",
       "tier": "about",
       "note": "the same at twice the gate",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "findings.first100.readings": {
-      "value": 9.70600414078675,
+      "value": 9.790322580645162,
       "fmt": ".1f",
-      "text": "9.7",
+      "text": "9.8",
       "producer": "ablations.motif_findings_figures",
       "tier": "about",
       "note": "readings that exist at all per user over each account's first 100 attempts, one window per account (a tendency reading needs enough directional errors, an accuracy reading enough attempts)",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "findings.first100.surplus_1sd": {
-      "value": 0.22453072285436537,
+      "value": 0.20189551172921139,
       "fmt": ".1f",
       "text": "0.2",
       "producer": "ablations.motif_findings_figures",
       "tier": "about",
       "note": "findings at the gate beyond that chance count — what the pane is actually reporting",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "findings.first100.surplus_2sd": {
-      "value": 0.10702849452147334,
+      "value": 0.1069570937888778,
       "fmt": ".1f",
       "text": "0.1",
       "producer": "ablations.motif_findings_figures",
       "tier": "about",
       "note": "the same at twice the gate",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "findings.first100.users": {
-      "value": 483,
+      "value": 496,
       "fmt": "d",
-      "text": "483",
+      "text": "496",
       "producer": "ablations.motif_findings_figures",
       "tier": "about",
       "note": "accounts with at least 100 first-time attempts on published problems",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "findings.first200.mean_1sd": {
-      "value": 3.9296296296296296,
+      "value": 4.0,
       "fmt": ".1f",
-      "text": "3.9",
+      "text": "4.0",
       "producer": "ablations.motif_findings_figures",
       "tier": "about",
       "note": "findings per user clearing the gate (|z| > 1), both readings over all axes, on the shipped readings run over each account's first 200 attempts, one window per account",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "findings.first200.mean_2sd": {
-      "value": 0.7592592592592593,
+      "value": 0.7733812949640287,
       "fmt": ".1f",
       "text": "0.8",
       "producer": "ablations.motif_findings_figures",
       "tier": "about",
       "note": "the same at twice the gate (|z| > 2)",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "findings.first200.null_1sd": {
-      "value": 3.473962449047312,
+      "value": 3.5018296335374846,
       "fmt": ".1f",
       "text": "3.5",
       "producer": "ablations.motif_findings_figures",
       "tier": "about",
       "note": "findings a user with nothing behind any reading would collect there: the readings that exist times the gate's chance pass share",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "findings.first200.null_2sd": {
-      "value": 0.49814362991716865,
+      "value": 0.5021396030000996,
       "fmt": ".1f",
       "text": "0.5",
       "producer": "ablations.motif_findings_figures",
       "tier": "about",
       "note": "the same at twice the gate",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "findings.first200.readings": {
-      "value": 10.948148148148148,
+      "value": 11.035971223021583,
       "fmt": ".1f",
-      "text": "10.9",
+      "text": "11.0",
       "producer": "ablations.motif_findings_figures",
       "tier": "about",
       "note": "readings that exist at all per user over each account's first 200 attempts, one window per account (a tendency reading needs enough directional errors, an accuracy reading enough attempts)",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "findings.first200.surplus_1sd": {
-      "value": 0.4556671805823176,
+      "value": 0.49817036646251545,
       "fmt": ".1f",
       "text": "0.5",
       "producer": "ablations.motif_findings_figures",
       "tier": "about",
       "note": "findings at the gate beyond that chance count — what the pane is actually reporting",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "findings.first200.surplus_2sd": {
-      "value": 0.26111562934209065,
+      "value": 0.2712416919639291,
       "fmt": ".1f",
       "text": "0.3",
       "producer": "ablations.motif_findings_figures",
       "tier": "about",
       "note": "the same at twice the gate",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "findings.first200.users": {
-      "value": 270,
+      "value": 278,
       "fmt": "d",
-      "text": "270",
+      "text": "278",
       "producer": "ablations.motif_findings_figures",
       "tier": "about",
       "note": "accounts with at least 200 first-time attempts on published problems",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "findings.first300.mean_1sd": {
-      "value": 4.314432989690721,
+      "value": 4.341584158415841,
       "fmt": ".1f",
       "text": "4.3",
       "producer": "ablations.motif_findings_figures",
       "tier": "about",
       "note": "findings per user clearing the gate (|z| > 1), both readings over all axes, on the shipped readings run over each account's first 300 attempts, one window per account",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "findings.first300.mean_2sd": {
-      "value": 0.9175257731958762,
+      "value": 0.9158415841584159,
       "fmt": ".1f",
       "text": "0.9",
       "producer": "ablations.motif_findings_figures",
       "tier": "about",
       "note": "the same at twice the gate (|z| > 2)",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "findings.first300.null_1sd": {
-      "value": 3.606544689885184,
+      "value": 3.639645775833525,
       "fmt": ".1f",
       "text": "3.6",
       "producer": "ablations.motif_findings_figures",
       "tier": "about",
       "note": "findings a user with nothing behind any reading would collect there: the readings that exist times the gate's chance pass share",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "findings.first300.null_2sd": {
-      "value": 0.517155061296239,
+      "value": 0.5219015418211015,
       "fmt": ".1f",
       "text": "0.5",
       "producer": "ablations.motif_findings_figures",
       "tier": "about",
       "note": "the same at twice the gate",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "findings.first300.readings": {
-      "value": 11.3659793814433,
+      "value": 11.470297029702971,
       "fmt": ".1f",
-      "text": "11.4",
+      "text": "11.5",
       "producer": "ablations.motif_findings_figures",
       "tier": "about",
       "note": "readings that exist at all per user over each account's first 300 attempts, one window per account (a tendency reading needs enough directional errors, an accuracy reading enough attempts)",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "findings.first300.surplus_1sd": {
-      "value": 0.7078882998055374,
+      "value": 0.7019383825823162,
       "fmt": ".1f",
       "text": "0.7",
       "producer": "ablations.motif_findings_figures",
       "tier": "about",
       "note": "findings at the gate beyond that chance count — what the pane is actually reporting",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "findings.first300.surplus_2sd": {
-      "value": 0.40037071189963724,
+      "value": 0.3939400423373144,
       "fmt": ".1f",
       "text": "0.4",
       "producer": "ablations.motif_findings_figures",
       "tier": "about",
       "note": "the same at twice the gate",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "findings.first300.users": {
-      "value": 194,
+      "value": 202,
       "fmt": "d",
-      "text": "194",
+      "text": "202",
       "producer": "ablations.motif_findings_figures",
       "tier": "about",
       "note": "accounts with at least 300 first-time attempts on published problems",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "findings.first50.mean_1sd": {
-      "value": 2.4020356234096694,
+      "value": 2.3955223880597014,
       "fmt": ".1f",
       "text": "2.4",
       "producer": "ablations.motif_findings_figures",
       "tier": "about",
       "note": "findings per user clearing the gate (|z| > 1), both readings over all axes, on the shipped readings run over each account's first 50 attempts, one window per account",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "findings.first50.mean_2sd": {
-      "value": 0.3727735368956743,
+      "value": 0.373134328358209,
       "fmt": ".1f",
       "text": "0.4",
       "producer": "ablations.motif_findings_figures",
       "tier": "about",
       "note": "the same at twice the gate (|z| > 2)",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "findings.first50.null_1sd": {
-      "value": 2.3124104186243923,
+      "value": 2.3131304559509203,
       "fmt": ".1f",
       "text": "2.3",
       "producer": "ablations.motif_findings_figures",
       "tier": "about",
       "note": "findings a user with nothing behind any reading would collect there: the readings that exist times the gate's chance pass share",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "findings.first50.null_2sd": {
-      "value": 0.3315846203541236,
+      "value": 0.3316878690255682,
       "fmt": ".1f",
       "text": "0.3",
       "producer": "ablations.motif_findings_figures",
       "tier": "about",
       "note": "the same at twice the gate",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "findings.first50.readings": {
-      "value": 7.287531806615776,
+      "value": 7.289800995024875,
       "fmt": ".1f",
       "text": "7.3",
       "producer": "ablations.motif_findings_figures",
       "tier": "about",
       "note": "readings that exist at all per user over each account's first 50 attempts, one window per account (a tendency reading needs enough directional errors, an accuracy reading enough attempts)",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "findings.first50.surplus_1sd": {
-      "value": 0.08962520478527702,
+      "value": 0.08239193210878115,
       "fmt": ".1f",
       "text": "0.1",
       "producer": "ablations.motif_findings_figures",
       "tier": "about",
       "note": "findings at the gate beyond that chance count — what the pane is actually reporting",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "findings.first50.surplus_2sd": {
-      "value": 0.04118891654155066,
+      "value": 0.041446459332640795,
       "fmt": ".1f",
       "text": "0.0",
       "producer": "ablations.motif_findings_figures",
       "tier": "about",
       "note": "the same at twice the gate",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "findings.first50.users": {
-      "value": 786,
+      "value": 804,
       "fmt": "d",
-      "text": "786",
+      "text": "804",
       "producer": "ablations.motif_findings_figures",
       "tier": "about",
       "note": "accounts with at least 50 first-time attempts on published problems",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "findings.last1000.mean_1sd": {
-      "value": 5.440771184686552,
+      "value": 5.469529712907507,
       "fmt": ".1f",
-      "text": "5.4",
+      "text": "5.5",
       "producer": "ablations.motif_findings_figures",
       "tier": "about",
       "note": "findings per user clearing the gate (|z| > 1), both readings over all axes, on the shipped readings run over every window of the latest 1000 attempts from position 1000 onward, averaged within the account, then across accounts — a hypothetical width",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "findings.last1000.mean_2sd": {
-      "value": 1.6825639482955013,
+      "value": 1.6814329527825385,
       "fmt": ".1f",
       "text": "1.7",
       "producer": "ablations.motif_findings_figures",
       "tier": "about",
       "note": "the same at twice the gate (|z| > 2)",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "findings.last1000.null_1sd": {
-      "value": 3.945587451492926,
+      "value": 3.957842323027416,
       "fmt": ".1f",
-      "text": "3.9",
+      "text": "4.0",
       "producer": "ablations.motif_findings_figures",
       "tier": "about",
       "note": "findings a user with nothing behind any reading would collect there: the readings that exist times the gate's chance pass share",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "findings.last1000.null_2sd": {
-      "value": 0.5657715890916785,
+      "value": 0.5675288579971134,
       "fmt": ".1f",
       "text": "0.6",
       "producer": "ablations.motif_findings_figures",
       "tier": "about",
       "note": "the same at twice the gate",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "findings.last1000.readings": {
-      "value": 12.43446830067637,
+      "value": 12.473089371302194,
       "fmt": ".1f",
-      "text": "12.4",
+      "text": "12.5",
       "producer": "ablations.motif_findings_figures",
       "tier": "about",
       "note": "readings that exist at all per user over every window of the latest 1000 attempts from position 1000 onward, averaged within the account, then across accounts — a hypothetical width (a tendency reading needs enough directional errors, an accuracy reading enough attempts)",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "findings.last1000.surplus_1sd": {
-      "value": 1.4951837331936262,
+      "value": 1.511687389880091,
       "fmt": ".1f",
       "text": "1.5",
       "producer": "ablations.motif_findings_figures",
       "tier": "about",
       "note": "findings at the gate beyond that chance count — what the pane is actually reporting",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "findings.last1000.surplus_2sd": {
-      "value": 1.116792359203823,
+      "value": 1.113904094785425,
       "fmt": ".1f",
       "text": "1.1",
       "producer": "ablations.motif_findings_figures",
       "tier": "about",
       "note": "the same at twice the gate",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "findings.last1000.users": {
-      "value": 59,
+      "value": 60,
       "fmt": "d",
-      "text": "59",
+      "text": "60",
       "producer": "ablations.motif_findings_figures",
       "tier": "about",
       "note": "accounts with at least 1000 first-time attempts on published problems",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "findings.last2000.mean_1sd": {
-      "value": 5.954547722517401,
+      "value": 5.971150928127789,
       "fmt": ".1f",
       "text": "6.0",
       "producer": "ablations.motif_findings_figures",
       "tier": "about",
       "note": "findings per user clearing the gate (|z| > 1), both readings over all axes, on the shipped readings run over every window of the latest 2000 attempts from position 2000 onward, averaged within the account, then across accounts — a hypothetical width",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "findings.last2000.mean_2sd": {
-      "value": 2.4044299806014044,
+      "value": 2.3061168528544544,
       "fmt": ".1f",
-      "text": "2.4",
+      "text": "2.3",
       "producer": "ablations.motif_findings_figures",
       "tier": "about",
       "note": "the same at twice the gate (|z| > 2)",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "findings.last2000.null_1sd": {
-      "value": 3.9446376800581824,
+      "value": 3.989067339838493,
       "fmt": ".1f",
-      "text": "3.9",
+      "text": "4.0",
       "producer": "ablations.motif_findings_figures",
       "tier": "about",
       "note": "findings a user with nothing behind any reading would collect there: the readings that exist times the gate's chance pass share",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "findings.last2000.null_2sd": {
-      "value": 0.5656353980426864,
+      "value": 0.5720063224045828,
       "fmt": ".1f",
       "text": "0.6",
       "producer": "ablations.motif_findings_figures",
       "tier": "about",
       "note": "the same at twice the gate",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "findings.last2000.readings": {
-      "value": 12.431475108168689,
+      "value": 12.571494611712849,
       "fmt": ".1f",
-      "text": "12.4",
+      "text": "12.6",
       "producer": "ablations.motif_findings_figures",
       "tier": "about",
       "note": "readings that exist at all per user over every window of the latest 2000 attempts from position 2000 onward, averaged within the account, then across accounts — a hypothetical width (a tendency reading needs enough directional errors, an accuracy reading enough attempts)",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "findings.last2000.surplus_1sd": {
-      "value": 2.009910042459219,
+      "value": 1.9820835882892958,
       "fmt": ".1f",
       "text": "2.0",
       "producer": "ablations.motif_findings_figures",
       "tier": "about",
       "note": "findings at the gate beyond that chance count — what the pane is actually reporting",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "findings.last2000.surplus_2sd": {
-      "value": 1.8387945825587182,
+      "value": 1.7341105304498716,
       "fmt": ".1f",
-      "text": "1.8",
+      "text": "1.7",
       "producer": "ablations.motif_findings_figures",
       "tier": "about",
       "note": "the same at twice the gate",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "findings.last2000.users": {
-      "value": 25,
+      "value": 27,
       "fmt": "d",
-      "text": "25",
+      "text": "27",
       "producer": "ablations.motif_findings_figures",
       "tier": "about",
       "note": "accounts with at least 2000 first-time attempts on published problems",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "findings.last500.mean_1sd": {
-      "value": 4.858673441867273,
+      "value": 4.890714061176976,
       "fmt": ".1f",
       "text": "4.9",
       "producer": "ablations.motif_findings_figures",
       "tier": "about",
       "note": "findings per user clearing the gate (|z| > 1), both readings over all axes, on the shipped readings run over every window of the latest 500 attempts from position 500 onward, averaged within the account, then across accounts",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "findings.last500.mean_2sd": {
-      "value": 1.1687580950918066,
+      "value": 1.206626115664865,
       "fmt": ".1f",
       "text": "1.2",
       "producer": "ablations.motif_findings_figures",
       "tier": "about",
       "note": "the same at twice the gate (|z| > 2)",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "findings.last500.null_1sd": {
-      "value": 3.8856672967250874,
+      "value": 3.911700839611692,
       "fmt": ".1f",
       "text": "3.9",
       "producer": "ablations.motif_findings_figures",
       "tier": "about",
       "note": "findings a user with nothing behind any reading would collect there: the readings that exist times the gate's chance pass share",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "findings.last500.null_2sd": {
-      "value": 0.5571794284569441,
+      "value": 0.5609124692549798,
       "fmt": ".1f",
       "text": "0.6",
       "producer": "ablations.motif_findings_figures",
       "tier": "about",
       "note": "the same at twice the gate",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "findings.last500.readings": {
-      "value": 12.24563070065045,
+      "value": 12.327675077503711,
       "fmt": ".1f",
-      "text": "12.2",
+      "text": "12.3",
       "producer": "ablations.motif_findings_figures",
       "tier": "about",
       "note": "readings that exist at all per user over every window of the latest 500 attempts from position 500 onward, averaged within the account, then across accounts (a tendency reading needs enough directional errors, an accuracy reading enough attempts)",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "findings.last500.surplus_1sd": {
-      "value": 0.9730061451421856,
+      "value": 0.9790132215652845,
       "fmt": ".1f",
       "text": "1.0",
       "producer": "ablations.motif_findings_figures",
       "tier": "about",
       "note": "findings at the gate beyond that chance count — what the pane is actually reporting",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "findings.last500.surplus_2sd": {
-      "value": 0.6115786666348625,
+      "value": 0.6457136464098852,
       "fmt": ".1f",
       "text": "0.6",
       "producer": "ablations.motif_findings_figures",
       "tier": "about",
       "note": "the same at twice the gate",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "findings.last500.users": {
-      "value": 115,
+      "value": 120,
       "fmt": "d",
-      "text": "115",
+      "text": "120",
       "producer": "ablations.motif_findings_figures",
       "tier": "about",
       "note": "accounts with at least 500 first-time attempts on published problems",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "findings.null_1sd_pct": {
@@ -4040,10 +4040,10 @@
       "tier": "about",
       "note": "share of readings with nothing behind them that the gate passes (|z| > 1)",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "findings.null_2sd_pct": {
@@ -4054,10 +4054,10 @@
       "tier": "about",
       "note": "the same at twice the gate (|z| > 2), the pane's full shade",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "findings.readings_per_user": {
@@ -4068,108 +4068,108 @@
       "tier": "about",
       "note": "readings the motif pane can show one user at most: two per axis, 7 axes",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "history.rank_gap_career_excess": {
-      "value": -0.0004042821034502264,
+      "value": 0.0037935434517483158,
       "fmt": "%.1f",
-      "text": "-0.0",
+      "text": "0.4",
       "producer": "ablations.serve_log_figures",
       "tier": "about",
       "note": "how much WIDER the career arm's spread reads than the per-block arm's, in percentage points of the more-than-2-ranks share — what within-career drift adds once it is no longer taken out. Positive means the career arm is wider",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "history.rank_gap_median": {
-      "value": 2.342169024654403,
+      "value": 2.231831011797003,
       "fmt": ".1f",
-      "text": "2.3",
+      "text": "2.2",
       "producer": "ablations.serve_log_figures",
       "tier": "about",
       "note": "median gap in ranks; the player's rating is fitted over their own consecutive 500-attempt block, so within-career drift is out; over first-time attempts whose problem still ships and whose 500-attempt block has an anchor rating; the gap in ranks is the player's rank minus the problem's, each mapped through the SHIPPED rating→rank curve and then differenced",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "history.rank_gap_median_career": {
-      "value": 2.3287483964150795,
+      "value": 2.260148857056733,
       "fmt": ".1f",
       "text": "2.3",
       "producer": "ablations.serve_log_figures",
       "tier": "about",
       "note": "median gap in ranks; the player's rating is one anchor over their whole first-time history, scored on exactly the rows the block arm scores so the two are paired; over first-time attempts whose problem still ships and whose 500-attempt block has an anchor rating; the gap in ranks is the player's rank minus the problem's, each mapped through the SHIPPED rating→rank curve and then differenced",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "history.rank_gap_over2_career_pct": {
-      "value": 0.5442787508669057,
+      "value": 0.5334474531528736,
       "fmt": "%.0f",
-      "text": "54",
+      "text": "53",
       "producer": "ablations.serve_log_figures",
       "tier": "about",
       "note": "share of attempts more than 2 ranks from the player's rank; the player's rating is one anchor over their whole first-time history, scored on exactly the rows the block arm scores so the two are paired; over first-time attempts whose problem still ships and whose 500-attempt block has an anchor rating; the gap in ranks is the player's rank minus the problem's, each mapped through the SHIPPED rating→rank curve and then differenced",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "history.rank_gap_over2_pct": {
-      "value": 0.5446830329703559,
+      "value": 0.5296539097011252,
       "fmt": "%.0f",
-      "text": "54",
+      "text": "53",
       "producer": "ablations.serve_log_figures",
       "tier": "about",
       "note": "share of attempts more than 2 ranks from the player's rank; the player's rating is fitted over their own consecutive 500-attempt block, so within-career drift is out; over first-time attempts whose problem still ships and whose 500-attempt block has an anchor rating; the gap in ranks is the player's rank minus the problem's, each mapped through the SHIPPED rating→rank curve and then differenced",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "history.rank_gap_over3_career_pct": {
-      "value": 0.4251798726675716,
+      "value": 0.4196192034812815,
       "fmt": "%.0f",
-      "text": "43",
+      "text": "42",
       "producer": "ablations.serve_log_figures",
       "tier": "about",
       "note": "share of attempts more than 3 ranks from the player's rank; the player's rating is one anchor over their whole first-time history, scored on exactly the rows the block arm scores so the two are paired; over first-time attempts whose problem still ships and whose 500-attempt block has an anchor rating; the gap in ranks is the player's rank minus the problem's, each mapped through the SHIPPED rating→rank curve and then differenced",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "history.rank_gap_over3_pct": {
-      "value": 0.42741821504521055,
+      "value": 0.41803594774315517,
       "fmt": "%.0f",
-      "text": "43",
+      "text": "42",
       "producer": "ablations.serve_log_figures",
       "tier": "about",
       "note": "share of attempts more than 3 ranks from the player's rank; the player's rating is fitted over their own consecutive 500-attempt block, so within-career drift is out; over first-time attempts whose problem still ships and whose 500-attempt block has an anchor rating; the gap in ranks is the player's rank minus the problem's, each mapped through the SHIPPED rating→rank curve and then differenced",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "loop.corrected_gap_zero_ranks": {
@@ -5909,129 +5909,129 @@
       }
     },
     "rank.dan_mae": {
-      "value": 1.46122933585601,
+      "value": 1.3751555296813738,
       "fmt": ".1f",
-      "text": "1.5",
+      "text": "1.4",
       "producer": "ablations.rank_calibration_figures",
       "tier": "about",
       "note": "…through the dan range",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "rank.declaration_noise_hi": {
-      "value": 2.0921422355867336,
+      "value": 2.121611078676325,
       "fmt": ".1f",
       "text": "2.1",
       "producer": "ablations.rank_calibration_figures",
       "tier": "about",
       "note": "…from the pooled spread",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "rank.declaration_noise_lo": {
-      "value": 1.6189553358017346,
+      "value": 1.6346571796561618,
       "fmt": ".1f",
       "text": "1.6",
       "producer": "ablations.rank_calibration_figures",
       "tier": "about",
       "note": "declaration noise the federation spread implies once the verified spread is subtracted in quadrature",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "rank.declaration_noise_ratio_hi": {
-      "value": 4.892666048889591,
+      "value": 4.715299646988798,
       "fmt": ".1f",
-      "text": "4.9",
+      "text": "4.7",
       "producer": "ablations.rank_calibration_figures",
       "tier": "about",
       "note": "…at the pooled end",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "rank.declaration_noise_ratio_lo": {
-      "value": 3.7860751871511145,
+      "value": 3.6330402398677935,
       "fmt": ".1f",
-      "text": "3.8",
+      "text": "3.6",
       "producer": "ablations.rank_calibration_figures",
       "tier": "about",
       "note": "that noise against the spread the publicly-checkable users show",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "rank.declarations_screened": {
-      "value": 11,
+      "value": 10,
       "fmt": "d",
-      "text": "11",
+      "text": "10",
       "producer": "ablations.rank_calibration_figures",
       "tier": "about",
       "note": "declarations the mapping screened out as junk before its final fit, and which nothing here scores",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "rank.declaring_median_rank": {
-      "value": -3.922590171172006,
+      "value": -3.7929486945222264,
       "fmt": "rank",
       "text": "4k",
       "producer": "ablations.rank_calibration_figures",
       "tier": "about",
       "note": "…of everyone who declared a rank anywhere",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "rank.deep_kyu_mae": {
-      "value": 3.0730181322767565,
+      "value": 2.910587914270679,
       "fmt": ".1f",
-      "text": "3.1",
+      "text": "2.9",
       "producer": "ablations.rank_calibration_figures",
       "tier": "about",
       "note": "mean absolute residual against declarations at 15 kyu and weaker, in ranks",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "rank.deep_kyu_mae_ratio": {
-      "value": 2.1030361606287737,
+      "value": 2.116551801922411,
       "fmt": ".1f",
       "text": "2.1",
       "producer": "ablations.rank_calibration_figures",
       "tier": "about",
       "note": "the first over the second",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "rank.exact_match_beyond1": {
@@ -6042,24 +6042,24 @@
       "tier": "about",
       "note": "of them sitting more than a rank from their verified rating",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "rank.exact_match_displacement": {
-      "value": 0.19529411764705887,
+      "value": 0.17411764705882357,
       "fmt": "+.2f",
-      "text": "+0.20",
+      "text": "+0.17",
       "producer": "ablations.rank_calibration_figures",
       "tier": "about",
       "note": "their mean self-report minus verified rating, in ranks",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "rank.exact_match_in_band": {
@@ -6070,10 +6070,10 @@
       "tier": "about",
       "note": "of them declaring exactly the band their verified rating falls in",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "rank.exact_match_miss_narrowest": {
@@ -6084,10 +6084,10 @@
       "tier": "about",
       "note": "narrowest miss among the out-of-band ones, as a distance to the declared band's edge",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "rank.exact_match_miss_widest": {
@@ -6098,10 +6098,10 @@
       "tier": "about",
       "note": "…widest",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "rank.exact_match_out_of_band": {
@@ -6112,24 +6112,24 @@
       "tier": "about",
       "note": "declaring a neighbouring band instead",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "rank.exact_match_spread": {
-      "value": 0.4276078143656572,
+      "value": 0.4499419416603123,
       "fmt": ".2f",
-      "text": "0.43",
+      "text": "0.45",
       "producer": "ablations.rank_calibration_figures",
       "tier": "about",
       "note": "its spread over those users",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "rank.exact_match_users": {
@@ -6140,164 +6140,164 @@
       "tier": "about",
       "note": "users holding both a self-report and a verified rating on that same ladder",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "rank.exact_match_widest_share": {
-      "value": 0.5993975903614457,
+      "value": 0.6722972972972971,
       "fmt": "%.0f",
-      "text": "60",
+      "text": "67",
       "producer": "ablations.rank_calibration_figures",
       "tier": "about",
       "note": "share of the exact-match mean the two widest-missing rows carry between them",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "rank.games_equivalent": {
-      "value": 15.315814883922764,
+      "value": 11.62394646939309,
       "fmt": ".0f",
-      "text": "15",
+      "text": "12",
       "producer": "ablations.rank_calibration_figures",
       "tier": "about",
       "note": "tournament games per player at which two independent ratings agree as well as the shown rank agrees with a declared EGF rank",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "rank.games_equivalent_sd": {
-      "value": 2.8630515333183455,
+      "value": 2.2231923817796635,
       "fmt": ".0f",
-      "text": "3",
+      "text": "2",
       "producer": "ablations.rank_calibration_figures",
       "tier": "about",
       "note": "its bootstrap SD over the declarations behind the target",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "rank.games_n": {
-      "value": 103,
+      "value": 105,
       "fmt": "d",
-      "text": "103",
+      "text": "105",
       "producer": "ablations.rank_calibration_figures",
       "tier": "about",
       "note": "EGF declarations the match rests on",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "rank.honesty_ci_hi": {
-      "value": 0.7446753239658951,
+      "value": 0.5942916428481831,
       "fmt": ".2f",
-      "text": "0.74",
+      "text": "0.59",
       "producer": "ablations.rank_calibration_figures",
       "tier": "about",
       "note": "highest 95% upper bound it reaches — what the data licenses as an upper limit on inflation",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "rank.honesty_hi": {
-      "value": 0.19529411764705887,
+      "value": 0.17411764705882357,
       "fmt": "+.2f",
-      "text": "+0.20",
+      "text": "+0.17",
       "producer": "ablations.rank_calibration_figures",
       "tier": "about",
       "note": "…highest reading over both routes",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "rank.honesty_lo": {
-      "value": 0.0534428862085957,
+      "value": -0.16586927157950998,
       "fmt": "+.2f",
-      "text": "+0.05",
+      "text": "-0.17",
       "producer": "ablations.rank_calibration_figures",
       "tier": "about",
       "note": "displacement of a self-report from a verified rating at the same fitted rank, lowest reading over both routes; + = self-reports claim stronger",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "rank.honesty_matched_hi": {
-      "value": 0.13725076867600328,
+      "value": -0.0812712643294586,
       "fmt": "+.2f",
-      "text": "+0.14",
+      "text": "-0.08",
       "producer": "ablations.rank_calibration_figures",
       "tier": "about",
       "note": "…highest over them",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "rank.honesty_matched_lo": {
-      "value": 0.0534428862085957,
+      "value": -0.16586927157950998,
       "fmt": "+.2f",
-      "text": "+0.05",
+      "text": "-0.17",
       "producer": "ablations.rank_calibration_figures",
       "tier": "about",
       "note": "the rank-matched route alone, lowest over the matching tolerances",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "rank.honesty_se": {
-      "value": 0.2920852622855267,
+      "value": 0.32485016816480694,
       "fmt": ".2f",
-      "text": "0.29",
+      "text": "0.32",
       "producer": "ablations.rank_calibration_figures",
       "tier": "about",
       "note": "widest standard error the rank-matched route carries",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "rank.honesty_selfreporters": {
-      "value": 195,
+      "value": 198,
       "fmt": "d",
-      "text": "195",
+      "text": "198",
       "producer": "ablations.rank_calibration_figures",
       "tier": "about",
       "note": "users they are matched against: self-reporters holding no verified rating",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "rank.honesty_verified": {
@@ -6308,108 +6308,108 @@
       "tier": "about",
       "note": "users with a machine-written federation rating, the contrast's binding count",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "rank.linkable_median_rank": {
-      "value": -0.4282829208078905,
+      "value": -0.31996709232887505,
       "fmt": "rank",
       "text": "1k",
       "producer": "ablations.rank_calibration_figures",
       "tier": "about",
       "note": "median fitted rank of the users holding a verified rating",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "rank.n_declarations": {
-      "value": 420,
+      "value": 425,
       "fmt": "~10",
       "text": "420",
       "producer": "ablations.rank_calibration_figures",
       "tier": "about",
       "note": "self-declared (player, server) ranks",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "rank.n_players": {
-      "value": 212,
+      "value": 215,
       "fmt": "~10",
-      "text": "210",
+      "text": "220",
       "producer": "ablations.rank_calibration_figures",
       "tier": "about",
       "note": "players behind rank.n_declarations",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "rank.rho": {
-      "value": 0.8381915570993671,
+      "value": 0.829945144098634,
       "fmt": ".2f",
-      "text": "0.84",
+      "text": "0.83",
       "producer": "ablations.rank_calibration_figures",
       "tier": "about",
       "note": "per-server Spearman(mapped rating, declared rank), n-weighted, self-declarations",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "rank.rho_se": {
-      "value": 0.026408508184220372,
+      "value": 0.025934424670445527,
       "fmt": ".2f",
       "text": "0.03",
       "producer": "ablations.rank_calibration_figures",
       "tier": "about",
       "note": "bootstrap SE of rank.rho over players",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "rank.route_gap": {
-      "value": 0.1017362954865205,
+      "value": 0.29883664871793525,
       "fmt": ".2f",
-      "text": "0.10",
+      "text": "0.30",
       "producer": "ablations.rank_calibration_figures",
       "tier": "about",
       "note": "exact-match reading minus the rank-matched one at the one-rank tolerance: what being publicly checkable is worth",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "rank.server_mean_max_t": {
-      "value": 1.313436197266374,
+      "value": 1.0444813715278587,
       "fmt": ".2f",
-      "text": "1.31",
+      "text": "1.04",
       "producer": "ablations.rank_calibration_figures",
       "tier": "about",
       "note": "largest per-server residual mean in units of its own standard error — nominal significance is 1.96, before any correction for looking at all of them",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "rank.servers_scored": {
@@ -6420,52 +6420,52 @@
       "tier": "about",
       "note": "servers carrying enough declarations for a residual mean and its error",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "rank.spread_survey_egf": {
-      "value": 2.06839234878547,
+      "value": 2.114225128399145,
       "fmt": ".1f",
       "text": "2.1",
       "producer": "ablations.rank_calibration_figures",
       "tier": "about",
       "note": "…against self-reports on the federation coupling, same range",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "rank.spread_survey_pooled": {
-      "value": 2.456479119210913,
+      "value": 2.509796280122166,
       "fmt": ".1f",
       "text": "2.5",
       "producer": "ablations.rank_calibration_figures",
       "tier": "about",
       "note": "…against self-reports pooled over every server, same range",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "rank.spread_verified": {
-      "value": 1.2873346609150889,
+      "value": 1.3408369768741253,
       "fmt": ".1f",
       "text": "1.3",
       "producer": "ablations.rank_calibration_figures",
       "tier": "about",
       "note": "spread of the residual against verified ratings, over their own fitted-rank range",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "rank.stone_value_dan_logit": {
@@ -6476,10 +6476,10 @@
       "tier": "about",
       "note": "the same over 1d–6d",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "rank.stone_value_kyu_logit": {
@@ -6490,122 +6490,122 @@
       "tier": "about",
       "note": "logits one band buys, averaged over 15k–5k, from the even-game table's joint stone-value fit",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "rank.within1_pct": {
-      "value": 0.29523809523809524,
+      "value": 0.28941176470588237,
       "fmt": "%.0f",
-      "text": "30",
+      "text": "29",
       "producer": "ablations.rank_calibration_figures",
       "tier": "about",
       "note": "self-declarations with the shown server rank within one rank of the declared",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "rank.within2_pct": {
-      "value": 0.5571428571428572,
+      "value": 0.5411764705882353,
       "fmt": "%.0f",
-      "text": "56",
+      "text": "54",
       "producer": "ablations.rank_calibration_figures",
       "tier": "about",
       "note": "…within two ranks",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "rank.within_se_pts": {
-      "value": 0.029988406250557046,
+      "value": 0.030503695509162952,
       "fmt": "%.0f",
       "text": "3",
       "producer": "ablations.rank_calibration_figures",
       "tier": "about",
       "note": "larger bootstrap SE of the two within-shares, percentage points",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "rankmap.consensus_dan_bias": {
-      "value": -0.0769742764767249,
+      "value": 0.3922607707068007,
       "fmt": "+.2f",
-      "text": "-0.08",
+      "text": "+0.39",
       "producer": "ablations.rank_map_arm_figures",
       "tier": "about",
       "note": "…the same error over the same rows under the shipped mapping, where the federation is one coupling among many",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "rankmap.federation_dan_bias": {
-      "value": -0.032181260187945156,
+      "value": 0.3773782074281751,
       "fmt": "+.2f",
-      "text": "-0.03",
+      "text": "+0.38",
       "producer": "ablations.rank_map_arm_figures",
       "tier": "about",
       "note": "mean signed error against dan-band declarations, in the declaring server's own units, with the federation the identity hub the latent is defined by (negative = placed weaker than they declare)",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "rankmap.federation_dan_shift": {
-      "value": 1.8585352831922266,
+      "value": 1.298161440671105,
       "fmt": "+.1f",
-      "text": "+1.9",
+      "text": "+1.3",
       "producer": "ablations.rank_map_arm_figures",
       "tier": "about",
       "note": "how far a latent anchored on the federation alone moves the shown rank of the surveyed users the shipped mapping places in the dan bands, in ranks (positive = shown stronger)",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "rankmap.federation_kyu_shift": {
-      "value": 1.0871680996863786,
+      "value": 1.008187655791808,
       "fmt": "+.1f",
-      "text": "+1.1",
+      "text": "+1.0",
       "producer": "ablations.rank_map_arm_figures",
       "tier": "about",
       "note": "…and of those it places in the kyu bands",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "rankmap.screen_curve_shift": {
-      "value": 0.11033843368159868,
+      "value": 0.23335080742872316,
       "fmt": ".3f",
-      "text": "0.110",
+      "text": "0.233",
       "producer": "ablations.rank_map_arm_figures",
       "tier": "about",
       "note": "largest displacement between the screened and unscreened rating→rank curves at equal rank, over the ladder they span, in rating units",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "rankmap.screen_likelihood_bar": {
@@ -6616,472 +6616,472 @@
       "tier": "about",
       "note": "loosest one-in-N ordinal likelihood a declared category must fall below for the mixture's junk posterior to pass one half, over the servers' fitted couplings",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "rankmap.screen_mildest_miss": {
-      "value": 5.975568366065238,
+      "value": 6.4654137031513255,
       "fmt": ".1f",
-      "text": "6.0",
+      "text": "6.5",
       "producer": "ablations.rank_map_arm_figures",
       "tier": "about",
       "note": "smallest miss among the declarations the screen removes: how far the mapping places that user from the band they declared, in ranks",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "rankmap.screen_rank_shift": {
-      "value": 0.39845019667088,
+      "value": 0.7874199788910818,
       "fmt": ".2f",
-      "text": "0.40",
+      "text": "0.79",
       "producer": "ablations.rank_map_arm_figures",
       "tier": "about",
       "note": "the same displacement at equal RATING, in ranks — the largest gap between the two curves anywhere on the ladder",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "recall.clean_chain_excluded_pct": {
-      "value": 0.32021033887930556,
+      "value": 0.3006210207702745,
       "fmt": "%.0f",
-      "text": "32",
+      "text": "30",
       "producer": "ablations.recall_figures",
       "tier": "about",
       "note": "share of repeat attempts excluded by the clean-chain filter (chains beginning before repeats were reliably logged)",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "recall.cochran_df": {
-      "value": 119,
+      "value": 125,
       "fmt": "d",
-      "text": "119",
+      "text": "125",
       "producer": "ablations.recall_figures",
       "tier": "about",
       "note": "its degrees of freedom",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "recall.cochran_q": {
-      "value": 133.11964849261773,
+      "value": 142.00097717993057,
       "fmt": ".0f",
-      "text": "133",
+      "text": "142",
       "producer": "ablations.recall_figures",
       "tier": "about",
       "note": "Cochran's heterogeneity statistic for the per-user step at the 5-events-per-cell cut",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "recall.constant_deficit_nats": {
-      "value": 0.06870925308597575,
+      "value": 0.0827135305383544,
       "fmt": ".2f",
-      "text": "0.07",
+      "text": "0.08",
       "producer": "ablations.recall_figures",
       "tier": "about",
       "note": "held-out nats the retention computation trails a constant rate by",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "recall.direction_share_min20_pct": {
-      "value": 0.9264705882352942,
+      "value": 0.9130434782608695,
       "fmt": "%.0f",
-      "text": "93",
+      "text": "91",
       "producer": "ablations.recall_figures",
       "tier": "about",
       "note": "share of those users whose own odds ratio runs in the expected direction, at the 20-events cut",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "recall.direction_share_min5_pct": {
-      "value": 0.85,
+      "value": 0.8412698412698413,
       "fmt": "%.0f",
-      "text": "85",
+      "text": "84",
       "producer": "ablations.recall_figures",
       "tier": "about",
       "note": "share of those users whose own odds ratio runs in the expected direction, at the 5-events cut",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "recall.free_rung_gain_nats": {
-      "value": 0.0023560036146561547,
+      "value": 0.0026375307958205196,
       "fmt": ".3f",
-      "text": "0.002",
+      "text": "0.003",
       "producer": "ablations.recall_figures",
       "tier": "about",
       "note": "held-out nats a free effect per rung buys — the upper bound on any reshaping of the streak term",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "recall.matched_ratio_era_gap": {
-      "value": 0.05467732741465481,
+      "value": 0.06055940854738173,
       "fmt": ".2f",
-      "text": "0.05",
+      "text": "0.06",
       "producer": "ablations.recall_figures",
       "tier": "about",
       "note": "absolute pre/post gap of the matched contrast — the check that stratifying removed the schedule change",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "recall.matched_ratio_or": {
-      "value": 1.7226834045447943,
+      "value": 1.7179961211651047,
       "fmt": ".2f",
       "text": "1.72",
       "producer": "ablations.recall_figures",
       "tier": "about",
       "note": "within-(user, matched relative-interval band) MH odds of clearing, post-success vs post-lapse — schedule-invariant, all eras pooled",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "recall.matched_ratio_or_post": {
-      "value": 1.7411832383628938,
+      "value": 1.7514754795596987,
       "fmt": ".2f",
-      "text": "1.74",
+      "text": "1.75",
       "producer": "ablations.recall_figures",
       "tier": "about",
       "note": "…and on serves after it settled",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "recall.matched_ratio_or_pre": {
-      "value": 1.686505910948239,
+      "value": 1.690916071012317,
       "fmt": ".2f",
       "text": "1.69",
       "producer": "ablations.recall_figures",
       "tier": "about",
       "note": "the same contrast on serves before the first-success step entered the schedule",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "recall.matched_step_interval": {
-      "value": 1.5921623141628052,
+      "value": 1.5872625002875451,
       "fmt": ".2f",
       "text": "1.59",
       "producer": "ablations.recall_figures",
       "tier": "about",
       "note": "interval multiplier the matched contrast implies at the post-lapse operating rate",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "recall.mh_plateau_or_sd": {
-      "value": 1.1689947249105006,
+      "value": 1.4633567940743943,
       "fmt": ".1f",
-      "text": "1.2",
+      "text": "1.5",
       "producer": "ablations.recall_figures",
       "tier": "about",
       "note": "separation of the second success from the first, in sd, within user",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "recall.mh_step_or_sd": {
-      "value": 14.589327910700254,
+      "value": 15.664980586737185,
       "fmt": ".1f",
-      "text": "14.6",
+      "text": "15.7",
       "producer": "ablations.recall_figures",
       "tier": "about",
       "note": "separation of the post-success from the post-lapse state, in sd, within user",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "recall.no_post_success_users_pct": {
-      "value": 0.42394822006472493,
+      "value": 0.415625,
       "fmt": "%.0f",
       "text": "42",
       "producer": "ablations.recall_figures",
       "tier": "about",
       "note": "users with no post-success rows inside the window the on-device model trains on",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "recall.pooled_or_min10": {
-      "value": 1.7972910874381243,
+      "value": 1.8094034195376396,
       "fmt": ".2f",
-      "text": "1.80",
+      "text": "1.81",
       "producer": "ablations.recall_figures",
       "tier": "about",
       "note": "pooled within-user post-lapse/post-success odds ratio, users with at least 10 events in each cell",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "recall.pooled_or_min20": {
-      "value": 1.7952484456111277,
+      "value": 1.8026917738927093,
       "fmt": ".2f",
       "text": "1.80",
       "producer": "ablations.recall_figures",
       "tier": "about",
       "note": "pooled within-user post-lapse/post-success odds ratio, users with at least 20 events in each cell",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "recall.pooled_or_min5": {
-      "value": 1.7862502286093744,
+      "value": 1.7934202981135932,
       "fmt": ".2f",
       "text": "1.79",
       "producer": "ablations.recall_figures",
       "tier": "about",
       "note": "pooled within-user post-lapse/post-success odds ratio, users with at least 5 events in each cell",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "recall.post_success_rows_median": {
-      "value": 1.0,
+      "value": 2.0,
       "fmt": "d",
-      "text": "1",
+      "text": "2",
       "producer": "ablations.recall_figures",
       "tier": "about",
       "note": "median post-success rows per user inside that same window",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "recall.recalibration_overspread": {
-      "value": 7.782455491206596,
+      "value": 9.220682571046288,
       "fmt": ".1f",
-      "text": "7.8",
+      "text": "9.2",
       "producer": "ablations.recall_figures",
       "tier": "about",
       "note": "reciprocal of that slope: how many times too wide the model's spread is",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "recall.recalibration_slope": {
-      "value": 0.12849414958169705,
+      "value": 0.10845184098844085,
       "fmt": ".2f",
-      "text": "0.13",
+      "text": "0.11",
       "producer": "ablations.recall_figures",
       "tier": "about",
       "note": "held-out Platt slope on the retention model's own log-odds, split by user",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "recall.rung0_clear_high": {
-      "value": 0.6926713947990544,
+      "value": 0.6932250259246457,
       "fmt": "%.0f",
       "text": "69",
       "producer": "ablations.recall_figures",
       "tier": "about",
       "note": "highest post-lapse clear rate across those same bins",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "recall.rung0_clear_low": {
-      "value": 0.6491300745650372,
+      "value": 0.64501679731243,
       "fmt": "%.0f",
       "text": "65",
       "producer": "ablations.recall_figures",
       "tier": "about",
       "note": "lowest post-lapse clear rate across elapsed-gap bins from 0.5 to 16 days",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "recall.rung0_clear_poststep": {
-      "value": 0.6640243902439025,
+      "value": 0.6587722031785603,
       "fmt": "%.0f",
       "text": "66",
       "producer": "ablations.recall_figures",
       "tier": "about",
       "note": "post-lapse clear rate over the same serves — the parity target",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "recall.rung0_clear_rate": {
-      "value": 0.6680643344389511,
+      "value": 0.6657893231103736,
       "fmt": "%.0f",
       "text": "67",
       "producer": "ablations.recall_figures",
       "tier": "about",
       "note": "pooled post-lapse clear rate, against the 0.80 window-open ceiling",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "recall.rung0_composition_points": {
-      "value": -3.871680383575715,
+      "value": -4.041519533484594,
       "fmt": ".1f",
-      "text": "-3.9",
+      "text": "-4.0",
       "producer": "ablations.recall_figures",
       "tier": "about",
       "note": "post-lapse clear-rate points, users who reach the next rung minus users who never do; negative means composition suppresses the step",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "recall.rung0_gap_trend_points": {
-      "value": 1.5987729695838588,
+      "value": 1.744119531301171,
       "fmt": ".1f",
-      "text": "1.6",
+      "text": "1.7",
       "producer": "ablations.recall_figures",
       "tier": "about",
       "note": "post-lapse clear-rate points per doubling of the elapsed gap over those bins; positive is a rise, not decay",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "recall.rung1_clear_poststep": {
-      "value": 0.7419354838709677,
+      "value": 0.7530584503851382,
       "fmt": "%.0f",
-      "text": "74",
+      "text": "75",
       "producer": "ablations.recall_figures",
       "tier": "about",
       "note": "realized clear of first-rung serves since the step settled",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "recall.rung_step_logodds_rise": {
-      "value": 0.084439371461839,
+      "value": 0.08194575609178889,
       "fmt": ".2f",
       "text": "0.08",
       "producer": "ablations.recall_figures",
       "tier": "about",
       "note": "rise in mean cold-solve log-odds from the post-lapse to the post-success state",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "recall.rung_step_model_visible_share": {
-      "value": 0.10900582441292198,
+      "value": 0.1005653013112141,
       "fmt": ".2f",
-      "text": "0.11",
+      "text": "0.10",
       "producer": "ablations.recall_figures",
       "tier": "about",
       "note": "that multiplier as a share of the interval correction the realized rates require at the first success",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "recall.rung_step_model_visible_stability": {
-      "value": 1.0711418236772885,
+      "value": 1.0662230608069654,
       "fmt": ".2f",
       "text": "1.07",
       "producer": "ablations.recall_figures",
       "tier": "about",
       "note": "stability multiplier the difficulty term already draws from that rise",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "recall.rung_up_clear_prestep": {
@@ -7092,24 +7092,24 @@
       "tier": "about",
       "note": "realized clear of rung >= 1 serves scheduled without the step — the diagnosis-era anchor",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "recall.step_form_gain_nats": {
-      "value": 0.0010462345911338433,
+      "value": 0.0011901117083814583,
       "fmt": ".3f",
       "text": "0.001",
       "producer": "ablations.recall_figures",
       "tier": "about",
       "note": "held-out nats a first-success step buys over the shipped linear streak term",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "regularization.both_off_cost_final_mnat": {
@@ -7897,129 +7897,129 @@
       }
     },
     "sefloor.dan_min": {
-      "value": 0.38425412303856193,
+      "value": 0.42953541086144187,
       "fmt": ".2f",
-      "text": "0.38",
+      "text": "0.43",
       "producer": "ablations.curve_shape_figures",
       "tier": "about",
       "note": "tightest SE floor over the dan range, in ranks — knots in [+0, +9) in internal rank, the 1d…9d bands",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "sefloor.kyu_vs_dan_ratio": {
-      "value": 4.037031635030392,
+      "value": 4.006225290910074,
       "fmt": ".1f",
       "text": "4.0",
       "producer": "ablations.curve_shape_figures",
       "tier": "about",
       "note": "mean floor over the middle kyus ÷ mean floor over the dan range, each an unweighted mean over that region's knots ([-15, -5) in internal rank, the 15k…6k bands; [+0, +9) in internal rank, the 1d…9d bands) — the TYPICAL kyu-vs-dan comparison, not the extremes",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "sefloor.midkyu_max": {
-      "value": 2.5451022041636886,
+      "value": 2.9387888533085333,
       "fmt": ".2f",
-      "text": "2.55",
+      "text": "2.94",
       "producer": "ablations.curve_shape_figures",
       "tier": "about",
       "note": "loosest SE floor over the middle kyus, in ranks — knots in [-15, -5) in internal rank, the 15k…6k bands",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "sefloor.spread_ratio": {
-      "value": 6.623487040393511,
+      "value": 6.841784819125235,
       "fmt": ".1f",
-      "text": "6.6",
+      "text": "6.8",
       "producer": "ablations.curve_shape_figures",
       "tier": "about",
       "note": "loosest middle-kyu floor ÷ tightest dan-range floor — the spread between the extremes a constant floor would have to cover",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "sefloor.weak_trough": {
-      "value": 0.46536838429802835,
+      "value": 0.4721909325275943,
       "fmt": ".2f",
       "text": "0.47",
       "producer": "ablations.curve_shape_figures",
       "tier": "about",
       "note": "tightest SE floor within 2 ranks of the rating→rank curve's weakest knot, in ranks — the weak-end trough, which is a different feature from the ridge at the 1k/1d boundary",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "serve.clear_100_300": {
-      "value": 0.7746874166795302,
+      "value": 0.7755344418052257,
       "fmt": "%.1f",
-      "text": "77.5",
+      "text": "77.6",
       "producer": "ablations.serve_log_figures",
       "tier": "about",
       "note": "clear rate over positions 101-300; first-time attempts, one row per (user, problem), by 1-based position in the user's own first-time history",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "serve.clear_25_100": {
-      "value": 0.7831858407079646,
+      "value": 0.7832368652074932,
       "fmt": "%.1f",
       "text": "78.3",
       "producer": "ablations.serve_log_figures",
       "tier": "about",
       "note": "clear rate over positions 26-100; first-time attempts, one row per (user, problem), by 1-based position in the user's own first-time history",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "serve.clear_after300": {
-      "value": 0.7766505407639667,
+      "value": 0.7775575014160623,
       "fmt": "%.1f",
-      "text": "77.7",
+      "text": "77.8",
       "producer": "ablations.serve_log_figures",
       "tier": "about",
       "note": "clear rate past position 300; first-time attempts, one row per (user, problem), by 1-based position in the user's own first-time history. Also the rate quoted for users past their first few hundred problems — the same population",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "serve.clear_first25": {
-      "value": 0.8164492569310708,
+      "value": 0.8155479059093517,
       "fmt": "%.1f",
       "text": "81.6",
       "producer": "ablations.serve_log_figures",
       "tier": "about",
       "note": "clear rate over positions 1-25; first-time attempts, one row per (user, problem), by 1-based position in the user's own first-time history",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "serve.fitted_ceiling": {
@@ -8030,108 +8030,108 @@
       "tier": "about",
       "note": "1 − the SHIPPED global lapse: the upper asymptote of the fitted response curve, which no bin of finite gap reaches",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "serve.gap_100_300": {
-      "value": -0.002218600841486217,
+      "value": -0.0023150452848714866,
       "fmt": "+.2f",
       "text": "-0.00",
       "producer": "ablations.serve_log_figures",
       "tier": "about",
       "note": "mean rating gap over positions 101-300; mean of (the player's own anchor rating − the problem's shipped rating) in rating units, positive when the problem sits BELOW the player; the anchor is their 80%-clear rating fitted over their WHOLE first-time history, so a player needs at least 20 rated attempts and a mixed record to enter; first-time attempts, one row per (user, problem), by 1-based position in the user's own first-time history",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "serve.gap_25_100": {
-      "value": 0.07806043440263175,
+      "value": 0.07868148779566646,
       "fmt": "+.2f",
       "text": "+0.08",
       "producer": "ablations.serve_log_figures",
       "tier": "about",
       "note": "mean rating gap over positions 26-100; mean of (the player's own anchor rating − the problem's shipped rating) in rating units, positive when the problem sits BELOW the player; the anchor is their 80%-clear rating fitted over their WHOLE first-time history, so a player needs at least 20 rated attempts and a mixed record to enter; first-time attempts, one row per (user, problem), by 1-based position in the user's own first-time history",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "serve.gap_after300": {
-      "value": -0.057500359481843254,
+      "value": -0.056367344855051064,
       "fmt": "+.2f",
       "text": "-0.06",
       "producer": "ablations.serve_log_figures",
       "tier": "about",
       "note": "mean rating gap past position 300; mean of (the player's own anchor rating − the problem's shipped rating) in rating units, positive when the problem sits BELOW the player; the anchor is their 80%-clear rating fitted over their WHOLE first-time history, so a player needs at least 20 rated attempts and a mixed record to enter; first-time attempts, one row per (user, problem), by 1-based position in the user's own first-time history",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "serve.gap_first25": {
-      "value": 0.5667106426227378,
+      "value": 0.5585123482263445,
       "fmt": "+.2f",
-      "text": "+0.57",
+      "text": "+0.56",
       "producer": "ablations.serve_log_figures",
       "tier": "about",
       "note": "mean rating gap over positions 1-25; mean of (the player's own anchor rating − the problem's shipped rating) in rating units, positive when the problem sits BELOW the player; the anchor is their 80%-clear rating fitted over their WHOLE first-time history, so a player needs at least 20 rated attempts and a mixed record to enter; first-time attempts, one row per (user, problem), by 1-based position in the user's own first-time history",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "serve.gapbin_clear_above2": {
-      "value": 0.9666845781837722,
+      "value": 0.9648,
       "fmt": "%.1f",
-      "text": "96.7",
+      "text": "96.5",
       "producer": "ablations.serve_log_figures",
       "tier": "about",
       "note": "clear rate where the player sits more than 2 rating units ABOVE the problem (gap >= 2); first-time clear rate in one bin of (player anchor rating − problem rating), bins half-open [lo, hi) in rating units; ± is the binomial standard error of that bin",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "serve.gapbin_clear_below2": {
-      "value": 0.15210355987055016,
+      "value": 0.15112540192926044,
       "fmt": "%.1f",
-      "text": "15.2",
+      "text": "15.1",
       "producer": "ablations.serve_log_figures",
       "tier": "about",
       "note": "clear rate where the player sits more than 2 rating units BELOW the problem (gap < -2); first-time clear rate in one bin of (player anchor rating − problem rating), bins half-open [lo, hi) in rating units; ± is the binomial standard error of that bin",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "serve.gapbin_clear_zero": {
-      "value": 0.8224907357552339,
+      "value": 0.819805444747708,
       "fmt": "%.1f",
-      "text": "82.2",
+      "text": "82.0",
       "producer": "ablations.serve_log_figures",
       "tier": "about",
       "note": "clear rate within 0.1 of a rating unit of zero gap; in-sample, the player's anchor being fitted on these same attempts; first-time clear rate in one bin of (player anchor rating − problem rating), bins half-open [lo, hi) in rating units; ± is the binomial standard error of that bin",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "serve.gapbin_inversions": {
@@ -8142,122 +8142,122 @@
       "tier": "about",
       "note": "adjacent gap bins across the whole ladder whose clear rate FALLS as the gap rises; 0 is the monotone rise the response model implies",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "serve.gapbin_se_above2": {
-      "value": 0.004159985977676182,
+      "value": 0.0042558796975478526,
       "fmt": "%.1f",
       "text": "0.4",
       "producer": "ablations.serve_log_figures",
       "tier": "about",
       "note": "± on serve.gapbin_clear_above2; first-time clear rate in one bin of (player anchor rating − problem rating), bins half-open [lo, hi) in rating units; ± is the binomial standard error of that bin",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "serve.gapbin_se_below2": {
-      "value": 0.020429693706370242,
+      "value": 0.020310018026131842,
       "fmt": "%.1f",
       "text": "2.0",
       "producer": "ablations.serve_log_figures",
       "tier": "about",
       "note": "± on serve.gapbin_clear_below2; first-time clear rate in one bin of (player anchor rating − problem rating), bins half-open [lo, hi) in rating units; ± is the binomial standard error of that bin",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "serve.gapbin_se_zero": {
-      "value": 0.0015205583721622851,
+      "value": 0.001437938497188979,
       "fmt": "%.1f",
-      "text": "0.2",
+      "text": "0.1",
       "producer": "ablations.serve_log_figures",
       "tier": "about",
       "note": "± on serve.gapbin_clear_zero; first-time clear rate in one bin of (player anchor rating − problem rating), bins half-open [lo, hi) in rating units; ± is the binomial standard error of that bin",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "serve.lapse_bound": {
-      "value": 0.03331542181622782,
+      "value": 0.03520000000000001,
       "fmt": ".3f",
-      "text": "0.033",
+      "text": "0.035",
       "producer": "ablations.serve_log_figures",
       "tier": "about",
       "note": "largest global lapse the log admits: no attempt can clear more often than 1 − lapse, so the top gap bin's clear rate bounds it from above at 1 − that rate",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "serve.lapse_headroom": {
-      "value": 1.034640429075398,
+      "value": 1.0931677018633543,
       "fmt": ".1f",
-      "text": "1.0",
+      "text": "1.1",
       "producer": "ablations.serve_log_figures",
       "tier": "about",
       "note": "the log's lapse bound ÷ the shipped lapse — how far inside the bound the fitted value sits",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "serve.onboard_const_over3_pct": {
-      "value": 0.7656666666666667,
+      "value": 0.7242833333333333,
       "fmt": "%.0f",
-      "text": "77",
+      "text": "72",
       "producer": "ablations.client_estimator_figures",
       "tier": "about",
       "note": "share served more than 3 ranks above true rank under a constant margin of 5 (simulated 20k, first 30 first-time attempts, 2000 seeded runs on the shipped 9×9 corpus)",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "serve.onboard_const_over5_pct": {
-      "value": 0.6351833333333333,
+      "value": 0.6198,
       "fmt": "%.0f",
-      "text": "64",
+      "text": "62",
       "producer": "ablations.client_estimator_figures",
       "tier": "about",
       "note": "share served more than 5 ranks above true rank under a constant margin of 5 (simulated 20k, first 30 first-time attempts, 2000 seeded runs on the shipped 9×9 corpus)",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "serve.onboard_count_over3_pct": {
-      "value": 0.9783166666666666,
+      "value": 0.97905,
       "fmt": "%.0f",
       "text": "98",
       "producer": "ablations.client_estimator_figures",
       "tier": "about",
       "note": "share served more than 3 ranks above true rank under a margin growing with the attempt count (simulated 20k, first 30 first-time attempts, 2000 seeded runs on the shipped 9×9 corpus)",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "serve.onboard_dan_attempts": {
@@ -8268,24 +8268,24 @@
       "tier": "about",
       "note": "first-time attempts before an unlimited-strength solver's SHOWN rank reaches 1 dan, under the shipped serve-gap cap",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "serve.onboard_dan_attempts_const": {
-      "value": 39,
+      "value": 40,
       "fmt": "d",
-      "text": "39",
+      "text": "40",
       "producer": "ablations.client_estimator_figures",
       "tier": "about",
       "note": "the same under a constant margin of 5",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "serve.onboard_dan_attempts_count": {
@@ -8296,38 +8296,38 @@
       "tier": "about",
       "note": "the same under a margin growing with the attempt count",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "serve.onboard_over3_pct": {
-      "value": 0.52925,
+      "value": 0.5576833333333333,
       "fmt": "%.0f",
-      "text": "53",
+      "text": "56",
       "producer": "ablations.client_estimator_figures",
       "tier": "about",
       "note": "share served more than 3 ranks above true rank under the shipped serve-gap cap (simulated 20k, first 30 first-time attempts, 2000 seeded runs on the shipped 9×9 corpus)",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "serve.onboard_over5_pct": {
-      "value": 0.3819166666666667,
+      "value": 0.3515,
       "fmt": "%.0f",
-      "text": "38",
+      "text": "35",
       "producer": "ablations.client_estimator_figures",
       "tier": "about",
       "note": "share served more than 5 ranks above true rank under the shipped serve-gap cap (simulated 20k, first 30 first-time attempts, 2000 seeded runs on the shipped 9×9 corpus)",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "slopescale.optimum_interior": {
@@ -8618,10 +8618,10 @@
       "tier": "about",
       "note": "published problems whose only resolved refutation is the pass, so excluding it would leave no ownership-swing measurement at all",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "swing.pass_outranks_stones_pct": {
@@ -8632,66 +8632,66 @@
       "tier": "about",
       "note": "share of the published problems where a resolved pass is the swing baseline over at least one resolved stone move",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "window.span_max_days": {
-      "value": 345.83005752314847,
+      "value": 350.8826491319471,
       "fmt": ".0f",
-      "text": "346",
+      "text": "351",
       "producer": "ablations.serve_log_figures",
       "tier": "about",
       "note": "longest span in days of a FULL rank-estimator window — the 500 most recent first-time attempts — over the users who have that many; bounded from above by the length of the log",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "window.span_median_days": {
-      "value": 29.647057876157817,
+      "value": 30.134831967593897,
       "fmt": ".0f",
       "text": "30",
       "producer": "ablations.serve_log_figures",
       "tier": "about",
       "note": "median span in days of a FULL rank-estimator window — the 500 most recent first-time attempts — over the users who have that many",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "window.span_over_90d": {
-      "value": 0.2152777777777778,
+      "value": 0.2108843537414966,
       "fmt": "%.0f",
-      "text": "22",
+      "text": "21",
       "producer": "ablations.serve_log_figures",
       "tier": "about",
       "note": "share of those users whose window spans more than 90 days; span in days of a FULL rank-estimator window — the 500 most recent first-time attempts — over the users who have that many",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     },
     "window.span_p75_days": {
-      "value": 73.19973164641195,
+      "value": 69.4376803877315,
       "fmt": ".0f",
-      "text": "73",
+      "text": "69",
       "producer": "ablations.serve_log_figures",
       "tier": "about",
       "note": "upper-quartile span in days of a FULL rank-estimator window — the 500 most recent first-time attempts — over the users who have that many",
       "measured": {
-        "at": "2026-09-03T16:20:20Z",
-        "git": "e470e356e40+dirty",
-        "db_max_id": 471436,
-        "data_version": "9b77faeb2de0af5a"
+        "at": "2026-09-11T12:30:51Z",
+        "git": "23e92b6dde6+dirty",
+        "db_max_id": 489642,
+        "data_version": "fd7ca9186c1f4131"
       }
     }
   },

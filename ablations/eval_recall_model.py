@@ -337,7 +337,9 @@ def _print_rung_table(events, min_n, retention, max_rung):
         # land at 0.80 only if no forgetting happened at all; anything at or
         # above it says the model understates that item's stability. Serves
         # spread through the window should average near its middle.
-        if rate >= WINDOW_OPEN_R:
+        if se == 0.0:
+            line += "   CEILING BREACH (every serve cleared; no SE)"
+        elif rate >= WINDOW_OPEN_R:
             line += f"   CEILING BREACH +{(rate - WINDOW_OPEN_R) / se:.1f} sd"
         else:
             line += f"   {(WINDOW_OPEN_R - rate) / se:5.1f} sd below ceiling"
