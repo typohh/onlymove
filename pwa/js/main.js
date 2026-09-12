@@ -100,16 +100,14 @@ document.addEventListener('touchstart', () => setUserHasInteracted(true));
 
 /**
  * Drop the pure-CSS boot splash (index.html) now that the app's own JS is in
- * control. Called at the very top of the init handler: every subsequent screen
- * the user can see — the size picker, the showLoading() spinner over the first
- * zip load, or the loaded board — is rendered by JS within this same handler,
- * so the splash hands off without ever exposing the static placeholder layout.
+ * control and the initial board UI has rendered. Guarded so multiple calls
+ * (e.g. cold-start size picker handoff vs standard problem load) are safe.
  */
 function hideBootSplash() {
     const el = document.getElementById('boot-splash');
-    if (!el) return;
+    if (!el || el.classList.contains('boot-hidden')) return;
     el.classList.add('boot-hidden');
-    setTimeout(() => el.remove(), 300);
+    setTimeout(() => el.remove(), 400);
 }
 
 // --- Init phases ------------------------------------------------------------
@@ -522,6 +520,7 @@ async function resolveInitialBoardSize(tsumegoId) {
         // Render an empty board behind the picker so the dialog overlays a
         // real-looking board instead of empty void.
         initializeBoard(state.boardSize);
+        hideBootSplash();
         const chosen = await showBoardSizePicker();
         setBoardSize(chosen);
         // Same reason as above — force-persist when chosen equals the default.
@@ -731,7 +730,6 @@ function wireLifecycleRecovery() {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
-    hideBootSplash();
     logStartupVersions();
 
     updateBoardSize();
@@ -797,11 +795,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     // notification / standing challenge).
     const intent = parseUrlIntent();
     await resolveInitialBoardSize(intent.tsumegoId);
-    await loadInitialProblem(intent);
-
-    document.getElementById('title').textContent = getTerm('tsumegoMode');
-    updateAllUI();
-    hideLoading();
+    try {
+        await loadInitialProblem(intent);
+    } finally {
+        document.getElementById('title').textContent = getTerm('tsumegoMode');
+        updateAllUI();
+        hideLoading();
+        hideBootSplash();
+    }
 
     // First-run onboarding bubbles. Runs after the first problem is painted and
     // history is loaded, so it can decide new-user vs existing-user and evaluate

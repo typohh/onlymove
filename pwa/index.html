@@ -32,36 +32,187 @@
   <link rel="stylesheet" type="text/css" href="style.css">
   <!-- Critical, self-contained boot-splash CSS: inlined so the loading state
        paints on the very first frame, before the (deferred, module) JS bundle
-       has downloaded/parsed. Without it the static HTML below shows a
-       half-built UI (placeholder header text + empty board) during the bundle
-       load window. The app removes #boot-splash once its DOMContentLoaded
-       handler runs (hideBootSplash in main.js). -->
+       has downloaded/parsed. Shows an animated 5×5 Triple Ko Go board matching
+       the app icon, looping the 6-move sequence until loading completes. -->
   <style id="boot-splash-style">
     #boot-splash {
       position: fixed; inset: 0; z-index: 10000;
       display: flex; align-items: center; justify-content: center;
       background: #222;
-      transition: opacity 0.25s ease;
+      transition: opacity 0.35s ease;
     }
     #boot-splash.boot-hidden { opacity: 0; pointer-events: none; }
-    #boot-splash .boot-spinner {
-      width: 12vmin; height: 12vmin;
-      border: 1.2vmin solid rgba(255, 255, 255, 0.2);
-      border-top-color: #fff;
-      border-radius: 50%;
-      animation: boot-spin 0.8s linear infinite;
+    .boot-content {
+      display: flex; flex-direction: column; align-items: center;
+      gap: clamp(14px, 4vmin, 24px);
     }
-    @keyframes boot-spin { to { transform: rotate(360deg); } }
+    .boot-board svg {
+      width: clamp(160px, 45vmin, 220px);
+      height: clamp(160px, 45vmin, 220px);
+      display: block;
+      filter: drop-shadow(0 6px 16px rgba(0, 0, 0, 0.5));
+    }
+    .boot-loading-text {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      font-size: clamp(0.95rem, 3.5vmin, 1.15rem);
+      letter-spacing: 0.06em;
+      color: #ccc;
+      text-align: center;
+    }
+    .ko-stone {
+      transform-box: fill-box;
+      transform-origin: center;
+    }
+    @keyframes ko-b1 {
+      0% { opacity: 0; transform: scale(1.18); }
+      1.5% { opacity: 1; transform: scale(1); }
+      49.9% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0; transform: scale(0.9); }
+      100% { opacity: 0; }
+    }
+    @keyframes ko-c1 {
+      0% { opacity: 0; }
+      49.9% { opacity: 0; }
+      50% { opacity: 0; transform: scale(1.18); }
+      51.5% { opacity: 1; transform: scale(1); }
+      99.9% { opacity: 1; transform: scale(1); }
+      100% { opacity: 0; transform: scale(0.9); }
+    }
+    @keyframes ko-b3 {
+      0% { opacity: 1; transform: scale(1); }
+      16.6% { opacity: 1; transform: scale(1); }
+      16.7% { opacity: 0; transform: scale(0.9); }
+      66.6% { opacity: 0; }
+      66.7% { opacity: 0; transform: scale(1.18); }
+      68.2% { opacity: 1; transform: scale(1); }
+      100% { opacity: 1; transform: scale(1); }
+    }
+    @keyframes ko-c3 {
+      0% { opacity: 0; }
+      16.6% { opacity: 0; }
+      16.7% { opacity: 0; transform: scale(1.18); }
+      18.2% { opacity: 1; transform: scale(1); }
+      66.6% { opacity: 1; transform: scale(1); }
+      66.7% { opacity: 0; transform: scale(0.9); }
+      100% { opacity: 0; }
+    }
+    @keyframes ko-b5 {
+      0% { opacity: 0; }
+      33.3% { opacity: 0; }
+      33.4% { opacity: 0; transform: scale(1.18); }
+      34.9% { opacity: 1; transform: scale(1); }
+      83.3% { opacity: 1; transform: scale(1); }
+      83.4% { opacity: 0; transform: scale(0.9); }
+      100% { opacity: 0; }
+    }
+    @keyframes ko-c5 {
+      0% { opacity: 1; transform: scale(1); }
+      33.3% { opacity: 1; transform: scale(1); }
+      33.4% { opacity: 0; transform: scale(0.9); }
+      83.3% { opacity: 0; }
+      83.4% { opacity: 0; transform: scale(1.18); }
+      84.9% { opacity: 1; transform: scale(1); }
+      100% { opacity: 1; transform: scale(1); }
+    }
+    .ko-b1 { animation: ko-b1 3.6s infinite; }
+    .ko-c1 { animation: ko-c1 3.6s infinite; }
+    .ko-b3 { animation: ko-b3 3.6s infinite; }
+    .ko-c3 { animation: ko-c3 3.6s infinite; }
+    .ko-b5 { animation: ko-b5 3.6s infinite; }
+    .ko-c5 { animation: ko-c5 3.6s infinite; }
+    .board-plate { fill: #2c2925; stroke: #454039; stroke-width: 1.5; }
+    .board-grid-line { stroke: #6e675e; stroke-width: 1.5; }
+    .board-star-dot { fill: #6e675e; }
     @media (prefers-color-scheme: light) {
       #boot-splash { background: #f0f0f0; }
-      #boot-splash .boot-spinner { border-color: rgba(0, 0, 0, 0.15); border-top-color: #333; }
+      .boot-board svg { filter: drop-shadow(0 6px 16px rgba(0, 0, 0, 0.15)); }
+      .boot-loading-text { color: #555; }
+      .board-plate { fill: #dcb382; stroke: #b58d5f; }
+      .board-grid-line { stroke: #7d5930; }
+      .board-star-dot { fill: #7d5930; }
     }
   </style>
 </head>
 <body>
-  <!-- Pure-CSS loading state shown from first paint until the app is ready;
-       see #boot-splash-style in <head>. -->
-  <div id="boot-splash"><div class="boot-spinner"></div></div>
+  <!-- Pure-CSS animated 5x5 Triple Ko loading state shown from first paint until the app is ready -->
+  <div id="boot-splash">
+    <div class="boot-content">
+      <div class="boot-board">
+        <svg viewBox="0 0 240 240" width="240" height="240" aria-label="Loading animation">
+          <defs>
+            <radialGradient id="w-grad" cx="35%" cy="35%" r="65%">
+              <stop offset="0%" stop-color="#ffffff"/>
+              <stop offset="80%" stop-color="#e2e2e2"/>
+              <stop offset="100%" stop-color="#c5c5c5"/>
+            </radialGradient>
+            <radialGradient id="b-grad" cx="35%" cy="35%" r="65%">
+              <stop offset="0%" stop-color="#424242"/>
+              <stop offset="30%" stop-color="#222222"/>
+              <stop offset="100%" stop-color="#0d0d0d"/>
+            </radialGradient>
+            <circle id="w-stone" r="18" fill="url(#w-grad)" stroke="#999" stroke-width="0.8" />
+            <circle id="b-stone" r="18" fill="url(#b-grad)" stroke="#444" stroke-width="0.8" />
+          </defs>
+          <!-- Background board plate -->
+          <rect class="board-plate" x="18" y="18" width="204" height="204" rx="10" />
+          <!-- Grid lines -->
+          <g class="board-grid-line">
+            <line x1="40" y1="40" x2="40" y2="200" />
+            <line x1="80" y1="40" x2="80" y2="200" />
+            <line x1="120" y1="40" x2="120" y2="200" />
+            <line x1="160" y1="40" x2="160" y2="200" />
+            <line x1="200" y1="40" x2="200" y2="200" />
+            <line x1="40" y1="40" x2="200" y2="40" />
+            <line x1="40" y1="80" x2="200" y2="80" />
+            <line x1="40" y1="120" x2="200" y2="120" />
+            <line x1="40" y1="160" x2="200" y2="160" />
+            <line x1="40" y1="200" x2="200" y2="200" />
+          </g>
+          <!-- Star point at D4 -->
+          <circle class="board-star-dot" cx="160" cy="160" r="3.5" />
+          <!-- Static White stones (7) -->
+          <use href="#w-stone" x="40" y="40" />
+          <use href="#w-stone" x="40" y="80" />
+          <use href="#w-stone" x="40" y="120" />
+          <use href="#w-stone" x="40" y="160" />
+          <use href="#w-stone" x="40" y="200" />
+          <use href="#w-stone" x="80" y="80" />
+          <use href="#w-stone" x="80" y="160" />
+          <!-- Static Black stones (11) -->
+          <use href="#b-stone" x="120" y="80" />
+          <use href="#b-stone" x="120" y="160" />
+          <use href="#b-stone" x="160" y="40" />
+          <use href="#b-stone" x="160" y="80" />
+          <use href="#b-stone" x="160" y="120" />
+          <use href="#b-stone" x="160" y="200" />
+          <use href="#b-stone" x="200" y="40" />
+          <use href="#b-stone" x="200" y="80" />
+          <use href="#b-stone" x="200" y="120" />
+          <use href="#b-stone" x="200" y="160" />
+          <use href="#b-stone" x="200" y="200" />
+          <!-- Dynamic Ko stones (6) -->
+          <g class="ko-stone ko-b1"><use href="#b-stone" x="80" y="40" /></g>
+          <g class="ko-stone ko-c1"><use href="#w-stone" x="120" y="40" /></g>
+          <g class="ko-stone ko-b3"><use href="#b-stone" x="80" y="120" /></g>
+          <g class="ko-stone ko-c3"><use href="#w-stone" x="120" y="120" /></g>
+          <g class="ko-stone ko-b5"><use href="#b-stone" x="80" y="200" /></g>
+          <g class="ko-stone ko-c5"><use href="#w-stone" x="120" y="200" /></g>
+        </svg>
+      </div>
+      <div id="boot-loading-text" class="boot-loading-text">Loading…</div>
+    </div>
+  </div>
+  <script>
+    (function () {
+      var l = (navigator.language || 'en').toLowerCase();
+      var msg = 'Loading…';
+      if (l.startsWith('ja')) msg = '読み込み中…';
+      else if (l.startsWith('zh')) msg = '正在加载…';
+      else if (l.startsWith('ko')) msg = '로딩 중…';
+      var el = document.getElementById('boot-loading-text');
+      if (el) el.textContent = msg;
+    })();
+  </script>
   <!-- Decorative monochrome ink-wash corner art; purely cosmetic, sits behind all UI. -->
   <div id="corner-art" aria-hidden="true">
     <div class="corner-piece tl"></div>
