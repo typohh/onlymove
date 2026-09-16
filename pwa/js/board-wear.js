@@ -37,23 +37,31 @@ function ageOf(level, birth) {
     return 1 - (1 - u) * (1 - u);
 }
 
+// When a mark first appears: skewed toward the start of the run (the square
+// of a uniform), so a sitting shows its first marks within a few problems and
+// keeps acquiring new ones at a slowing pace to the end.
+function birthOf(rnd) {
+    const u = rnd();
+    return u * u * FULL_AT * 0.85;
+}
+
 // A crack along the grain: mostly vertical (the wood texture's grain runs
 // top to bottom), wandering a little, growing from its origin in both
 // directions as it ages, and darkening. Drawn as a dark hairline with a
 // lighter line beside it where the split's far edge catches light.
 function drawCrack(ctx, W, H, rnd, level) {
-    const birth = rnd() * FULL_AT * 0.85;
+    const birth = birthOf(rnd);
     const ox = W * (0.05 + rnd() * 0.9), oy = H * (0.1 + rnd() * 0.8);
     const fullLen = H * (0.12 + rnd() * 0.3);
     const lean = (rnd() - 0.5) * 0.25;                // off-vertical
     const segs = 6 + Math.floor(rnd() * 6);
     const wobble = [];
     for (let i = 0; i < segs; i++) wobble.push((rnd() - 0.5) * 1.1);
-    const depthMax = 0.25 + rnd() * 0.45;
+    const depthMax = 0.4 + rnd() * 0.5;
     const age = ageOf(level, birth);
     if (age <= 0) return;
-    const len = fullLen * (0.15 + 0.85 * age);
-    const depth = depthMax * (0.35 + 0.65 * age);
+    const len = fullLen * (0.25 + 0.75 * age);
+    const depth = depthMax * (0.5 + 0.5 * age);
     const half = len / 2, step = len / segs;
     const pts = [];
     let x = ox, y = oy - half, heading = Math.PI / 2 + lean;
@@ -83,17 +91,17 @@ function drawCrack(ctx, W, H, rnd, level) {
 // A splotch: an irregular stain, its outline a circle with a few harmonics,
 // filled with a soft radial falloff. Spreads and deepens with age.
 function drawSplotch(ctx, W, H, rnd, level) {
-    const birth = rnd() * FULL_AT * 0.85;
+    const birth = birthOf(rnd);
     const cx = W * (0.08 + rnd() * 0.84), cy = H * (0.08 + rnd() * 0.84);
     const fullR = Math.min(W, H) * (0.03 + rnd() * 0.07);
     const harmonics = [];
     for (let k = 0; k < 4; k++) harmonics.push([2 + k, 0.05 + rnd() * 0.18, rnd() * 2 * Math.PI]);
     const tone = rnd();                                // 0 tea, 1 grey-brown
-    const alphaMax = 0.10 + rnd() * 0.18;
+    const alphaMax = 0.16 + rnd() * 0.2;
     const age = ageOf(level, birth);
     if (age <= 0) return;
-    const r = fullR * (0.3 + 0.7 * age);
-    const alpha = alphaMax * (0.4 + 0.6 * age);
+    const r = fullR * (0.4 + 0.6 * age);
+    const alpha = alphaMax * (0.55 + 0.45 * age);
     ctx.save();
     ctx.beginPath();
     const N = 48;

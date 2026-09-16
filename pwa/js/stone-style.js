@@ -39,6 +39,8 @@ export function flawRateForStreak(streak) {
 const CRACK_SHARE = 0.46;
 const BITE_SHARE = 0.485;        // the remainder is a face pit
 const V_BITE_SHARE = 0.2;        // of the rim bites, a small V notch rather than an oval
+const SHALLOW_RIM_SHARE = 0.1;   // of the oval bites, a large facet on the face with a narrow notch
+const COMPOUND_SHARE = 0.4;      // of the oval bites, one to three smaller chips along the inner edge
 const SHELL_PATTERNS = [
     { lines: [0.10, 0.12, 0.11, 0.10, 0.09, 0.09, 0.09, 0.09], factor: 0.25, thickness: 1.75 },
     { lines: [0.10, 0.09, 0.08, 0.07, 0.06, 0.06, 0.06, 0.06, 0.06, 0.06, 0.06], factor: 0.20, thickness: 1.5 },
@@ -225,17 +227,20 @@ function drawBiteEdge(ctx, cx, cy, r, bites, i, isWhite) {
 // the notch is simply gone.
 function drawFacet(ctx, cx, cy, r, bite, isWhite) {
     const { a, facet } = bite;
-    const fx = cx + Math.cos(a) * (r - facet.depth * 0.55);
-    const fy = cy + Math.sin(a) * (r - facet.depth * 0.55);
+    // The facet hangs off the bite's own inner edge: the bite's centre pulled
+    // inward past its depth, so a sub-chip's facet sits where that sub-chip
+    // is rather than on the rim.
+    const ex = bite.bx - Math.cos(a) * bite.h, ey = bite.by - Math.sin(a) * bite.h;   // the bite's inner edge
+    const fx = ex - Math.cos(a) * facet.depth * 0.55;
+    const fy = ey - Math.sin(a) * facet.depth * 0.55;
     ctx.save();
     ctx.beginPath();
     ctx.ellipse(fx, fy, facet.width, facet.depth, a + Math.PI / 2, 0, 2 * Math.PI);
     ctx.clip();
-    // Base of the facet: shaded across its depth, darker where it meets the
-    // notch and lighter toward the face on slate; the reverse on shell.
-    const gx0 = cx + Math.cos(a) * r, gy0 = cy + Math.sin(a) * r;
-    const gx1 = cx + Math.cos(a) * (r - facet.depth * 1.3), gy1 = cy + Math.sin(a) * (r - facet.depth * 1.3);
-    const g = ctx.createLinearGradient(gx0, gy0, gx1, gy1);
+    // Base of the facet: a concave sphere, so the shading is radial from
+    // the notch — brightest where the break is deepest, fading toward the
+    // facet's inner edge where it runs out to the face.
+    const g = ctx.createRadialGradient(ex, ey, 0, ex, ey, Math.max(facet.width, facet.depth * 1.6));
     if (isWhite) {
         g.addColorStop(0, `rgba(150,145,130,${(0.45 * facet.gloss).toFixed(3)})`);
         g.addColorStop(1, `rgba(150,145,130,${(0.12 * facet.gloss).toFixed(3)})`);
@@ -357,19 +362,52 @@ function stoneParams(board, stone) {
             } else {
                 // An ellipse centred a little outside the rim; its overlap
                 // with the disc is what goes missing. Sizes vary widely.
-                const w = r * (0.16 + rnd() * 0.32);
-                const h = r * (0.08 + rnd() * 0.18);
+                // A chip is always a piece of a sphere. Usually the sphere
+                // is centred outside the stone and takes a bite out of the
+                // rim; rarely (SHALLOW_RIM_SHARE) it sits mostly ON the face,
+                // a large dome-shaped facet that crosses the rim only along a
+                // narrow notch.
+                const shallowRim = rnd() < SHALLOW_RIM_SHARE;
+                const w = r * (shallowRim ? 0.12 + rnd() * 0.1 : 0.16 + rnd() * 0.32);
+                const h = r * (shallowRim ? 0.04 + rnd() * 0.04 : 0.08 + rnd() * 0.18);
                 const dist = r + h * (0.3 + rnd() * 0.35);
                 // Half the time the chip came off the TOP face: the fracture
                 // surface then shows on the stone as a second oval inside the
                 // rim, polished where the face is matte. The other half the
-                // chip is on the underside and only the notch shows.
-                const facet = rnd() < 0.5 ? {
-                    depth: r * (0.14 + rnd() * 0.18),
-                    width: w * (0.9 + rnd() * 0.4),
+                // chip is on the underside and only the notch shows. The
+                // shallow-rim kind is always a top-face chip — the facet IS
+                // the chip.
+                const facet = (shallowRim || rnd() < 0.5) ? {
+                    depth: r * (shallowRim ? 0.3 + rnd() * 0.2 : 0.14 + rnd() * 0.18),
+                    width: shallowRim ? r * (0.3 + rnd() * 0.25) : w * (0.9 + rnd() * 0.4),
                     gloss: 0.6 + rnd() * 0.4,
                 } : null;
-                flaws.push({ kind: 'bite', shape: 'oval', bx: cx + Math.cos(a) * dist, by: cy + Math.sin(a) * dist, w, h, tilt: a + Math.PI / 2, a, facet });
+                const main = { kind: 'bite', shape: 'oval', bx: cx + Math.cos(a) * dist, by: cy + Math.sin(a) * dist, w, h, tilt: a + Math.PI / 2, a, facet };
+                flaws.push(main);
+                // Chips seldom come off cleanly: some carry a run of smaller
+                // chips along their inner edge, each a smaller sphere biting
+                // a little deeper, with a smaller facet where the parent has
+                // one.
+                if (!shallowRim && rnd() < COMPOUND_SHARE) {
+                    const count = 1 + Math.floor(rnd() * 3);
+                    for (let j = 0; j < count; j++) {
+                        const along = (rnd() - 0.5) * 1.4;         // position along the parent's width
+                        const sw = w * (0.25 + rnd() * 0.25);
+                        const sh = h * (0.5 + rnd() * 0.5);
+                        // On the parent's inner edge: step inward from the parent's
+                        // centre by its depth, then sideways along its width.
+                        const ax = Math.cos(a), ay = Math.sin(a), tx = -ay, ty = ax;
+                        const inward = h * (0.7 + rnd() * 0.3);
+                        const sbx = main.bx - ax * inward + tx * along * w;
+                        const sby = main.by - ay * inward + ty * along * w;
+                        const sfacet = facet ? {
+                            depth: facet.depth * (0.35 + rnd() * 0.3),
+                            width: sw * (1 + rnd() * 0.4),
+                            gloss: facet.gloss,
+                        } : null;
+                        flaws.push({ kind: 'bite', shape: 'oval', bx: sbx, by: sby, w: sw, h: sh, tilt: a + Math.PI / 2 + (rnd() - 0.5) * 0.5, a, facet: sfacet, sub: true });
+                    }
+                }
             }
         } else {
             const a = rnd() * 2 * Math.PI;
