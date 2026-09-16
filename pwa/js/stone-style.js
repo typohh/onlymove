@@ -29,6 +29,7 @@ const FULL_AT = 200;
 const FLAWS_PER_WEAR = 2;        // mean flaws per stone at full wear
 const MAX_FLAWS = 6;             // the Poisson tail past this is far rarer than a board is wide
 const MAX_RIM_CHIPS = 2;         // a real stone with three chips on its rim is not seen
+const SIZE_FRESH = 0.5;          // flaw size at no wear, as a share of full size
 export function flawRateForStreak(streak) {
     const t = Math.min(1, Math.max(0, streak) / FULL_AT);
     return FLAW_RATE_WORN * t;
@@ -271,12 +272,12 @@ function drawFacet(ctx, cx, cy, r, bite, isWhite) {
 // A crack: starts at the rim and wanders inward as a jagged polyline, each
 // segment turning by a random amount, with a chance of one short side branch.
 // Drawn dark with a fainter light stroke a pixel off so it reads as a groove.
-function drawCrack(ctx, cx, cy, r, rnd, isWhite) {
+function drawCrack(ctx, cx, cy, r, rnd, isWhite, sz = 1, depthScale = 1) {
     const a0 = rnd() * 2 * Math.PI;                // where on the rim it starts
     let x = cx + Math.cos(a0) * (r - 0.5), y = cy + Math.sin(a0) * (r - 0.5);
     let heading = a0 + Math.PI + (rnd() - 0.5) * 0.8;  // inward, roughly
     const segments = 4 + Math.floor(rnd() * 4);
-    let step = r * (0.16 + rnd() * 0.12);
+    let step = r * (0.16 + rnd() * 0.12) * sz;
     const pts = [[x, y]];
     let branch = null;
     for (let i = 0; i < segments; i++) {
@@ -300,7 +301,7 @@ function drawCrack(ctx, cx, cy, r, rnd, isWhite) {
     };
     // How deep the crack reads: most are faint, a few plainly there. The
     // product of two uniforms leans the draw toward the faint end.
-    const depth = 0.3 + rnd() * rnd() * 0.7;
+    const depth = (0.3 + rnd() * rnd() * 0.7) * depthScale;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctx.lineWidth = Math.max(0.6, r / 45);
@@ -335,6 +336,16 @@ function stoneParams(board, stone) {
     // set wears by accumulating defects rather than by every stone acquiring
     // one. Each flaw then rolls its kind independently.
     const lambda = FLAWS_PER_WEAR * (board.stoneFlawRate ?? 0);
+    // Flaws grow in SIZE as well as in number, but per flaw: each draws its
+    // own size from a distribution whose upper tail widens with wear. Fresh,
+    // nearly every flaw is small and a large one is rare; worn, large ones
+    // are common and small ones still occur. The sizes written below are the
+    // ceiling — a draw never exceeds 1 — so a worn set cannot overdo it.
+    const wear = Math.min(1, (board.stoneFlawRate ?? 0) / FLAW_RATE_WORN);
+    const sizeDraw = () => {
+        const shape = 4 - 3.3 * wear;            // exponent: 4 fresh (small-heavy), 0.7 worn
+        return SIZE_FRESH + (1 - SIZE_FRESH) * Math.pow(rnd(), shape);
+    };
     const n = Math.min(MAX_FLAWS, poisson(rnd, lambda));
     const flaws = [];
     // Chips keep well apart: on a real stone two chips near each other are
@@ -366,13 +377,14 @@ function stoneParams(board, stone) {
     for (let i = 0; i < n; i++) {
         const kindRoll = rnd();
         if (kindRoll < CRACK_SHARE) {
-            flaws.push({ kind: 'crack' });
+            flaws.push({ kind: 'crack', sz: sizeDraw(), depthScale: 0.55 + 0.45 * sizeDraw() });
         } else if (kindRoll < CRACK_SHARE + BITE_SHARE) {
             if (rnd() < V_BITE_SHARE) {
                 // A small V notch: two rim points a little apart, the apex
                 // inside and a little off-centre. Much smaller than an oval.
-                const half = 0.05 + rnd() * 0.08;           // half-width, radians
-                const depth = r * (0.05 + rnd() * 0.09);
+                const sz = sizeDraw();
+                const half = (0.05 + rnd() * 0.08) * sz;    // half-width, radians
+                const depth = r * (0.05 + rnd() * 0.09) * sz;
                 const skew = (rnd() - 0.5) * 0.6;
                 const a = freeAngle(half);
                 if (a == null) continue;
@@ -407,10 +419,11 @@ function stoneParams(board, stone) {
                 // shallow-rim chip is a near-circular facet with a small p,
                 // which is what makes its notch narrow.
                 const k = 0.3 + rnd() * 0.35;
+                const sz = sizeDraw();
                 let facet = null, w, h;
                 const hasFacet = shallowRim || rnd() < 0.5;
                 if (hasFacet) {
-                    const D = r * (shallowRim ? 0.3 + rnd() * 0.2 : 0.14 + rnd() * 0.18);
+                    const D = r * (shallowRim ? 0.3 + rnd() * 0.2 : 0.14 + rnd() * 0.18) * sz;
                     const A = D * (shallowRim ? 0.9 + rnd() * 0.4 : 1.2 + rnd() * 1.0);
                     const pr = D * (shallowRim ? 0.08 + rnd() * 0.12 : 0.3 + rnd() * 0.3);
                     const c = A * Math.sqrt(Math.max(0, 1 - ((D - pr) / D) ** 2));
@@ -420,7 +433,7 @@ function stoneParams(board, stone) {
                     // the chord, never a narrow deep gouge.
                     h = w * (0.25 + rnd() * 0.35);
                 } else {
-                    w = r * (0.16 + rnd() * 0.32);
+                    w = r * (0.16 + rnd() * 0.32) * sz;
                     h = w * (0.25 + rnd() * 0.35);
                 }
                 const dist = r + h * k;
@@ -465,7 +478,7 @@ function stoneParams(board, stone) {
                 }
             }
         } else {
-            const w = r * (0.14 + rnd() * 0.16);
+            const w = r * (0.14 + rnd() * 0.16) * sizeDraw();
             const h = w * (0.55 + rnd() * 0.4);
             let placed = null;
             for (let t = 0; t < 6 && !placed; t++) {
@@ -514,7 +527,7 @@ function drawStone(ctx, stone, board) {
 
     for (const b of bites) if (b.facet) drawFacet(ctx, cx, cy, r, b, isWhite);
     for (const fl of flaws) {
-        if (fl.kind === 'crack') drawCrack(ctx, cx, cy, r, rnd, isWhite);
+        if (fl.kind === 'crack') drawCrack(ctx, cx, cy, r, rnd, isWhite, fl.sz, fl.depthScale);
         else if (fl.kind === 'pit') drawPit(ctx, cx, cy, r, fl, isWhite);
     }
     ctx.restore();
