@@ -9,7 +9,8 @@ import { handleBoardClick as handleTsumegoClick } from './game-logic.js';
 import { handleBoardClick as handleAnalysisClick } from './analysis.js';
 import { updateBoardSize, updateCapturesUI } from './ui.js';
 import { APP_MODES, usesTapToConfirm } from './constants.js';
-import { COL_LETTERS } from './sgf.js';
+import { COL_LETTERS, tsumegoIdOf } from './sgf.js';
+import { FLAWED_SHELL, hashSeed } from './stone-style.js';
 
 WGo.DIR = 'lib/wgo/';
 
@@ -97,8 +98,9 @@ export function initializeBoard(size) {
     const board = new WGo.Board(boardWrapper, {
         size,
         background: WGo.DIR + "wood_1024.jpg",
-        stoneHandler: WGo.Board.drawHandlers.SHELL
+        stoneHandler: FLAWED_SHELL,
     });
+    board.stoneSeed = currentStoneSeed();
 
     board.addEventListener('click', handleBoardClick);
     board.addCustomObject(coordinateLabels);
@@ -153,6 +155,15 @@ const drawIllegalDueToKoMarker = () => {
     markKoPoints(state.kifuReader.game, state.kifuReader.node.move, state.board);
 }
 
+// The stone set is the PROBLEM's: seeded from its id, so a problem always
+// shows the same stones with the same flaws, and the next problem shows
+// others (stone-style.js). A board with no problem (the size picker's empty
+// board) draws the seed-0 set.
+function currentStoneSeed() {
+    const p = state.currentProblem;
+    return hashSeed(p && p.filename ? tsumegoIdOf(p.filename) : '');
+}
+
 export function redraw() {
     if (!state.kifuReader) return;
 
@@ -161,6 +172,7 @@ export function redraw() {
         initializeBoard(position.size);
     }
 
+    state.board.stoneSeed = currentStoneSeed();
     state.board.removeAllObjects();
 
     for (let x = 0; x < position.size; x++) {
@@ -313,9 +325,10 @@ export async function getBoardImageBlob() {
         const tempBoard = new WGo.Board(tempContainer, {
             size: startPosition ? startPosition.size : state.board.size,
             background: "", // We will draw the background manually
-            stoneHandler: WGo.Board.drawHandlers.SHELL,
+            stoneHandler: FLAWED_SHELL,
             width: width
         });
+        tempBoard.stoneSeed = state.board.stoneSeed;
         tempBoard.addCustomObject(coordinateLabels);
 
         // Populate the temporary board
