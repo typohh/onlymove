@@ -146,10 +146,7 @@ function showRankSurvey() {
             // it works on both the dark and light modal backgrounds.
             const intro = document.createElement('div');
             intro.textContent = getTerm('rankSurveyIntro');
-            intro.style.fontSize = '0.8em';
-            intro.style.opacity = '0.7';
-            intro.style.maxWidth = '30em';
-            intro.style.marginBottom = '0.1786em';
+            intro.className = 'modal-note';
             modal.appendChild(intro);
 
             const grid = modalRankGrid();
@@ -166,14 +163,7 @@ function showRankSurvey() {
 
                 if (isMobile) {
                     const select = document.createElement('select');
-                    select.style.padding = '0.1429em 0.2286em';
-                    select.style.borderRadius = 'var(--radius)';
-                    select.style.background = '#444';
-                    select.style.color = '#fff';
-                    select.style.border = 'calc(0.2 * var(--u)) solid #555';
-                    select.style.fontSize = 'inherit';
-                    select.style.width = '8em';
-                    select.style.boxSizing = 'border-box';
+                    select.className = 'survey-select';
 
                     const blank = document.createElement('option');
                     blank.value = '';
@@ -196,29 +186,13 @@ function showRankSurvey() {
                 } else {
                     // Desktop Custom Popover Dropdown Button
                     const btn = document.createElement('button');
-                    btn.className = 'btn btn-inline';
-                    btn.style.padding = '0.1429em 0.3429em';
-                    btn.style.borderRadius = 'var(--radius)';
-                    btn.style.background = '#444';
-                    btn.style.color = '#fff';
-                    btn.style.border = 'calc(0.2 * var(--u)) solid #555';
-                    btn.style.fontSize = 'inherit';
-                    btn.style.width = '8em';
-                    btn.style.boxSizing = 'border-box';
-                    btn.style.textAlign = 'left';
-                    btn.style.cursor = 'pointer';
-                    btn.style.display = 'flex';
-                    btn.style.justifyContent = 'space-between';
-                    btn.style.alignItems = 'center';
-                    btn.style.textTransform = 'none';
-                    btn.style.fontWeight = 'normal';
+                    btn.className = 'survey-btn';
 
                     const textSpan = document.createElement('span');
                     textSpan.textContent = noneLabel;
                     const arrowSpan = document.createElement('span');
                     arrowSpan.textContent = '▼';
-                    arrowSpan.style.fontSize = '0.8em';
-                    arrowSpan.style.color = '#888';
+                    arrowSpan.className = 'survey-btn-arrow';
                     btn.appendChild(textSpan);
                     btn.appendChild(arrowSpan);
 
@@ -233,68 +207,28 @@ function showRankSurvey() {
 
                         // Create centered card overlay inside a dark backdrop
                         const backdrop = document.createElement('div');
-                        backdrop.style.position = 'fixed';
-                        backdrop.style.inset = '0';
-                        backdrop.style.background = 'rgba(0,0,0,0.5)';
-                        backdrop.style.zIndex = '20000';
-                        backdrop.style.display = 'flex';
-                        backdrop.style.justifyContent = 'center';
-                        backdrop.style.alignItems = 'center';
+                        backdrop.className = 'survey-popover-backdrop';
                         backdrop.dataset.server = server;
 
                         const picker = document.createElement('div');
+                        picker.className = 'survey-popover';
+                        // The popover hangs off <body>, not the modal, so it
+                        // takes the modal's type size explicitly.
                         picker.style.fontSize = window.getComputedStyle(modal).fontSize;
-                        picker.style.background = '#333';
-                        picker.style.border = 'calc(0.2 * var(--u)) solid #555';
-                        picker.style.borderRadius = 'var(--radius)';
-                        picker.style.boxShadow = '0 calc(1 * var(--u)) calc(3 * var(--u)) rgba(0,0,0,0.6)';
-                        picker.style.width = '240px';
-                        picker.style.maxWidth = 'var(--stats-card-max-w)';
-                        picker.style.display = 'flex';
-                        picker.style.flexDirection = 'column';
-                        picker.style.boxSizing = 'border-box';
-                        picker.style.overflow = 'hidden';
 
                         const header = document.createElement('div');
                         header.textContent = server;
-                        header.style.padding = '0.3429em 0.5714em';
-                        header.style.fontWeight = 'bold';
-                        header.style.background = '#2a2a2a';
-                        header.style.borderBottom = '1px solid #444';
-                        header.style.textAlign = 'center';
-                        header.style.fontSize = '1.1em';
+                        header.className = 'survey-popover-header';
                         picker.appendChild(header);
 
                         const list = document.createElement('div');
-                        list.style.overflowY = 'auto';
-                        list.style.maxHeight = 'calc(0.5 * var(--app-h))';
-                        list.style.display = 'flex';
-                        list.style.flexDirection = 'column';
+                        list.className = 'survey-popover-list';
 
                         const addOption = (val, labelText) => {
                             const opt = document.createElement('div');
                             opt.textContent = labelText;
-                            opt.style.padding = '0.2286em 0.5714em';
-                            opt.style.cursor = 'pointer';
-                            opt.style.color = '#fff';
-                            opt.style.textAlign = 'center';
-                            opt.style.boxSizing = 'border-box';
-
-                            if (selectedRanks[server] === val) {
-                                opt.style.background = '#555';
-                                opt.style.fontWeight = 'bold';
-                            }
-
-                            opt.addEventListener('mouseenter', () => {
-                                opt.style.background = '#444';
-                            });
-                            opt.addEventListener('mouseleave', () => {
-                                if (selectedRanks[server] === val) {
-                                    opt.style.background = '#555';
-                                } else {
-                                    opt.style.background = 'transparent';
-                                }
-                            });
+                            opt.className = 'survey-option';
+                            if (selectedRanks[server] === val) opt.classList.add('selected');
 
                             opt.addEventListener('click', (ev) => {
                                 ev.stopPropagation();

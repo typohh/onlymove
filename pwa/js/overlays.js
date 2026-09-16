@@ -45,25 +45,15 @@ function signedAtLeast(value, isCorrect, step) {
 
 function createOverlayContent(stats, message, textColor) {
     const container = document.createElement('div');
-    Object.assign(container.style, {
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        color: textColor,
-        fontWeight: 'bold',
-        textAlign: 'center',
-    });
+    container.className = 'result-content';
+    container.style.color = textColor;
 
     // The "Correct!" line stands above whatever the answer changed. It keys off
     // the verdict alone, so a linked or dropped attempt — which records nothing
     // and so has no rank or recall line — still gets it.
     if (stats && stats.isCorrect) {
         const banner = document.createElement('div');
-        Object.assign(banner.style, {
-            fontSize: `calc(var(--board-side) / 12)`,
-            marginBottom: '20px',
-        });
+        banner.className = 'result-banner';
         banner.textContent = getTerm('correctBanner');
         container.appendChild(banner);
     }
@@ -77,10 +67,7 @@ function createOverlayContent(stats, message, textColor) {
         // and filled when the promise resolves — usually well within the
         // overlay's hold. A null impact (model not ready) removes the blank line.
         const el = document.createElement('div');
-        Object.assign(el.style, {
-            fontSize: `calc(var(--board-side) / 20)`,
-            marginBottom: '20px',
-        });
+        el.className = 'result-line';
         el.textContent = ' '; // U+00A0 — a plain space collapses to zero height
         container.appendChild(el);
         const fill = ({ beforeHours, afterHours }) => {
@@ -96,10 +83,7 @@ function createOverlayContent(stats, message, textColor) {
         // suppressed, so the line is always there and always says the answer counted.
         const rankChange = signedAtLeast(stats.rankChange, stats.isCorrect, RANK_CHANGE_STEP);
         const rankChangeElement = document.createElement('div');
-        Object.assign(rankChangeElement.style, {
-            fontSize: `calc(var(--board-side) / 20)`,
-            marginBottom: '20px',
-        });
+        rankChangeElement.className = 'result-line';
         const sign = rankChange < 0 ? '−' : '+';
         const formattedChange = `${sign}${Math.abs(rankChange).toFixed(RANK_CHANGE_DECIMALS)}`;
         rankChangeElement.textContent = getTerm('rankChangeFormat', { change: formattedChange });
@@ -110,10 +94,7 @@ function createOverlayContent(stats, message, textColor) {
         // this line can never contradict the number above it.
         if (stats.rankChangeDirection !== 'same') {
             const rankChangeMessageElement = document.createElement('div');
-            Object.assign(rankChangeMessageElement.style, {
-                fontSize: `calc(var(--board-side) / 25)`,
-                marginBottom: '20px',
-            });
+            rankChangeMessageElement.className = 'result-line-sm';
             const newRank = getDescriptiveRank(state.displayRank);
             const term = stats.rankChangeDirection === 'up' ? 'rankUpTo' : 'rankDownTo';
             rankChangeMessageElement.textContent = getTerm(term, { rank: newRank });
@@ -123,10 +104,7 @@ function createOverlayContent(stats, message, textColor) {
 
     if (message) {
         const messageElement = document.createElement('div');
-        Object.assign(messageElement.style, {
-            fontSize: `calc(var(--board-side) / 30)`,
-            maxWidth: '80%',
-        });
+        messageElement.className = 'result-message';
         messageElement.textContent = message;
         container.appendChild(messageElement);
     }
@@ -141,23 +119,15 @@ export function displayOverlay(message, duration, callback, color = 'rgba(139, 0
     const overlay = document.createElement('div');
     // `app-blocking-overlay` lets onboarding.js hold a bubble back until this
     // transition lifts (so a callout never floats over the fade screen).
-    overlay.className = 'overlay app-blocking-overlay';
-    Object.assign(overlay.style, {
-        position: 'fixed', top: '0', left: '0', width: '100%', height: '100%',
-        backgroundColor: color, display: 'flex', justifyContent: 'center',
-        alignItems: 'center', zIndex: '1000', opacity: '0'
-    });
+    overlay.className = 'overlay app-blocking-overlay result-overlay';
+    overlay.style.backgroundColor = color;
 
     const content = document.createElement('div');
-    Object.assign(content.style, {
-        display: 'flex', flexDirection: 'column', alignItems: 'center',
-    });
+    content.className = 'result-content';
+    content.style.color = 'white';
     if (message) {
         const messageElement = document.createElement('div');
-        Object.assign(messageElement.style, {
-            color: 'white', fontWeight: 'bold', textAlign: 'center',
-            fontSize: `calc(var(--board-side) / 25)`, padding: '20px'
-        });
+        messageElement.className = 'result-message result-message-lg';
         messageElement.textContent = message;
         content.appendChild(messageElement);
     }
@@ -183,12 +153,7 @@ export function displayOverlay(message, duration, callback, color = 'rgba(139, 0
         // it, rather than auto-dismissing after `duration`.
         const button = document.createElement('button');
         button.textContent = buttonText;
-        Object.assign(button.style, {
-            marginTop: '20px', padding: '10px 20px',
-            fontSize: `calc(var(--board-side) / 30)`, cursor: 'pointer',
-            border: '1px solid white', borderRadius: '5px',
-            backgroundColor: 'transparent', color: 'white', fontWeight: 'bold',
-        });
+        button.className = 'result-btn';
         button.onclick = dismiss;
         content.appendChild(button);
     } else {
@@ -209,14 +174,8 @@ export function fadeOverlay(duration, callback, stats = null, message = null, co
     const overlay = document.createElement('div');
     // See displayOverlay: marks this as a fullscreen transition so onboarding.js
     // defers any bubble until it lifts.
-    overlay.className = 'app-blocking-overlay';
-    Object.assign(overlay.style, {
-        position: 'fixed', top: '0', left: '0', width: '100%', height: '100%',
-        backgroundColor: colors.background, zIndex: '1000', opacity: '0',
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
-    });
+    overlay.className = 'app-blocking-overlay result-overlay';
+    overlay.style.backgroundColor = colors.background;
 
     let buttonClicked = Promise.resolve();
     if (stats || message || buttonText) {
@@ -225,17 +184,7 @@ export function fadeOverlay(duration, callback, stats = null, message = null, co
             buttonClicked = new Promise((resolve) => {
                 const button = document.createElement('button');
                 button.textContent = buttonText;
-                Object.assign(button.style, {
-                    marginTop: '20px',
-                    padding: '10px 20px',
-                    fontSize: `calc(var(--board-side) / 30)`,
-                    cursor: 'pointer',
-                    border: `1px solid ${colors.text}`,
-                    borderRadius: '5px',
-                    backgroundColor: 'transparent',
-                    color: colors.text,
-                    fontWeight: 'bold',
-                });
+                button.className = 'result-btn';
                 button.onclick = () => {
                     button.disabled = true;
                     resolve();
@@ -428,18 +377,7 @@ let toastContainer = null;
 function getToastContainer() {
     if (toastContainer && toastContainer.isConnected) return toastContainer;
     toastContainer = document.createElement('div');
-    Object.assign(toastContainer.style, {
-        position: 'fixed',
-        top: '50%',
-        left: '50%',
-        transform: 'translate(-50%, -50%)',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        gap: 'calc(1 * var(--u))',
-        zIndex: '10000',
-        pointerEvents: 'none',
-    });
+    toastContainer.className = 'toast-stack';
     document.body.appendChild(toastContainer);
     return toastContainer;
 }
@@ -453,17 +391,7 @@ function getToastContainer() {
 export function showToast(text, { isError = false, autoDismiss = true } = {}) {
     const message = document.createElement('div');
     message.textContent = text;
-    Object.assign(message.style, {
-        backgroundColor: isError ? 'rgba(255, 0, 0, 0.8)' : 'rgba(0, 0, 0, 0.8)',
-        color: 'white',
-        padding: '0.3333em 0.6667em',
-        borderRadius: '0.1667em',
-        fontWeight: 'bold',
-        fontSize: 'calc(3 * var(--u))',
-        pointerEvents: 'none',
-        whiteSpace: 'nowrap',
-        textAlign: 'center',
-    });
+    message.className = isError ? 'toast toast-error' : 'toast';
     getToastContainer().appendChild(message);
     if (autoDismiss) {
         setTimeout(() => {

@@ -92,10 +92,7 @@ export async function showRankTranslation() {
             // each row; small + muted so it reads as a note, not a heading.
             const caption = document.createElement('div');
             caption.textContent = getTerm('rankProgressCaption');
-            caption.style.textAlign = 'center';
-            caption.style.fontSize = '0.8em';
-            caption.style.opacity = '0.6';
-            caption.style.marginBottom = '0.3571em';
+            caption.className = 'modal-note';
             modal.appendChild(caption);
 
             // One system per row: bold name on the left, "<rank> (<progress>%)" on
@@ -111,15 +108,14 @@ export async function showRankTranslation() {
                 label.textContent = name;
                 label.className = 'modal-rank-label';
                 const val = document.createElement('div');
-                // Left-align: the grid sits inside a text-align:center modal, so
-                // without this the value inherits center and narrower rows (e.g. a
-                // 1-digit percent) drift right, opening an uneven gap after the name.
-                val.style.textAlign = 'left';
+                // Left-set (.modal-rank-value): the grid sits inside a
+                // text-align:center modal, so without it narrower rows (a
+                // 1-digit percent) drift right and open an uneven gap.
+                val.className = 'modal-rank-value';
                 val.textContent = rankLabel + ' ';
                 const pct = document.createElement('span');
                 pct.textContent = `(${percent}%)`;
-                pct.style.fontSize = '0.8em';
-                pct.style.opacity = '0.6';
+                pct.className = 'modal-rank-pct';
                 val.appendChild(pct);
                 grid.appendChild(label);
                 grid.appendChild(val);

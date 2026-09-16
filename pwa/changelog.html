@@ -6,89 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="color-scheme" content="dark light">
     <title>Changelog — onlymove.net</title>
-    <style>
-        /* Palette mirrors the main app (style.css): dark by default with a
-           prefers-color-scheme: light override. Accent is the app's chocolate
-           orange (#d2691e). Kept in sync with about.html / privacy.html. */
-        :root {
-            --bg: #222;
-            --text: #ddd;
-            --heading: #fff;
-            --accent: #d2691e;
-            --muted: #888;
-            --rule: #444;
-            --code-bg: rgba(255, 255, 255, 0.08);
-            --code-text: #eee;
-        }
-
-        @media (prefers-color-scheme: light) {
-            :root {
-                --bg: #f0f0f0;
-                --text: #333;
-                --heading: #222;
-                --accent: #c25e16;
-                --muted: #777;
-                --rule: #ccc;
-                --code-bg: rgba(0, 0, 0, 0.06);
-                --code-text: #222;
-            }
-        }
-
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-            line-height: 1.6;
-            color: var(--text);
-            max-width: 800px;
-            margin: 0 auto;
-            padding: 20px;
-            background-color: var(--bg);
-        }
-
-        h1 {
-            color: var(--heading);
-            text-align: center;
-            border-bottom: 2px solid var(--accent);
-            padding-bottom: 10px;
-        }
-
-        ul {
-            margin-top: 10px;
-            margin-bottom: 20px;
-        }
-
-        li {
-            margin-bottom: 8px;
-        }
-
-        strong {
-            color: var(--heading);
-        }
-
-        code {
-            background-color: var(--code-bg);
-            color: var(--code-text);
-            padding: 0.1em 0.4em;
-            border-radius: 4px;
-            font-size: 0.9em;
-        }
-
-        .footer {
-            text-align: center;
-            margin-top: 30px;
-            padding-top: 20px;
-            border-top: 1px solid var(--rule);
-            color: var(--muted);
-        }
-
-        a {
-            color: var(--accent);
-            text-decoration: none;
-        }
-
-        a:hover {
-            text-decoration: underline;
-        }
-    </style>
+    <link rel="stylesheet" href="pages.css">
 </head>
 
 <body>
@@ -97,6 +15,7 @@
          release and translating each entry would not keep pace). -->
     <h1>Changelog</h1>
     <ul>
+        <li><strong>2026-09-16:</strong> A visual refresh of everything around the board, which is unchanged. Buttons, the menu, the dialogs and the statistics window now share one palette: a warm dark ground, off-white text, and a single vermilion accent kept for the things that mean something, namely the recall count, the rank progress and the active tab. The mode name is a small label instead of a heading, the rank progress bar has a knob and sits clear of the rank, and the ink-wash corners are quieter. The About, Changelog, Privacy, Methodology, Leaderboard and Statistics pages share the same palette and typography. The loading screen now stays up until the board is ready on a slow connection, instead of dropping onto a half-built page after fifteen seconds.</li>
         <li><strong>2026-09-03:</strong> Community statistics have moved to a page of their own at <a href="/statistics">/statistics</a>, which loads without the app, like the leaderboard, and can be shared by link. The menu now has a Community section holding Leaderboard, Statistics and Discord, and the personal statistics window is called My stats. Opened from the app, the page still marks where you stand in each chart; a link passed to someone else shows the community alone.</li>
         <li><strong>2026-09-03:</strong> The figure at the top right now says what it is. A small caption above it reads <em>You</em> while it shows your rank, <em>Problem</em> while a review shows the problem's rank, and <em>Score</em> once you play a move in review, where the number now stands on its own without the word in front of it.</li>
         <li><strong>2026-09-03:</strong> The komi circle beside the mode name is legible in light mode again. It shows what White gets, so it stays a white stone; on a light page it is now drawn the way diagrams draw one, a white disc with a dark rim.</li>
