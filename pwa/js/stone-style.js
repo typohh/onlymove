@@ -217,6 +217,54 @@ function drawBiteEdge(ctx, cx, cy, r, bites, i, isWhite) {
     ctx.restore();
 }
 
+// The fracture surface of a top-face chip: an oval inside the rim, adjoining
+// the notch, with the smooth glassy look of a conchoidal break. On slate it
+// reads lighter than the matte face and carries a sharp reflection; on shell
+// it is a slightly darker, translucent patch with the same reflection. The
+// caller has already clipped to the stone's outline, so the oval's part in
+// the notch is simply gone.
+function drawFacet(ctx, cx, cy, r, bite, isWhite) {
+    const { a, facet } = bite;
+    const fx = cx + Math.cos(a) * (r - facet.depth * 0.55);
+    const fy = cy + Math.sin(a) * (r - facet.depth * 0.55);
+    ctx.save();
+    ctx.beginPath();
+    ctx.ellipse(fx, fy, facet.width, facet.depth, a + Math.PI / 2, 0, 2 * Math.PI);
+    ctx.clip();
+    // Base of the facet: shaded across its depth, darker where it meets the
+    // notch and lighter toward the face on slate; the reverse on shell.
+    const gx0 = cx + Math.cos(a) * r, gy0 = cy + Math.sin(a) * r;
+    const gx1 = cx + Math.cos(a) * (r - facet.depth * 1.3), gy1 = cy + Math.sin(a) * (r - facet.depth * 1.3);
+    const g = ctx.createLinearGradient(gx0, gy0, gx1, gy1);
+    if (isWhite) {
+        g.addColorStop(0, `rgba(150,145,130,${(0.45 * facet.gloss).toFixed(3)})`);
+        g.addColorStop(1, `rgba(150,145,130,${(0.12 * facet.gloss).toFixed(3)})`);
+    } else {
+        g.addColorStop(0, `rgba(120,122,128,${(0.55 * facet.gloss).toFixed(3)})`);
+        g.addColorStop(1, `rgba(70,72,78,${(0.25 * facet.gloss).toFixed(3)})`);
+    }
+    ctx.fillStyle = g;
+    ctx.fillRect(cx - r - 1, cy - r - 1, 2 * r + 2, 2 * r + 2);
+    // The reflection: a small hard ellipse off the facet's centre, toward the
+    // light (upper left), the polish showing as a sharper highlight than the
+    // face carries anywhere.
+    const hx = fx - facet.width * 0.25, hy = fy - facet.depth * 0.3;
+    const hg = ctx.createRadialGradient(hx, hy, 0, hx, hy, facet.width * 0.45);
+    hg.addColorStop(0, `rgba(255,255,255,${(isWhite ? 0.75 : 0.5) * facet.gloss})`);
+    hg.addColorStop(0.5, `rgba(255,255,255,${(isWhite ? 0.25 : 0.15) * facet.gloss})`);
+    hg.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = hg;
+    ctx.fillRect(cx - r - 1, cy - r - 1, 2 * r + 2, 2 * r + 2);
+    ctx.restore();
+    // The facet's inner rim: a faint line where the polished surface meets
+    // the matte face.
+    ctx.beginPath();
+    ctx.ellipse(fx, fy, facet.width, facet.depth, a + Math.PI / 2, 0, 2 * Math.PI);
+    ctx.lineWidth = Math.max(0.5, r / 50);
+    ctx.strokeStyle = isWhite ? 'rgba(110,100,85,0.35)' : 'rgba(160,162,170,0.35)';
+    ctx.stroke();
+}
+
 // A crack: starts at the rim and wanders inward as a jagged polyline, each
 // segment turning by a random amount, with a chance of one short side branch.
 // Drawn dark with a fainter light stroke a pixel off so it reads as a groove.
@@ -312,7 +360,16 @@ function stoneParams(board, stone) {
                 const w = r * (0.16 + rnd() * 0.32);
                 const h = r * (0.08 + rnd() * 0.18);
                 const dist = r + h * (0.3 + rnd() * 0.35);
-                flaws.push({ kind: 'bite', shape: 'oval', bx: cx + Math.cos(a) * dist, by: cy + Math.sin(a) * dist, w, h, tilt: a + Math.PI / 2 });
+                // Half the time the chip came off the TOP face: the fracture
+                // surface then shows on the stone as a second oval inside the
+                // rim, polished where the face is matte. The other half the
+                // chip is on the underside and only the notch shows.
+                const facet = rnd() < 0.5 ? {
+                    depth: r * (0.14 + rnd() * 0.18),
+                    width: w * (0.9 + rnd() * 0.4),
+                    gloss: 0.6 + rnd() * 0.4,
+                } : null;
+                flaws.push({ kind: 'bite', shape: 'oval', bx: cx + Math.cos(a) * dist, by: cy + Math.sin(a) * dist, w, h, tilt: a + Math.PI / 2, a, facet });
             }
         } else {
             const a = rnd() * 2 * Math.PI;
@@ -355,6 +412,7 @@ function drawStone(ctx, stone, board) {
         });
     }
 
+    for (const b of bites) if (b.facet) drawFacet(ctx, cx, cy, r, b, isWhite);
     for (const fl of flaws) {
         if (fl.kind === 'crack') drawCrack(ctx, cx, cy, r, rnd, isWhite);
         else if (fl.kind === 'pit') drawPit(ctx, cx, cy, r, fl, isWhite);
