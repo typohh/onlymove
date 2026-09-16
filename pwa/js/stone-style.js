@@ -15,8 +15,11 @@
 // A handler is `{ stone: { draw(stone, board) }, shadow }` with `this` bound
 // to the 2D context (see WGo.Board.drawHandlers). The shadow is WGo's own.
 
-const CHIP_RATE = 0.35;          // stones with a chip (rim or face)
 const CRACK_RATE = 0.3;          // stones with a crack from the rim
+// Chips are mostly at the rim: nine in ten a bite that cuts the outline, the
+// rest a shallow pit on the face.
+const BITE_RATE = 0.315;         // stones with a bite out of the rim (not a circle any more)
+const PIT_RATE = 0.035;          // stones with a shallow pit on the face
 const SHELL_PATTERNS = [
     { lines: [0.10, 0.12, 0.11, 0.10, 0.09, 0.09, 0.09, 0.09], factor: 0.25, thickness: 1.75 },
     { lines: [0.10, 0.09, 0.08, 0.07, 0.06, 0.06, 0.06, 0.06, 0.06, 0.06, 0.06], factor: 0.20, thickness: 1.5 },
@@ -74,9 +77,6 @@ function drawShellLines(ctx, cx, cy, r, angle, pattern) {
 // highlight's centre so the radial gradient becomes an ellipse, then restored.
 function drawHighlight(ctx, cx, cy, r, { ox, oy, rx, ry, peak, stops }) {
     ctx.save();
-    ctx.beginPath();
-    ctx.arc(cx, cy, Math.max(0, r - 0.5), 0, 2 * Math.PI, true);
-    ctx.clip();
     const hx = cx + ox * r, hy = cy + oy * r;
     ctx.translate(hx, hy);
     ctx.scale(rx, ry);
@@ -87,32 +87,57 @@ function drawHighlight(ctx, cx, cy, r, { ox, oy, rx, ry, peak, stops }) {
     ctx.restore();
 }
 
-// A chip: a smooth-edged loss of surface, either a bite at the rim or a
-// shallow pit on the face. Never jagged — a chip is a conchoidal facet, and
-// the eye tells it from a crack by that smoothness. Drawn as a darker oval
-// where the surface falls away, with a thin light lip on the side that
-// catches the light.
-function drawChip(ctx, cx, cy, r, rnd, isWhite) {
-    const a = rnd() * 2 * Math.PI;                 // bearing from the centre
-    const atRim = rnd() < 0.55;
-    const w = r * (atRim ? 0.26 + rnd() * 0.24 : 0.14 + rnd() * 0.16);
-    const h = atRim ? r * (0.10 + rnd() * 0.08) : w * (0.55 + rnd() * 0.4);
-    const dist = atRim ? r - h * 0.35 : r * (0.15 + rnd() * 0.5);
-    const bx = cx + Math.cos(a) * dist, by = cy + Math.sin(a) * dist;
-    const tilt = atRim ? a : rnd() * Math.PI;
+// A pit: a smooth-edged, shallow loss of surface on the face. Never jagged —
+// a chip is a conchoidal facet, and the eye tells it from a crack by that
+// smoothness. Faint on purpose: a darker oval and a thin light lip.
+function drawPit(ctx, cx, cy, r, pit, isWhite) {
+    const { bx, by, w, h, tilt } = pit;
+    ctx.beginPath();
+    ctx.ellipse(bx, by, w, h, tilt, 0, 2 * Math.PI);
+    ctx.fillStyle = isWhite ? 'rgba(90,85,75,0.12)' : 'rgba(0,0,0,0.25)';
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(bx - w * 0.08, by - h * 0.3, w * 0.9, h * 0.75, tilt, Math.PI * 1.05, Math.PI * 1.95);
+    ctx.strokeStyle = isWhite ? 'rgba(255,255,255,0.3)' : 'rgba(255,255,255,0.08)';
+    ctx.lineWidth = Math.max(0.6, r / 40);
+    ctx.stroke();
+}
+
+// The stone's outline: a disc, less a bite where an ellipse centred just
+// outside the rim overlaps it. Two clips: the disc, then the disc-with-
+// ellipse under even-odd. The intersection is disc minus ellipse — a single
+// even-odd clip would keep the ellipse's part OUTSIDE the disc, which is
+// inside that path once. The same function clips the stone, its shadow (at
+// the shadow's larger radius) and every mark on the face.
+function clipOutline(ctx, cx, cy, r, bite, extra = 0) {
+    const rr = Math.max(0, r - 0.5 + extra);
+    ctx.beginPath();
+    ctx.arc(cx, cy, rr, 0, 2 * Math.PI, true);
+    ctx.clip();
+    if (!bite) return;
+    ctx.beginPath();
+    ctx.arc(cx, cy, rr, 0, 2 * Math.PI, true);
+    ctx.moveTo(bite.bx + bite.w, bite.by);
+    ctx.ellipse(bite.bx, bite.by, bite.w, bite.h, bite.tilt, 0, 2 * Math.PI);
+    ctx.clip('evenodd');
+}
+
+// The broken face along a bite: a thin dark line on the stone side of the
+// new edge, and a lighter one just inside it where the fracture catches light.
+function drawBiteEdge(ctx, cx, cy, r, bite, isWhite) {
     ctx.save();
     ctx.beginPath();
     ctx.arc(cx, cy, Math.max(0, r - 0.5), 0, 2 * Math.PI, true);
     ctx.clip();
+    ctx.lineWidth = Math.max(0.8, r / 30);
+    ctx.strokeStyle = isWhite ? 'rgba(120,112,98,0.45)' : 'rgba(0,0,0,0.7)';
     ctx.beginPath();
-    ctx.ellipse(bx, by, w, h, tilt, 0, 2 * Math.PI);
-    ctx.fillStyle = isWhite ? 'rgba(90,85,75,0.32)' : 'rgba(0,0,0,0.6)';
-    ctx.fill();
-    // The lip: the facet's upper-left edge, toward the light.
+    ctx.ellipse(bite.bx, bite.by, bite.w + ctx.lineWidth * 0.5, bite.h + ctx.lineWidth * 0.5, bite.tilt, 0, 2 * Math.PI);
+    ctx.stroke();
+    ctx.lineWidth = Math.max(0.6, r / 45);
+    ctx.strokeStyle = isWhite ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.12)';
     ctx.beginPath();
-    ctx.ellipse(bx - w * 0.08, by - h * 0.3, w * 0.9, h * 0.75, tilt, Math.PI * 1.05, Math.PI * 1.95);
-    ctx.strokeStyle = isWhite ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.18)';
-    ctx.lineWidth = Math.max(0.7, r / 36);
+    ctx.ellipse(bite.bx, bite.by, bite.w + ctx.lineWidth * 2.2, bite.h + ctx.lineWidth * 2.2, bite.tilt, 0, 2 * Math.PI);
     ctx.stroke();
     ctx.restore();
 }
@@ -147,10 +172,6 @@ function drawCrack(ctx, cx, cy, r, rnd, isWhite) {
         for (let i = 1; i < line.length; i++) ctx.lineTo(line[i][0] + dx, line[i][1] + dy);
         ctx.stroke();
     };
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(cx, cy, Math.max(0, r - 0.5), 0, 2 * Math.PI, true);
-    ctx.clip();
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctx.lineWidth = Math.max(0.6, r / 45);
@@ -160,18 +181,16 @@ function drawCrack(ctx, cx, cy, r, rnd, isWhite) {
     ctx.strokeStyle = isWhite ? 'rgba(70,65,55,0.55)' : 'rgba(0,0,0,0.75)';
     trace(pts, 0, 0);
     if (branch) trace(branch, 0, 0);
-    ctx.restore();
 }
 
-function drawStone(ctx, stone, board) {
+// Every number a stone needs, drawn from its own generator in a FIXED order.
+// Computed once per draw and shared by the stone and its shadow, which WGo
+// draws on separate layers through separate calls.
+function stoneParams(board, stone) {
     const r = board.stoneRadius;
     const cx = board.getX(stone.x) - board.ls;
     const cy = board.getY(stone.y) - board.ls;
-    const isWhite = stone.c === WGo.W;
     const rnd = rngFor(board.stoneSeed >>> 0, stone.x, stone.y);
-
-    // Draw order of the random numbers is fixed: pattern, angle, highlight
-    // (4), flaw roll, then whatever the flaw needs.
     const pattern = SHELL_PATTERNS[Math.floor(rnd() * SHELL_PATTERNS.length)];
     const angle = rnd() * 2;
     const hl = {
@@ -182,11 +201,37 @@ function drawStone(ctx, stone, board) {
     };
     const strength = 0.75 + rnd() * 0.35;
     const flawRoll = rnd();
+    let bite = null, pit = null, crack = false;
+    if (flawRoll < CRACK_RATE) {
+        crack = true;
+    } else if (flawRoll < CRACK_RATE + BITE_RATE) {
+        // An ellipse centred a little outside the rim; its overlap with the
+        // disc is what goes missing.
+        const a = rnd() * 2 * Math.PI;
+        const w = r * (0.22 + rnd() * 0.22);
+        const h = r * (0.12 + rnd() * 0.12);
+        const dist = r + h * (0.35 + rnd() * 0.3);
+        bite = { bx: cx + Math.cos(a) * dist, by: cy + Math.sin(a) * dist, w, h, tilt: a + Math.PI / 2 };
+    } else if (flawRoll < CRACK_RATE + BITE_RATE + PIT_RATE) {
+        const a = rnd() * 2 * Math.PI;
+        const w = r * (0.14 + rnd() * 0.16);
+        const h = w * (0.55 + rnd() * 0.4);
+        const dist = r * (0.15 + rnd() * 0.5);
+        pit = { bx: cx + Math.cos(a) * dist, by: cy + Math.sin(a) * dist, w, h, tilt: rnd() * Math.PI };
+    }
+    return { r, cx, cy, rnd, pattern, angle, hl, strength, bite, pit, crack };
+}
 
-    ctx.beginPath();
+function drawStone(ctx, stone, board) {
+    const p = stoneParams(board, stone);
+    const { r, cx, cy, rnd, pattern, angle, hl, strength, bite, pit, crack } = p;
+    const isWhite = stone.c === WGo.W;
+
+    ctx.save();
+    clipOutline(ctx, cx, cy, r, bite);
+
     ctx.fillStyle = isWhite ? '#aaa' : '#000';
-    ctx.arc(cx, cy, Math.max(0, r - 0.5), 0, 2 * Math.PI, true);
-    ctx.fill();
+    ctx.fillRect(cx - r - 1, cy - r - 1, 2 * r + 2, 2 * r + 2);
 
     if (isWhite) {
         drawShellLines(ctx, cx, cy, r, angle, pattern);
@@ -199,22 +244,37 @@ function drawStone(ctx, stone, board) {
         const g1 = ctx.createRadialGradient(cx + 0.4 * r, cy + 0.4 * r, 0, cx + 0.5 * r, cy + 0.5 * r, r);
         g1.addColorStop(0, 'rgba(32,32,32,1)');
         g1.addColorStop(1, 'rgba(0,0,0,0)');
-        ctx.beginPath();
         ctx.fillStyle = g1;
-        ctx.arc(cx, cy, Math.max(0, r - 0.5), 0, 2 * Math.PI, true);
-        ctx.fill();
+        ctx.fillRect(cx - r - 1, cy - r - 1, 2 * r + 2, 2 * r + 2);
         drawHighlight(ctx, cx, cy, r, {
             ...hl, peak: 0.28 * strength,
             stops: [[0, 1], [0.4, 0.55], [1, 0]],
         });
     }
 
-    if (flawRoll < CRACK_RATE) drawCrack(ctx, cx, cy, r, rnd, isWhite);
-    else if (flawRoll < CRACK_RATE + CHIP_RATE) drawChip(ctx, cx, cy, r, rnd, isWhite);
+    if (crack) drawCrack(ctx, cx, cy, r, rnd, isWhite);
+    else if (pit) drawPit(ctx, cx, cy, r, pit, isWhite);
+    ctx.restore();
+
+    if (bite) drawBiteEdge(ctx, cx, cy, r, bite, isWhite);
+}
+
+// WGo's own shadow, clipped to the stone's outline (at the shadow's larger
+// radius) so a bitten rim casts a bitten shadow.
+function drawShadow(ctx, stone, board) {
+    const { r, cx, cy, bite } = stoneParams(board, stone);
+    if (!bite) { WGo.Board.drawHandlers.SHELL.shadow.draw.call(ctx, stone, board); return; }
+    ctx.save();
+    clipOutline(ctx, cx, cy, r, bite, r);   // generous: the blur is well under r
+    WGo.Board.drawHandlers.SHELL.shadow.draw.call(ctx, stone, board);
+    ctx.restore();
 }
 
 /** The handler board.js hands to WGo.Board. `board.stoneSeed` picks the set. */
 export const FLAWED_SHELL = {
     stone: { draw(stone, board) { drawStone(this, stone, board); } },
-    get shadow() { return WGo.Board.drawHandlers.SHELL.shadow; },
+    shadow: {
+        draw(stone, board) { drawShadow(this, stone, board); },
+        clear(stone, board) { WGo.Board.drawHandlers.SHELL.shadow.clear.call(this, stone, board); },
+    },
 };
