@@ -20,8 +20,8 @@
     "path": "/home/ootakamoku/Repositories/onlymove/android/android.keystore",
     "alias": "android"
   },
-  "appVersionName": "3",
-  "appVersionCode": 3,
+  "appVersionName": "4",
+  "appVersionCode": 4,
   "shortcuts": [],
   "generatorApp": "bubblewrap-cli",
   "webManifestUrl": "https://onlymove.net/manifest.json",
@@ -34,7 +34,7 @@
   "isChromeOSOnly": false,
   "isMetaQuest": false,
   "fullScopeUrl": "https://onlymove.net/",
-  "minSdkVersion": 21,
+  "minSdkVersion": 23,
   "orientation": "default",
   "fingerprints": [],
   "additionalTrustedOrigins": [],
@@ -45,5 +45,5 @@
   "displayOverride": [
     "standalone"
   ],
-  "appVersion": "3"
+  "appVersion": "4"
 }
