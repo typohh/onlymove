@@ -67,6 +67,44 @@ function openHint(button, text) {
 }
 
 /**
+ * Make `anchor` (any element) open a hint bubble with `text` — a string, or a
+ * function returning one, resolved each time the bubble opens so a reading
+ * that is costly or that changes with state is computed on demand rather than
+ * at render. The anchor keeps its own content; this wires the interaction only.
+ * The text doubles as the accessible name when it is a string.
+ */
+export function hintAnchor(anchor, text) {
+    const resolve = () => (typeof text === 'function' ? text() : text);
+    anchor.setAttribute('role', 'button');
+    anchor.setAttribute('tabindex', '0');
+    if (typeof text === 'string') anchor.setAttribute('aria-label', text);
+
+    const toggle = () => {
+        if (openFor === anchor && pinned) { closeHint(); return; }
+        openHint(anchor, resolve());
+        pinned = true;
+    };
+
+    anchor.addEventListener('click', (e) => {
+        // The hint sits inside dialogs and rows that have their own click
+        // handling; asking for an explanation must never also pick the thing.
+        e.preventDefault();
+        e.stopPropagation();
+        toggle();
+    });
+    anchor.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+    });
+    anchor.addEventListener('pointerenter', () => {
+        if (canHover() && openFor !== anchor) { openHint(anchor, resolve()); pinned = false; }
+    });
+    anchor.addEventListener('pointerleave', () => {
+        if (canHover() && openFor === anchor && !pinned) closeHint();
+    });
+    return anchor;
+}
+
+/**
  * A "?" button that shows `text` in a bubble. Drop it next to any control whose
  * meaning needs a sentence. The text doubles as the accessible name, so a screen
  * reader gets the explanation from the button without opening anything.
@@ -75,31 +113,5 @@ export function hintButton(text) {
     const button = document.createElement('span');
     button.className = 'hint-btn';
     button.textContent = '?';
-    button.setAttribute('role', 'button');
-    button.setAttribute('tabindex', '0');
-    button.setAttribute('aria-label', text);
-
-    const toggle = () => {
-        if (openFor === button && pinned) { closeHint(); return; }
-        openHint(button, text);
-        pinned = true;
-    };
-
-    button.addEventListener('click', (e) => {
-        // The hint sits inside dialogs and rows that have their own click
-        // handling; asking for an explanation must never also pick the thing.
-        e.preventDefault();
-        e.stopPropagation();
-        toggle();
-    });
-    button.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
-    });
-    button.addEventListener('pointerenter', () => {
-        if (canHover() && openFor !== button) { openHint(button, text); pinned = false; }
-    });
-    button.addEventListener('pointerleave', () => {
-        if (canHover() && openFor === button && !pinned) closeHint();
-    });
-    return button;
+    return hintAnchor(button, text);
 }

@@ -33,6 +33,10 @@ import { APP_MODES, MOTIF_Z } from './constants.js';
 import { appMetrics, layoutMode } from './viewport.js';
 import { flaggedMotifCategories } from './weakness.js';
 import { onTrainingFocusShown } from './onboarding.js';
+import { hintAnchor } from './hint-bubble.js';
+import { explainMotif } from './motif-explain.js';
+import { computeMotifStats } from './motif-stats.js';
+import { orientReadings } from './motif-readings.js';
 
 const MIN_Z = MOTIF_Z;    // include a problem motif only past the shared gate
 const MAX_MOTIFS = 3;
@@ -115,13 +119,15 @@ function topMotifs(problem) {
     for (let k = 0; k < embedding.length; k++) {
         const v = embedding[k];
         if (!Number.isFinite(v) || !(Math.abs(v) >= MIN_Z)) continue;
-        const text = localizedMotif(labels[String(k)],
-                                    v >= 0 ? 'positive' : 'negative');
+        const side = v >= 0 ? 'positive' : 'negative';
+        const component = labels[String(k)];
+        const text = localizedMotif(component, side);
         if (!text) continue;
-        scored.push({ v: Math.abs(v), text });
+        scored.push({ v: Math.abs(v), text,
+                      explain: () => explainMotif({ component, side, name: text, kind: 'problem' }) });
     }
     scored.sort((a, b) => b.v - a.v);
-    return scored.slice(0, MAX_MOTIFS).map((m) => m.text);
+    return scored.slice(0, MAX_MOTIFS);
 }
 
 /**
@@ -193,10 +199,23 @@ function trainingFocusMotifs() {
                                        : 'trainingFocusUndervaluedTentative', { motif: name })
                    : getTerm(confident ? 'trainingFocusWeak'
                                        : 'trainingFocusWeakTentative', { motif: name });
-        scored.push({ z, text });
+        // The explanation quotes the reading behind the sentence — the rank
+        // effect, or the share of errors — which the front page never shows.
+        // Computed when the bubble opens, not here: this list is rebuilt on
+        // repaint, and the readings walk the whole window.
+        const component = labels[String(k)];
+        const readingKind = kind === 'weak' ? 'strength' : 'tendency';
+        const explain = () => {
+            const stats = computeMotifStats();
+            const st = stats && stats.find((s) => s.k === k);
+            const oriented = st ? orientReadings(st, tail) : null;
+            return explainMotif({ component, side: tail, name, kind: readingKind,
+                                  reading: oriented ? oriented[readingKind] : null });
+        };
+        scored.push({ z, text, explain });
     }
     scored.sort((a, b) => b.z - a.z);
-    return scored.slice(0, MAX_MOTIFS).map((m) => m.text);
+    return scored.slice(0, MAX_MOTIFS);
 }
 
 /**
@@ -238,7 +257,7 @@ export function syncMotifBubble() {
 
     // Rebuild the DOM only when the content actually changed — this runs on
     // every repaint.
-    const key = show ? `${titleKey}|${motifs.join('|')}` : null;
+    const key = show ? `${titleKey}|${motifs.map((m) => m.text).join('|')}` : null;
     if (show && key !== _renderedKey) {
         const tabLabel = el('motif-bubble-tab-label');
         if (tabLabel) tabLabel.textContent = getTerm(titleKey);
@@ -247,7 +266,13 @@ export function syncMotifBubble() {
         ul.className = 'motif-bubble-list';
         for (const m of motifs) {
             const li = document.createElement('li');
-            li.textContent = m;
+            // The whole line is the tap target: a short list with no room for
+            // a separate "?" beside each entry.
+            const span = document.createElement('span');
+            span.className = 'motif-hint';
+            span.textContent = m.text;
+            hintAnchor(span, m.explain);
+            li.appendChild(span);
             ul.appendChild(li);
         }
         content.appendChild(ul);

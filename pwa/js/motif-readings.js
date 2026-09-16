@@ -234,6 +234,36 @@ export function motifReadings(history, theta, K, curveFor,
     return out;
 }
 
+// Both readings of one axis, oriented to the tail that NAMES it. An axis named
+// only on its negative tail is described from that end, with both readings
+// mirrored so "weak" and "overplay" keep meaning the named motif throughout. A
+// standard error is unsigned, so mirroring leaves it alone; a share reflects
+// (null share included), since "toward the named motif" flips with the tail.
+// Shared by the stats panes and the explanation bubbles, so one motif is
+// described the same way wherever it is named.
+export function orientReadings(st, side) {
+    const flip = side === 'negative';
+    const g = st.strength, t = st.tendency;
+    return {
+        strength: g && {
+            ranks: flip ? -g.ranks : g.ranks,
+            lo: flip ? -g.hi : g.lo,
+            hi: flip ? -g.lo : g.hi,
+            z: flip ? -g.z : g.z,
+            se: g.se,
+        },
+        tendency: t && {
+            share: flip ? 1 - t.share : t.share,
+            nullShare: flip ? 1 - t.nullShare : t.nullShare,
+            lo: flip ? 1 - t.hi : t.lo,
+            hi: flip ? 1 - t.lo : t.hi,
+            z: flip ? -t.z : t.z,
+            n: t.n,
+            se: t.se,
+        },
+    };
+}
+
 // Whether a reading clears the shared confidence gate. Confidence only — a
 // finding the user is reliably making is reported however small it is.
 export const isFlagged = (r) => !!r && Number.isFinite(r.z) && Math.abs(r.z) > MOTIF_Z;

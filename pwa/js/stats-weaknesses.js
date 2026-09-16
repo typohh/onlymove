@@ -42,7 +42,9 @@ import { normCdf } from './math-utils.js';
 import { findExamplesForIssue, probit } from './stats-compute.js';
 import { getRecallCandidates } from './recall-model.js';
 import { computeMotifStats, isFlagged, usableMotifAttempts } from './motif-stats.js';
-import { MIN_ATTEMPTS } from './motif-readings.js';
+import { MIN_ATTEMPTS, orientReadings } from './motif-readings.js';
+import { hintAnchor } from './hint-bubble.js';
+import { explainMotif } from './motif-explain.js';
 import { beginExampleReview } from './problem-loader.js';
 import { enterAnalysisMode } from './analysis.js';
 import { hideStatsModal, restoreStatsModal, discardStatsModal } from './stats-ui.js';
@@ -105,31 +107,12 @@ export function buildMotifPane(kind, history = state.answerHistory) {
         const side = labelFor(st.k, 'positive') ? 'positive'
                    : (labelFor(st.k, 'negative') ? 'negative' : null);
         if (!side) continue;
-        const flip = side === 'negative';
-        const t = st.tendency, g = st.strength;
         rows.push({
             k: st.k,
             side,
             name: labelFor(st.k, side),
-            // A standard error is unsigned, so mirroring leaves it alone.
-            strength: g && {
-                ranks: flip ? -g.ranks : g.ranks,
-                lo: flip ? -g.hi : g.lo,
-                hi: flip ? -g.lo : g.hi,
-                z: flip ? -g.z : g.z,
-                se: g.se,
-            },
-            // Mirroring a share reflects it — null share included — since
-            // "toward the named motif" flips with the tail that names it.
-            tendency: t && {
-                share: flip ? 1 - t.share : t.share,
-                nullShare: flip ? 1 - t.nullShare : t.nullShare,
-                lo: flip ? 1 - t.hi : t.lo,
-                hi: flip ? 1 - t.lo : t.hi,
-                z: flip ? -t.z : t.z,
-                n: t.n,
-                se: t.se,
-            },
+            component: labelMap[String(st.k)],
+            ...orientReadings(st, side),
         });
     }
     if (rows.length === 0) {
@@ -370,8 +353,14 @@ function buildMotifRow(kind, row, recallSet, history, scale) {
     const lead = document.createElement('div');
     lead.className = 'wk-lead';
     const name = document.createElement('span');
-    name.className = 'wk-name';
+    name.className = 'wk-name motif-hint';
     name.textContent = row.name;
+    // The name explains itself: what the motif is, and what this pane's
+    // reading says about the user on it, in a sentence with the number in it.
+    hintAnchor(name, () => explainMotif({
+        component: row.component, side: row.side, name: row.name,
+        kind, reading: row[kind],
+    }));
     lead.appendChild(name);
     const value = document.createElement('span');
     value.className = 'wk-value';

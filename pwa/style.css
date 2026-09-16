@@ -2091,6 +2091,9 @@ body {
     border: 2px solid var(--ui-bubble-border);
     box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
     line-height: 1.35;
+    /* A motif explanation is two or three short paragraphs separated by blank
+       lines; a one-line hint is unaffected. */
+    white-space: pre-line;
 }
 /* Arrow = a bordered square rotated 45°, sitting behind the body (z 0) with its
    inner half covered by the body — a border-triangle can't carry an outline, so
@@ -2120,6 +2123,21 @@ body {
 /* Opened from inside a modal (z 10000), so it has to clear one. */
 .ui-bubble.ui-bubble-top {
     z-index: 10500;
+}
+
+/* A word that opens a hint (hintAnchor on a motif name): a dotted underline
+   is the whole affordance, so it reads as a term with a definition behind it
+   rather than as a link. */
+.motif-hint {
+    cursor: help;
+    text-decoration: underline dotted;
+    text-decoration-color: color-mix(in srgb, currentColor 45%, transparent);
+    text-underline-offset: 0.18em;
+}
+.motif-hint:hover,
+.motif-hint:focus-visible {
+    text-decoration-color: currentColor;
+    outline: none;
 }
 
 /* The "?" that opens a hint (js/hint-bubble.js). Deliberately quiet — it is an
