@@ -103,6 +103,11 @@ document.addEventListener('touchstart', () => setUserHasInteracted(true));
  * control and the initial board UI has rendered. Guarded so multiple calls
  * (e.g. cold-start size picker handoff vs standard problem load) are safe.
  */
+// The bundle has run: disarm index.html's bundle-failure fallback, which would
+// otherwise drop the splash at a fixed 15s over a boot that is merely slow.
+// From here the splash is lifted by hideBootSplash() alone.
+clearTimeout(window.__bootSplashTimer);
+
 function hideBootSplash() {
     const el = document.getElementById('boot-splash');
     if (!el || el.classList.contains('boot-hidden')) return;

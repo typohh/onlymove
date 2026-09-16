@@ -11,12 +11,12 @@
        layers stop at the browser's letterbox and the insets are all 0px. -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="color-scheme" content="dark light">
-  <!-- Browser chrome colour follows the page: the app paints #222 by default and
+  <!-- Browser chrome colour follows the page: the app paints #211f1c (style.css --canvas) by default and
        white under a light preference (style.css), and the manifest, which cannot
        switch, takes the default. -->
   <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
-  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#222222">
-  <meta name="theme-color" content="#222222">
+  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#211f1c">
+  <meta name="theme-color" content="#211f1c">
   <!-- Standalone hints. `mobile-web-app-capable` is the modern, cross-browser
        key (Chrome/Samsung Internet); the `apple-*` pair is the iOS equivalent.
        These make even a legacy "Add to Home screen" shortcut (the fallback
@@ -38,7 +38,7 @@
     #boot-splash {
       position: fixed; inset: 0; z-index: 10000;
       display: flex; align-items: center; justify-content: center;
-      background: #222;
+      background: #211f1c;
       transition: opacity 0.35s ease;
     }
     #boot-splash.boot-hidden { opacity: 0; pointer-events: none; }
@@ -343,8 +343,11 @@
     // Safety net: if the JS bundle fails to load/parse entirely, main.js's
     // hideBootSplash() never runs. Drop the splash after 15s so a catastrophic
     // failure degrades to the (blank-header) static UI instead of an eternal
-    // spinner. The happy path removes the splash long before this fires.
-    setTimeout(function () {
+    // spinner. It guards the BUNDLE, not the boot: main.js clears this timer
+    // the moment it runs, so a slow first load (a throttled network fetching
+    // the problem archive) keeps the splash up until the board is ready
+    // rather than dropping it onto the half-built shell at the 15s mark.
+    window.__bootSplashTimer = setTimeout(function () {
       var el = document.getElementById('boot-splash');
       if (el) el.classList.add('boot-hidden');
     }, 15000);
