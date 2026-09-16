@@ -228,20 +228,17 @@ function drawBiteEdge(ctx, cx, cy, r, bites, i, isWhite) {
 // the notch is simply gone.
 function drawFacet(ctx, cx, cy, r, bite, isWhite) {
     const { a, facet } = bite;
-    // The facet hangs off the bite's own inner edge: the bite's centre pulled
-    // inward past its depth, so a sub-chip's facet sits where that sub-chip
-    // is rather than on the rim.
-    const ex = bite.bx - Math.cos(a) * bite.h, ey = bite.by - Math.sin(a) * bite.h;   // the bite's inner edge
-    const fx = ex - Math.cos(a) * facet.depth * 0.55;
-    const fy = ey - Math.sin(a) * facet.depth * 0.55;
+    const { fx, fy } = facet;
+    // The shading radiates from the notch: the facet's outermost point.
+    const ex = fx + Math.cos(a) * facet.D * 0.9, ey = fy + Math.sin(a) * facet.D * 0.9;
     ctx.save();
     ctx.beginPath();
-    ctx.ellipse(fx, fy, facet.width, facet.depth, a + Math.PI / 2, 0, 2 * Math.PI);
+    ctx.ellipse(fx, fy, facet.A, facet.D, a + Math.PI / 2, 0, 2 * Math.PI);
     ctx.clip();
     // Base of the facet: a concave sphere, so the shading is radial from
     // the notch — brightest where the break is deepest, fading toward the
     // facet's inner edge where it runs out to the face.
-    const g = ctx.createRadialGradient(ex, ey, 0, ex, ey, Math.max(facet.width, facet.depth * 1.6));
+    const g = ctx.createRadialGradient(ex, ey, 0, ex, ey, Math.max(facet.A, facet.D * 1.6));
     if (isWhite) {
         g.addColorStop(0, `rgba(150,145,130,${(0.45 * facet.gloss).toFixed(3)})`);
         g.addColorStop(1, `rgba(150,145,130,${(0.12 * facet.gloss).toFixed(3)})`);
@@ -254,8 +251,8 @@ function drawFacet(ctx, cx, cy, r, bite, isWhite) {
     // The reflection: a small hard ellipse off the facet's centre, toward the
     // light (upper left), the polish showing as a sharper highlight than the
     // face carries anywhere.
-    const hx = fx - facet.width * 0.25, hy = fy - facet.depth * 0.3;
-    const hg = ctx.createRadialGradient(hx, hy, 0, hx, hy, facet.width * 0.45);
+    const hx = fx - facet.A * 0.25, hy = fy - facet.D * 0.3;
+    const hg = ctx.createRadialGradient(hx, hy, 0, hx, hy, facet.A * 0.45);
     hg.addColorStop(0, `rgba(255,255,255,${(isWhite ? 0.75 : 0.5) * facet.gloss})`);
     hg.addColorStop(0.5, `rgba(255,255,255,${(isWhite ? 0.25 : 0.15) * facet.gloss})`);
     hg.addColorStop(1, 'rgba(255,255,255,0)');
@@ -265,7 +262,7 @@ function drawFacet(ctx, cx, cy, r, bite, isWhite) {
     // The facet's inner rim: a faint line where the polished surface meets
     // the matte face.
     ctx.beginPath();
-    ctx.ellipse(fx, fy, facet.width, facet.depth, a + Math.PI / 2, 0, 2 * Math.PI);
+    ctx.ellipse(fx, fy, facet.A, facet.D, a + Math.PI / 2, 0, 2 * Math.PI);
     ctx.lineWidth = Math.max(0.5, r / 50);
     ctx.strokeStyle = isWhite ? 'rgba(110,100,85,0.35)' : 'rgba(160,162,170,0.35)';
     ctx.stroke();
@@ -397,28 +394,44 @@ function stoneParams(board, stone) {
                 // a large dome-shaped facet that crosses the rim only along a
                 // narrow notch.
                 const shallowRim = rnd() < SHALLOW_RIM_SHARE;
-                const w = r * (shallowRim ? 0.12 + rnd() * 0.1 : 0.16 + rnd() * 0.32);
-                // The cut is a shallow cap of the chip's sphere: its depth
-                // into the stone is tied to the chip's width, never a narrow
-                // but deep gouge. The ellipse's centre sits outside the rim,
-                // so the depth of the cut is h less that overhang.
-                const h = shallowRim ? r * (0.04 + rnd() * 0.04) : w * (0.25 + rnd() * 0.35);
-                const dist = r + h * (0.3 + rnd() * 0.35);
-                // Half the time the chip came off the TOP face: the fracture
-                // surface then shows on the stone as a second oval inside the
-                // rim, polished where the face is matte. The other half the
-                // chip is on the underside and only the notch shows. The
-                // shallow-rim kind is always a top-face chip — the facet IS
-                // the chip.
-                const facet = (shallowRim || rnd() < 0.5) ? {
-                    depth: r * (shallowRim ? 0.3 + rnd() * 0.2 : 0.14 + rnd() * 0.18),
-                    width: shallowRim ? r * (0.3 + rnd() * 0.25) : w * (0.9 + rnd() * 0.4),
-                    gloss: 0.6 + rnd() * 0.4,
-                } : null;
-                const span = Math.asin(Math.min(1, Math.max(w, facet ? facet.width : 0) / r));
+                // ONE construction for the notch and the facet, so their
+                // edges meet at the rim. The facet ellipse is placed first:
+                // centre on the chip's bearing at radius r - D + p, semi-axes
+                // A along the rim and D into the stone, protruding p past the
+                // rim. Its chord where it crosses the rim is then
+                //   c = A * sqrt(1 - ((D - p) / D)^2),
+                // and the notch oval — centred outside at r + h*k with
+                // semi-axes w, h — is given the SAME chord, w = c / sqrt(1 -
+                // k^2). Half the ordinary chips came off the underside and
+                // have no facet; those size their notch directly. The
+                // shallow-rim chip is a near-circular facet with a small p,
+                // which is what makes its notch narrow.
+                const k = 0.3 + rnd() * 0.35;
+                let facet = null, w, h;
+                const hasFacet = shallowRim || rnd() < 0.5;
+                if (hasFacet) {
+                    const D = r * (shallowRim ? 0.3 + rnd() * 0.2 : 0.14 + rnd() * 0.18);
+                    const A = D * (shallowRim ? 0.9 + rnd() * 0.4 : 1.2 + rnd() * 1.0);
+                    const pr = D * (shallowRim ? 0.08 + rnd() * 0.12 : 0.3 + rnd() * 0.3);
+                    const c = A * Math.sqrt(Math.max(0, 1 - ((D - pr) / D) ** 2));
+                    facet = { fr: r - D + pr, A, D, gloss: 0.6 + rnd() * 0.4 };
+                    w = c / Math.sqrt(1 - k * k);
+                    // The cut is a shallow cap: depth into the stone tied to
+                    // the chord, never a narrow deep gouge.
+                    h = w * (0.25 + rnd() * 0.35);
+                } else {
+                    w = r * (0.16 + rnd() * 0.32);
+                    h = w * (0.25 + rnd() * 0.35);
+                }
+                const dist = r + h * k;
+                const span = Math.asin(Math.min(1, Math.max(w, facet ? facet.A : 0) / r));
                 const a = freeAngle(span);
                 if (a == null) continue;
                 arcs.push([a, span]);
+                if (facet) {
+                    facet.fx = cx + Math.cos(a) * facet.fr;
+                    facet.fy = cy + Math.sin(a) * facet.fr;
+                }
                 const main = { kind: 'bite', shape: 'oval', bx: cx + Math.cos(a) * dist, by: cy + Math.sin(a) * dist, w, h, tilt: a + Math.PI / 2, a, facet };
                 flaws.push(main);
                 // Chips seldom come off cleanly: some carry a run of smaller
@@ -439,9 +452,12 @@ function stoneParams(board, stone) {
                         const inward = h * (0.7 + rnd() * 0.3);
                         const sbx = main.bx - ax * inward + tx * along * w;
                         const sby = main.by - ay * inward + ty * along * w;
+                        // A sub-chip's facet is centred on the sub-notch
+                        // itself with the same half-width, so the two ovals
+                        // meet where the sub-notch is widest.
                         const sfacet = facet ? {
-                            depth: facet.depth * (0.35 + rnd() * 0.3),
-                            width: sw * (1 + rnd() * 0.4),
+                            fx: sbx - ax * sh * 0.4, fy: sby - ay * sh * 0.4,
+                            A: sw, D: facet.D * (0.35 + rnd() * 0.3),
                             gloss: facet.gloss,
                         } : null;
                         flaws.push({ kind: 'bite', shape: 'oval', bx: sbx, by: sby, w: sw, h: sh, tilt: a + Math.PI / 2 + (rnd() - 0.5) * 0.5, a, facet: sfacet, sub: true });
