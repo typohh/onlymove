@@ -339,18 +339,43 @@ function stoneParams(board, stone) {
     const lambda = FLAWS_PER_WEAR * (board.stoneFlawRate ?? 0);
     const n = Math.min(MAX_FLAWS, poisson(rnd, lambda));
     const flaws = [];
+    // Chips never overlap. Rim chips claim an arc of the rim (their angle
+    // and half-span, the facet's width counted where it is wider than the
+    // notch); face pits claim a disc. A new chip tries a few positions and
+    // is dropped if none is free. A compound chip's sub-chips are part of
+    // their parent and claim nothing of their own.
+    const arcs = [];    // [angle, halfSpan]
+    const discs = [];   // [x, y, radius]
+    const arcGap = 0.06;
+    const arcFree = (a, half) => arcs.every(([b, bh]) => {
+        let d = Math.abs(a - b) % (2 * Math.PI);
+        if (d > Math.PI) d = 2 * Math.PI - d;
+        return d > half + bh + arcGap;
+    });
+    const discFree = (x, y, rad) => discs.every(([px, py, pr]) => Math.hypot(x - px, y - py) > rad + pr)
+        && arcs.every(([b, bh]) => {
+            // A pit must also clear the rim chips' facets, which reach inward.
+            const fx = cx + Math.cos(b) * r * 0.8, fy = cy + Math.sin(b) * r * 0.8;
+            return Math.hypot(x - fx, y - fy) > rad + bh * r;
+        });
+    const freeAngle = (half) => {
+        for (let t = 0; t < 6; t++) { const a = rnd() * 2 * Math.PI; if (arcFree(a, half)) return a; }
+        return null;
+    };
     for (let i = 0; i < n; i++) {
         const kindRoll = rnd();
         if (kindRoll < CRACK_SHARE) {
             flaws.push({ kind: 'crack' });
         } else if (kindRoll < CRACK_SHARE + BITE_SHARE) {
-            const a = rnd() * 2 * Math.PI;
             if (rnd() < V_BITE_SHARE) {
                 // A small V notch: two rim points a little apart, the apex
                 // inside and a little off-centre. Much smaller than an oval.
                 const half = 0.05 + rnd() * 0.08;           // half-width, radians
                 const depth = r * (0.05 + rnd() * 0.09);
                 const skew = (rnd() - 0.5) * 0.6;
+                const a = freeAngle(half);
+                if (a == null) continue;
+                arcs.push([a, half]);
                 const rimPt = (da) => [cx + Math.cos(a + da) * (r + 0.5), cy + Math.sin(a + da) * (r + 0.5)];
                 const am = a + skew * half;
                 flaws.push({ kind: 'bite', shape: 'v', pts: [
@@ -369,7 +394,11 @@ function stoneParams(board, stone) {
                 // narrow notch.
                 const shallowRim = rnd() < SHALLOW_RIM_SHARE;
                 const w = r * (shallowRim ? 0.12 + rnd() * 0.1 : 0.16 + rnd() * 0.32);
-                const h = r * (shallowRim ? 0.04 + rnd() * 0.04 : 0.08 + rnd() * 0.18);
+                // The cut is a shallow cap of the chip's sphere: its depth
+                // into the stone is tied to the chip's width, never a narrow
+                // but deep gouge. The ellipse's centre sits outside the rim,
+                // so the depth of the cut is h less that overhang.
+                const h = shallowRim ? r * (0.04 + rnd() * 0.04) : w * (0.25 + rnd() * 0.35);
                 const dist = r + h * (0.3 + rnd() * 0.35);
                 // Half the time the chip came off the TOP face: the fracture
                 // surface then shows on the stone as a second oval inside the
@@ -382,6 +411,10 @@ function stoneParams(board, stone) {
                     width: shallowRim ? r * (0.3 + rnd() * 0.25) : w * (0.9 + rnd() * 0.4),
                     gloss: 0.6 + rnd() * 0.4,
                 } : null;
+                const span = Math.asin(Math.min(1, Math.max(w, facet ? facet.width : 0) / r));
+                const a = freeAngle(span);
+                if (a == null) continue;
+                arcs.push([a, span]);
                 const main = { kind: 'bite', shape: 'oval', bx: cx + Math.cos(a) * dist, by: cy + Math.sin(a) * dist, w, h, tilt: a + Math.PI / 2, a, facet };
                 flaws.push(main);
                 // Chips seldom come off cleanly: some carry a run of smaller
@@ -410,11 +443,18 @@ function stoneParams(board, stone) {
                 }
             }
         } else {
-            const a = rnd() * 2 * Math.PI;
             const w = r * (0.14 + rnd() * 0.16);
             const h = w * (0.55 + rnd() * 0.4);
-            const dist = r * (0.15 + rnd() * 0.5);
-            flaws.push({ kind: 'pit', bx: cx + Math.cos(a) * dist, by: cy + Math.sin(a) * dist, w, h, tilt: rnd() * Math.PI });
+            let placed = null;
+            for (let t = 0; t < 6 && !placed; t++) {
+                const a = rnd() * 2 * Math.PI;
+                const dist = r * (0.15 + rnd() * 0.5);
+                const x = cx + Math.cos(a) * dist, y = cy + Math.sin(a) * dist;
+                if (discFree(x, y, w)) placed = [x, y];
+            }
+            if (!placed) continue;
+            discs.push([placed[0], placed[1], w]);
+            flaws.push({ kind: 'pit', bx: placed[0], by: placed[1], w, h, tilt: rnd() * Math.PI });
         }
     }
     return { r, cx, cy, rnd, pattern, angle, hl, strength, flaws, bites: flaws.filter((f) => f.kind === 'bite') };
