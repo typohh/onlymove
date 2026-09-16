@@ -11,6 +11,7 @@ import { updateBoardSize, updateCapturesUI } from './ui.js';
 import { APP_MODES, usesTapToConfirm } from './constants.js';
 import { COL_LETTERS, tsumegoIdOf } from './sgf.js';
 import { FLAWED_SHELL, hashSeed, flawRateForStreak } from './stone-style.js';
+import { makeBoardWearLayer } from './board-wear.js';
 
 WGo.DIR = 'lib/wgo/';
 
@@ -100,8 +101,9 @@ export function initializeBoard(size) {
         background: WGo.DIR + "wood_1024.jpg",
         stoneHandler: FLAWED_SHELL,
     });
-    board.stoneSeed = currentStoneSeed();
-    board.stoneFlawRate = flawRateForStreak(solvingStreak());
+    applyWear(board);
+    // Under the grid (weight 100), over the wood: the wear layer.
+    board.addLayer(makeBoardWearLayer(), 50);
 
     board.addEventListener('click', handleBoardClick);
     board.addCustomObject(coordinateLabels);
@@ -165,12 +167,15 @@ function currentStoneSeed() {
     return hashSeed(p && p.filename ? tsumegoIdOf(p.filename) : '');
 }
 
-// The stones wear with use: how many problems the user has answered in the
-// current run without a break, where a break is STREAK_GAP_MS with no
-// attempt. Walked back from the newest attempt; a run whose last attempt is
-// older than the gap has ended, and counts zero.
+// The stones and the wood wear with use: how many problems the user has
+// answered in the current run without a break, where a break is
+// STREAK_GAP_MS with no attempt. Walked back from the newest attempt; a run
+// whose last attempt is older than the gap has ended, and counts zero. The
+// run's FIRST problem also names the sitting: the wood's wear is seeded from
+// it, so the marks stay put for the whole run (a run of zero is the problem
+// on screen, which becomes that first row once answered).
 const STREAK_GAP_MS = 15 * 60 * 1000;
-function solvingStreak() {
+function solvingRun() {
     const rows = getMergedAnswerHistory();
     let last = Date.now();
     let n = 0;
@@ -180,7 +185,20 @@ function solvingStreak() {
         n++;
         last = t;
     }
-    return n;
+    const p = state.currentProblem;
+    const firstId = n > 0 ? rows[rows.length - n].problemId
+                          : (p && p.filename ? tsumegoIdOf(p.filename) : '');
+    return { length: n, firstId };
+}
+
+// Everything a board reads to draw its wear, set together so the stone set,
+// the stones' wear and the wood's wear describe one sitting.
+function applyWear(board) {
+    const run = solvingRun();
+    board.stoneSeed = currentStoneSeed();
+    board.stoneFlawRate = flawRateForStreak(run.length);
+    board.wearSeed = hashSeed(run.firstId);
+    board.wearLevel = run.length;
 }
 
 export function redraw() {
@@ -191,8 +209,7 @@ export function redraw() {
         initializeBoard(position.size);
     }
 
-    state.board.stoneSeed = currentStoneSeed();
-    state.board.stoneFlawRate = flawRateForStreak(solvingStreak());
+    applyWear(state.board);
     state.board.removeAllObjects();
 
     for (let x = 0; x < position.size; x++) {
@@ -350,6 +367,9 @@ export async function getBoardImageBlob() {
         });
         tempBoard.stoneSeed = state.board.stoneSeed;
         tempBoard.stoneFlawRate = state.board.stoneFlawRate;
+        tempBoard.wearSeed = state.board.wearSeed;
+        tempBoard.wearLevel = state.board.wearLevel;
+        tempBoard.addLayer(makeBoardWearLayer(), 50);
         tempBoard.addCustomObject(coordinateLabels);
 
         // Populate the temporary board
@@ -384,8 +404,11 @@ export async function getBoardImageBlob() {
             ctx.drawImage(bgImg, 0, 0, width, height);
         }
 
-        // Copy all canvas layers from the temporary board
-        const canvases = Array.from(tempContainer.querySelectorAll('canvas'));
+        // Copy all canvas layers from the temporary board, in stacking order:
+        // WGo appends each layer's canvas in the order they were added, which
+        // is not their z-order once a layer is added under the grid.
+        const canvases = Array.from(tempContainer.querySelectorAll('canvas'))
+            .sort((a, b) => (parseInt(a.style.zIndex, 10) || 0) - (parseInt(b.style.zIndex, 10) || 0));
         canvases.forEach(c => {
             ctx.drawImage(c, 0, 0, width, height);
         });
