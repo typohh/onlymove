@@ -2,8 +2,9 @@
 //
 // The stone draw handler: WGo's shell stones with per-stone variation. Each
 // stone gets its own highlight (offset, shape and strength move within a
-// band) and a small chance of a flaw — a chip at the rim, or a hairline
-// crack — so a board reads as a set of real stones rather than one stamp.
+// band) and a chance of a flaw — a smooth-edged chip at the rim or on the
+// face, or a jagged crack running in from the rim — so a board reads as a set
+// of real stones rather than one stamp.
 //
 // Everything is a PURE FUNCTION of (board.stoneSeed, x, y). WGo redraws every
 // object on each repaint, so a stone must come out identical draw after draw
@@ -14,8 +15,8 @@
 // A handler is `{ stone: { draw(stone, board) }, shadow }` with `this` bound
 // to the 2D context (see WGo.Board.drawHandlers). The shadow is WGo's own.
 
-const RIM_CHIP_RATE = 1 / 8;     // stones with a chip at the rim
-const CRACK_RATE = 1 / 20;       // stones with a hairline crack
+const CHIP_RATE = 0.35;          // stones with a chip (rim or face)
+const CRACK_RATE = 0.3;          // stones with a crack from the rim
 const SHELL_PATTERNS = [
     { lines: [0.10, 0.12, 0.11, 0.10, 0.09, 0.09, 0.09, 0.09], factor: 0.25, thickness: 1.75 },
     { lines: [0.10, 0.09, 0.08, 0.07, 0.06, 0.06, 0.06, 0.06, 0.06, 0.06, 0.06], factor: 0.20, thickness: 1.5 },
@@ -86,60 +87,79 @@ function drawHighlight(ctx, cx, cy, r, { ox, oy, rx, ry, peak, stops }) {
     ctx.restore();
 }
 
-// A shallow bite at the rim: a darker crescent where the surface falls away,
-// with a thin light lip on its inner edge where the new face catches light.
+// A chip: a smooth-edged loss of surface, either a bite at the rim or a
+// shallow pit on the face. Never jagged — a chip is a conchoidal facet, and
+// the eye tells it from a crack by that smoothness. Drawn as a darker oval
+// where the surface falls away, with a thin light lip on the side that
+// catches the light.
 function drawChip(ctx, cx, cy, r, rnd, isWhite) {
-    const a = rnd() * 2 * Math.PI;                 // where on the rim
-    const w = r * (0.28 + rnd() * 0.22);           // bite width
-    const depth = r * (0.06 + rnd() * 0.06);
-    const bx = cx + Math.cos(a) * (r - depth * 0.4);
-    const by = cy + Math.sin(a) * (r - depth * 0.4);
+    const a = rnd() * 2 * Math.PI;                 // bearing from the centre
+    const atRim = rnd() < 0.55;
+    const w = r * (atRim ? 0.26 + rnd() * 0.24 : 0.14 + rnd() * 0.16);
+    const h = atRim ? r * (0.10 + rnd() * 0.08) : w * (0.55 + rnd() * 0.4);
+    const dist = atRim ? r - h * 0.35 : r * (0.15 + rnd() * 0.5);
+    const bx = cx + Math.cos(a) * dist, by = cy + Math.sin(a) * dist;
+    const tilt = atRim ? a : rnd() * Math.PI;
     ctx.save();
     ctx.beginPath();
     ctx.arc(cx, cy, Math.max(0, r - 0.5), 0, 2 * Math.PI, true);
     ctx.clip();
     ctx.beginPath();
-    ctx.ellipse(bx, by, w, depth * 2, a, 0, 2 * Math.PI);
-    ctx.fillStyle = isWhite ? 'rgba(90,85,75,0.28)' : 'rgba(0,0,0,0.55)';
+    ctx.ellipse(bx, by, w, h, tilt, 0, 2 * Math.PI);
+    ctx.fillStyle = isWhite ? 'rgba(90,85,75,0.32)' : 'rgba(0,0,0,0.6)';
     ctx.fill();
+    // The lip: the facet's upper-left edge, toward the light.
     ctx.beginPath();
-    ctx.ellipse(bx - Math.cos(a) * depth * 0.9, by - Math.sin(a) * depth * 0.9, w * 0.85, depth * 1.2, a, 0, 2 * Math.PI);
-    ctx.strokeStyle = isWhite ? 'rgba(255,255,255,0.55)' : 'rgba(255,255,255,0.14)';
-    ctx.lineWidth = Math.max(0.6, r / 40);
+    ctx.ellipse(bx - w * 0.08, by - h * 0.3, w * 0.9, h * 0.75, tilt, Math.PI * 1.05, Math.PI * 1.95);
+    ctx.strokeStyle = isWhite ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.18)';
+    ctx.lineWidth = Math.max(0.7, r / 36);
     ctx.stroke();
     ctx.restore();
 }
 
-// A hairline: a short bezier in the lower half of the disc, away from the
-// highlight, drawn dark with a fainter light stroke one pixel off so it reads
-// as a groove rather than a pen mark.
+// A crack: starts at the rim and wanders inward as a jagged polyline, each
+// segment turning by a random amount, with a chance of one short side branch.
+// Drawn dark with a fainter light stroke a pixel off so it reads as a groove.
 function drawCrack(ctx, cx, cy, r, rnd, isWhite) {
-    const a0 = Math.PI * (0.15 + rnd() * 0.7);     // start angle, lower half
-    const len = r * (0.45 + rnd() * 0.5);
-    const x1 = cx + Math.cos(a0) * r * 0.85, y1 = cy + Math.sin(a0) * r * 0.85;
-    const dir = a0 + Math.PI + (rnd() - 0.5) * 0.9;
-    const x2 = x1 + Math.cos(dir) * len, y2 = y1 + Math.sin(dir) * len;
-    const bend = (rnd() - 0.5) * r * 0.5;
-    const nx = -Math.sin(dir) * bend, ny = Math.cos(dir) * bend;
-    const c1x = x1 + (x2 - x1) * 0.35 + nx, c1y = y1 + (y2 - y1) * 0.35 + ny;
-    const c2x = x1 + (x2 - x1) * 0.7 - nx * 0.5, c2y = y1 + (y2 - y1) * 0.7 - ny * 0.5;
+    const a0 = rnd() * 2 * Math.PI;                // where on the rim it starts
+    let x = cx + Math.cos(a0) * (r - 0.5), y = cy + Math.sin(a0) * (r - 0.5);
+    let heading = a0 + Math.PI + (rnd() - 0.5) * 0.8;  // inward, roughly
+    const segments = 4 + Math.floor(rnd() * 4);
+    let step = r * (0.16 + rnd() * 0.12);
+    const pts = [[x, y]];
+    let branch = null;
+    for (let i = 0; i < segments; i++) {
+        heading += (rnd() - 0.5) * 1.3;
+        x += Math.cos(heading) * step;
+        y += Math.sin(heading) * step;
+        pts.push([x, y]);
+        step *= 0.85;
+        if (!branch && i >= 1 && rnd() < 0.35) {
+            const bh = heading + (rnd() < 0.5 ? 1 : -1) * (0.7 + rnd() * 0.6);
+            const bl = step * (0.8 + rnd() * 0.6);
+            branch = [[x, y], [x + Math.cos(bh) * bl * 0.6, y + Math.sin(bh) * bl * 0.6],
+                      [x + Math.cos(bh + (rnd() - 0.5)) * bl, y + Math.sin(bh + (rnd() - 0.5)) * bl]];
+        }
+    }
+    const trace = (line, dx, dy) => {
+        ctx.beginPath();
+        ctx.moveTo(line[0][0] + dx, line[0][1] + dy);
+        for (let i = 1; i < line.length; i++) ctx.lineTo(line[i][0] + dx, line[i][1] + dy);
+        ctx.stroke();
+    };
     ctx.save();
     ctx.beginPath();
-    ctx.arc(cx, cy, Math.max(0, r - 1), 0, 2 * Math.PI, true);
+    ctx.arc(cx, cy, Math.max(0, r - 0.5), 0, 2 * Math.PI, true);
     ctx.clip();
     ctx.lineCap = 'round';
-    const lw = Math.max(0.5, r / 55);
-    ctx.lineWidth = lw;
-    ctx.strokeStyle = isWhite ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.12)';
-    ctx.beginPath();
-    ctx.moveTo(x1 + 0.7, y1 + 0.7);
-    ctx.bezierCurveTo(c1x + 0.7, c1y + 0.7, c2x + 0.7, c2y + 0.7, x2 + 0.7, y2 + 0.7);
-    ctx.stroke();
-    ctx.strokeStyle = isWhite ? 'rgba(70,65,55,0.45)' : 'rgba(0,0,0,0.7)';
-    ctx.beginPath();
-    ctx.moveTo(x1, y1);
-    ctx.bezierCurveTo(c1x, c1y, c2x, c2y, x2, y2);
-    ctx.stroke();
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = Math.max(0.6, r / 45);
+    ctx.strokeStyle = isWhite ? 'rgba(255,255,255,0.55)' : 'rgba(255,255,255,0.14)';
+    trace(pts, 0.8, 0.8);
+    if (branch) trace(branch, 0.8, 0.8);
+    ctx.strokeStyle = isWhite ? 'rgba(70,65,55,0.55)' : 'rgba(0,0,0,0.75)';
+    trace(pts, 0, 0);
+    if (branch) trace(branch, 0, 0);
     ctx.restore();
 }
 
@@ -190,7 +210,7 @@ function drawStone(ctx, stone, board) {
     }
 
     if (flawRoll < CRACK_RATE) drawCrack(ctx, cx, cy, r, rnd, isWhite);
-    else if (flawRoll < CRACK_RATE + RIM_CHIP_RATE) drawChip(ctx, cx, cy, r, rnd, isWhite);
+    else if (flawRoll < CRACK_RATE + CHIP_RATE) drawChip(ctx, cx, cy, r, rnd, isWhite);
 }
 
 /** The handler board.js hands to WGo.Board. `board.stoneSeed` picks the set. */
