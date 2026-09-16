@@ -15,11 +15,22 @@
 // A handler is `{ stone: { draw(stone, board) }, shadow }` with `this` bound
 // to the 2D context (see WGo.Board.drawHandlers). The shadow is WGo's own.
 
-const CRACK_RATE = 0.3;          // stones with a crack from the rim
-// Chips are mostly at the rim: nine in ten a bite that cuts the outline, the
-// rest a shallow pit on the face.
-const BITE_RATE = 0.315;         // stones with a bite out of the rim (not a circle any more)
-const PIT_RATE = 0.035;          // stones with a shallow pit on the face
+// How worn the set is: the share of stones with a flaw, which board.js sets
+// per repaint from the user's current run of problems without a break
+// (flawRateForStreak). A fresh sitting shows a stone or two with a defect
+// on a typical board; by FULL_AT problems in one sitting nearly every stone
+// has one.
+const FLAW_RATE_FRESH = 0.07;
+const FLAW_RATE_WORN = 0.97;
+const FULL_AT = 200;
+export function flawRateForStreak(streak) {
+    const t = Math.min(1, Math.max(0, streak) / FULL_AT);
+    return FLAW_RATE_FRESH + (FLAW_RATE_WORN - FLAW_RATE_FRESH) * t;
+}
+// What a flaw is, given that there is one. Chips are mostly at the rim: nine
+// in ten a bite that cuts the outline, the rest a shallow pit on the face.
+const CRACK_SHARE = 0.46;
+const BITE_SHARE = 0.485;        // the remainder is a face pit
 const SHELL_PATTERNS = [
     { lines: [0.10, 0.12, 0.11, 0.10, 0.09, 0.09, 0.09, 0.09], factor: 0.25, thickness: 1.75 },
     { lines: [0.10, 0.09, 0.08, 0.07, 0.06, 0.06, 0.06, 0.06, 0.06, 0.06, 0.06], factor: 0.20, thickness: 1.5 },
@@ -200,11 +211,17 @@ function stoneParams(board, stone) {
         ry: 0.85 + rnd() * 0.35,
     };
     const strength = 0.75 + rnd() * 0.35;
-    const flawRoll = rnd();
+    // Two rolls: whether there is a flaw (against the board's wear), then
+    // which. Kept separate so that raising the wear only ADDS flaws — a
+    // stone flawed at a low rate keeps the same flaw at a higher one.
+    const hasFlaw = rnd() < (board.stoneFlawRate ?? FLAW_RATE_FRESH);
+    const kindRoll = rnd();
     let bite = null, pit = null, crack = false;
-    if (flawRoll < CRACK_RATE) {
+    if (!hasFlaw) {
+        // no flaw
+    } else if (kindRoll < CRACK_SHARE) {
         crack = true;
-    } else if (flawRoll < CRACK_RATE + BITE_RATE) {
+    } else if (kindRoll < CRACK_SHARE + BITE_SHARE) {
         // An ellipse centred a little outside the rim; its overlap with the
         // disc is what goes missing.
         const a = rnd() * 2 * Math.PI;
@@ -212,7 +229,7 @@ function stoneParams(board, stone) {
         const h = r * (0.12 + rnd() * 0.12);
         const dist = r + h * (0.35 + rnd() * 0.3);
         bite = { bx: cx + Math.cos(a) * dist, by: cy + Math.sin(a) * dist, w, h, tilt: a + Math.PI / 2 };
-    } else if (flawRoll < CRACK_RATE + BITE_RATE + PIT_RATE) {
+    } else {
         const a = rnd() * 2 * Math.PI;
         const w = r * (0.14 + rnd() * 0.16);
         const h = w * (0.55 + rnd() * 0.4);

@@ -1,6 +1,6 @@
 // js/board.js
 
-import { state, setBoard, setKifuReader, setGhostMove } from './state.js';
+import { state, setBoard, setKifuReader, setGhostMove, getMergedAnswerHistory } from './state.js';
 // NOTE: the next three imports are deliberate ESM cycles — game-logic.js,
 // analysis.js, and ui.js all import board primitives back from this module.
 // They work only because every imported name is called at runtime, never at
@@ -10,7 +10,7 @@ import { handleBoardClick as handleAnalysisClick } from './analysis.js';
 import { updateBoardSize, updateCapturesUI } from './ui.js';
 import { APP_MODES, usesTapToConfirm } from './constants.js';
 import { COL_LETTERS, tsumegoIdOf } from './sgf.js';
-import { FLAWED_SHELL, hashSeed } from './stone-style.js';
+import { FLAWED_SHELL, hashSeed, flawRateForStreak } from './stone-style.js';
 
 WGo.DIR = 'lib/wgo/';
 
@@ -101,6 +101,7 @@ export function initializeBoard(size) {
         stoneHandler: FLAWED_SHELL,
     });
     board.stoneSeed = currentStoneSeed();
+    board.stoneFlawRate = flawRateForStreak(solvingStreak());
 
     board.addEventListener('click', handleBoardClick);
     board.addCustomObject(coordinateLabels);
@@ -164,6 +165,24 @@ function currentStoneSeed() {
     return hashSeed(p && p.filename ? tsumegoIdOf(p.filename) : '');
 }
 
+// The stones wear with use: how many problems the user has answered in the
+// current run without a break, where a break is STREAK_GAP_MS with no
+// attempt. Walked back from the newest attempt; a run whose last attempt is
+// older than the gap has ended, and counts zero.
+const STREAK_GAP_MS = 15 * 60 * 1000;
+function solvingStreak() {
+    const rows = getMergedAnswerHistory();
+    let last = Date.now();
+    let n = 0;
+    for (let i = rows.length - 1; i >= 0; i--) {
+        const t = rows[i].date;
+        if (!Number.isFinite(t) || last - t > STREAK_GAP_MS) break;
+        n++;
+        last = t;
+    }
+    return n;
+}
+
 export function redraw() {
     if (!state.kifuReader) return;
 
@@ -173,6 +192,7 @@ export function redraw() {
     }
 
     state.board.stoneSeed = currentStoneSeed();
+    state.board.stoneFlawRate = flawRateForStreak(solvingStreak());
     state.board.removeAllObjects();
 
     for (let x = 0; x < position.size; x++) {
@@ -329,6 +349,7 @@ export async function getBoardImageBlob() {
             width: width
         });
         tempBoard.stoneSeed = state.board.stoneSeed;
+        tempBoard.stoneFlawRate = state.board.stoneFlawRate;
         tempBoard.addCustomObject(coordinateLabels);
 
         // Populate the temporary board
