@@ -11,7 +11,7 @@ import { updateBoardSize, updateCapturesUI } from './ui.js';
 import { APP_MODES, usesTapToConfirm } from './constants.js';
 import { COL_LETTERS, tsumegoIdOf } from './sgf.js';
 import { FLAWED_SHELL, hashSeed, flawRateForStreak } from './stone-style.js';
-import { makeBoardWearLayer } from './board-wear.js';
+import { makeBoardWearLayer, gridWear } from './board-wear.js';
 
 WGo.DIR = 'lib/wgo/';
 
@@ -107,6 +107,8 @@ export function initializeBoard(size) {
 
     board.addEventListener('click', handleBoardClick);
     board.addCustomObject(coordinateLabels);
+    // After the labels, so a patch at the edge rubs them faint too.
+    board.addCustomObject(gridWear);
     setBoard(board);
     updateBoardSize();
 }
@@ -193,8 +195,12 @@ function solvingRun() {
 
 // Everything a board reads to draw its wear, set together so the stone set,
 // the stones' wear and the wood's wear describe one sitting.
+// TEMPORARY, for looking at the wear by hand: a non-null value stands in for
+// the run's length. Set back to null before a deploy.
+const WEAR_LEVEL_OVERRIDE = null;
 function applyWear(board) {
     const run = solvingRun();
+    if (WEAR_LEVEL_OVERRIDE != null) run.length = WEAR_LEVEL_OVERRIDE;
     board.stoneSeed = currentStoneSeed();
     board.stoneFlawRate = flawRateForStreak(run.length);
     board.wearSeed = hashSeed(run.firstId);
@@ -371,6 +377,7 @@ export async function getBoardImageBlob() {
         tempBoard.wearLevel = state.board.wearLevel;
         tempBoard.addLayer(makeBoardWearLayer(), 50);
         tempBoard.addCustomObject(coordinateLabels);
+        tempBoard.addCustomObject(gridWear);
 
         // Populate the temporary board
         if (startPosition) {

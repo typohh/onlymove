@@ -28,6 +28,7 @@ const FLAW_RATE_WORN = 0.97;
 const FULL_AT = 200;
 const FLAWS_PER_WEAR = 2;        // mean flaws per stone at full wear
 const MAX_FLAWS = 6;             // the Poisson tail past this is far rarer than a board is wide
+const MAX_RIM_CHIPS = 2;         // a real stone with three chips on its rim is not seen
 export function flawRateForStreak(streak) {
     const t = Math.min(1, Math.max(0, streak) / FULL_AT);
     return FLAW_RATE_WORN * t;
@@ -339,26 +340,29 @@ function stoneParams(board, stone) {
     const lambda = FLAWS_PER_WEAR * (board.stoneFlawRate ?? 0);
     const n = Math.min(MAX_FLAWS, poisson(rnd, lambda));
     const flaws = [];
-    // Chips never overlap. Rim chips claim an arc of the rim (their angle
+    // Chips keep well apart: on a real stone two chips near each other are
+    // practically never seen. Rim chips claim an arc of the rim (their angle
     // and half-span, the facet's width counted where it is wider than the
-    // notch); face pits claim a disc. A new chip tries a few positions and
-    // is dropped if none is free. A compound chip's sub-chips are part of
-    // their parent and claim nothing of their own.
+    // notch) plus a wide clear margin either side; face pits claim a disc
+    // with a margin. A new chip tries a few positions and is dropped if none
+    // is free, so a worn stone runs out of room before it crowds. A compound
+    // chip's sub-chips are part of their parent and claim nothing of their own.
     const arcs = [];    // [angle, halfSpan]
     const discs = [];   // [x, y, radius]
-    const arcGap = 0.06;
+    const arcGap = 1.1;                     // radians of clear rim between chips
     const arcFree = (a, half) => arcs.every(([b, bh]) => {
         let d = Math.abs(a - b) % (2 * Math.PI);
         if (d > Math.PI) d = 2 * Math.PI - d;
         return d > half + bh + arcGap;
     });
-    const discFree = (x, y, rad) => discs.every(([px, py, pr]) => Math.hypot(x - px, y - py) > rad + pr)
+    const discFree = (x, y, rad) => discs.every(([px, py, pr]) => Math.hypot(x - px, y - py) > 2 * (rad + pr))
         && arcs.every(([b, bh]) => {
             // A pit must also clear the rim chips' facets, which reach inward.
             const fx = cx + Math.cos(b) * r * 0.8, fy = cy + Math.sin(b) * r * 0.8;
-            return Math.hypot(x - fx, y - fy) > rad + bh * r;
+            return Math.hypot(x - fx, y - fy) > 2 * rad + bh * r + r * 0.25;
         });
     const freeAngle = (half) => {
+        if (arcs.length >= MAX_RIM_CHIPS) return null;
         for (let t = 0; t < 6; t++) { const a = rnd() * 2 * Math.PI; if (arcFree(a, half)) return a; }
         return null;
     };
@@ -422,11 +426,13 @@ function stoneParams(board, stone) {
                 // a little deeper, with a smaller facet where the parent has
                 // one.
                 if (!shallowRim && rnd() < COMPOUND_SHARE) {
-                    const count = 1 + Math.floor(rnd() * 3);
+                    const count = 1 + Math.floor(rnd() * 2);
                     for (let j = 0; j < count; j++) {
-                        const along = (rnd() - 0.5) * 1.4;         // position along the parent's width
-                        const sw = w * (0.25 + rnd() * 0.25);
-                        const sh = h * (0.5 + rnd() * 0.5);
+                        // Within the parent's own width, so the cluster reads
+                        // as ONE ragged chip and never as neighbours.
+                        const along = (rnd() - 0.5) * 0.9;
+                        const sw = w * (0.2 + rnd() * 0.2);
+                        const sh = h * (0.4 + rnd() * 0.4);
                         // On the parent's inner edge: step inward from the parent's
                         // centre by its depth, then sideways along its width.
                         const ax = Math.cos(a), ay = Math.sin(a), tx = -ay, ty = ax;

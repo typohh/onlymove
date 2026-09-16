@@ -17,6 +17,7 @@
 const FULL_AT = 200;            // the level at which the set of marks is complete
 const CRACK_COUNT = 9;          // marks that CAN exist per session, each with its own birth
 const SPLOTCH_COUNT = 8;
+const RUB_COUNT = 5;            // patches where the grid lines are worn away
 
 function rngFor(seed, salt) {
     let a = (seed ^ Math.imul(salt + 1, 0x9e3779b1)) >>> 0;
@@ -123,6 +124,51 @@ function drawSplotch(ctx, W, H, rnd, level) {
     ctx.fillRect(cx - r * 1.5, cy - r * 1.5, r * 3, r * 3);
     ctx.restore();
 }
+
+// A patch where the lines are rubbed faint, as they go where stones are set
+// down and slid most: a soft disc ERASED from the grid layer, so the wood
+// underneath shows through the lines. Widens and deepens with age.
+function rubPatch(ctx, W, H, rnd, level) {
+    const birth = birthOf(rnd);
+    const cx = W * (0.15 + rnd() * 0.7), cy = H * (0.15 + rnd() * 0.7);
+    const fullR = Math.min(W, H) * (0.08 + rnd() * 0.12);
+    const stretch = 0.7 + rnd() * 0.6;              // a little elliptical
+    const rot = rnd() * Math.PI;
+    const strengthMax = 0.5 + rnd() * 0.45;
+    const age = ageOf(level, birth);
+    if (age <= 0) return;
+    const r = fullR * (0.5 + 0.5 * age);
+    const strength = strengthMax * (0.45 + 0.55 * age);
+    ctx.save();
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.translate(cx, cy);
+    ctx.rotate(rot);
+    ctx.scale(stretch, 1 / stretch);
+    const g = ctx.createRadialGradient(0, 0, 0, 0, 0, r);
+    g.addColorStop(0, `rgba(0,0,0,${strength.toFixed(3)})`);
+    g.addColorStop(0.55, `rgba(0,0,0,${(strength * 0.6).toFixed(3)})`);
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(-r * 2, -r * 2, r * 4, r * 4);
+    ctx.restore();
+}
+
+/**
+ * A WGo custom object for the GRID layer: after the grid and the coordinate
+ * labels are drawn, it rubs the lines faint in a few patches. Same seed and
+ * level as the wear layer, so the patches sit still and grow with the run.
+ */
+export const gridWear = {
+    grid: {
+        draw(args, board) {
+            const seed = board.wearSeed >>> 0;
+            const level = board.wearLevel || 0;
+            if (level <= 0) return;
+            const W = this.canvas.width, H = this.canvas.height;
+            for (let i = 0; i < RUB_COUNT; i++) rubPatch(this, W, H, rngFor(seed, 300 + i), level);
+        },
+    },
+};
 
 /** A WGo layer that paints the wood's wear. Add it below the grid (weight < 100). */
 export function makeBoardWearLayer() {
