@@ -5,14 +5,13 @@
 // embeds in its inline <script>. Page-specific styling stays in the
 // handlers; this owns only the pieces that shouldn't drift apart.
 
+// The document stylesheet (pwa/pages.css, a static asset) carries the palette,
+// type and table rules every document page shares; a page adds its width here
+// and its own rules after.
 export function baseCss(maxWidthPx) {
-  return `:root { color-scheme: light dark; }
-  body { font: 15px/1.5 -apple-system, system-ui, sans-serif; margin: 0; padding: 1.5rem 1rem 3rem;
-         max-width: ${maxWidthPx}px; margin-inline: auto; }
-  h1 { font-size: 1.4rem; margin: 0 0 .3rem; }
-  p.sub { margin: 0 0 1rem; opacity: .6; font-size: .85rem; }
-  table { width: 100%; border-collapse: collapse; }
-  tbody tr:nth-child(even) { background: color-mix(in srgb, currentColor 5%, transparent); }`;
+  return `@import url('/pages.css');
+  body { max-width: ${maxWidthPx}px; padding-top: 2rem; }
+  h1 { font-size: 1.6rem; margin-bottom: 0.4rem; }`;
 }
 
 // HTML-escape helper injected into each page's inline script (both pages

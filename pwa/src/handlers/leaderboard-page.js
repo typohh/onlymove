@@ -196,18 +196,14 @@ function renderPage(rows, belowMin) {
   ${baseCss(760)}
   /* The activity window, inline after the title — the board IS the past week, so
      it belongs in the heading rather than as a footnote about who is missing. */
-  h1 .hnote { font-size: .62em; font-weight: 400; opacity: .55; white-space: nowrap; }
   th, td { padding: .5rem .5rem; text-align: right; white-space: nowrap; }
   td:nth-child(2) { text-align: left; width: 99%; }
   th.player { text-align: left; }
-  thead th { font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; opacity: .55; font-weight: 600;
-             border-bottom: 1px solid; }
   /* vertical divider separating the declared rank from the predicted one */
-  th.pred-start, td.pred-start { border-left: 1px solid color-mix(in srgb, currentColor 15%, transparent); }
+  th.pred-start, td.pred-start { border-left: 1px solid var(--hairline); }
   thead th[data-sort] { cursor: pointer; user-select: none; -webkit-user-select: none; }
-  thead th[data-sort]:hover { opacity: .85; }
-  thead th.sorted { opacity: .95; }
-  td.rank { opacity: .5; font-variant-numeric: tabular-nums; }
+  thead th[data-sort]:hover, thead th.sorted { color: var(--ink); }
+  td.rank { color: var(--ink-muted); font-variant-numeric: tabular-nums; }
   td.val { font-variant-numeric: tabular-nums; font-weight: 600; }
   /* progress-to-next-rank "(64%)" — same relative size/mute as the front-page
      rank list's percentage span (rank-translation.js: 0.8em, opacity .6).
@@ -221,14 +217,10 @@ function renderPage(rows, belowMin) {
      right-aligned, so without it a one-digit percent shortens the whole string and
      pushes that row's rank label — and the parentheses — a digit out of column. */
   .pctn { display: inline-block; min-width: 2ch; text-align: right; font-variant-numeric: tabular-nums; }
-  td.decl { opacity: .7; font-variant-numeric: tabular-nums; }
+  td.decl { color: var(--ink-muted); font-variant-numeric: tabular-nums; }
   .name { overflow: hidden; text-overflow: ellipsis; max-width: 16rem; display: inline-block; vertical-align: bottom; }
   /* Unregistered players — muted so named (registered) rows stand out. */
-  .name.anon { opacity: .5; font-style: italic; }
-  .empty { opacity: .5; padding: 2rem 0; text-align: center; }
-  footer { margin-top: 1.5rem; opacity: .55; font-size: .82rem; }
-  footer p { margin: .35rem 0; }
-  footer a { color: inherit; }
+  .name.anon { color: var(--ink-muted); font-style: italic; }
   /* Units selector — a dropdown above the table. There are as many options as
      there are ranking systems we couple to, so this is a <select> rather than a
      segmented control: the list grows with rank_map.json without ever wrapping.
@@ -236,11 +228,7 @@ function renderPage(rows, belowMin) {
      transparent: the popup list is painted by the OS, which leaves it light in
      dark mode, so inheriting the page's light-on-dark text renders the open list
      white on white. The system pair flips with the theme on both parts. */
-  .units { margin: 0 0 .9rem; }
-  .units select { font: inherit; font-size: .8rem; padding: .25rem 1.4rem .25rem .5rem;
-                  color: FieldText; background: Field;
-                  border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
-                  border-radius: .5rem; cursor: pointer; }
+  .units { margin: 0.6rem 0 1.2rem; }
   .units select option { color: FieldText; background: Field; }
   @media (max-width: 420px) {
     body { padding-left: .6rem; padding-right: .6rem; }

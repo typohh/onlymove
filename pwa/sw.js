@@ -27,6 +27,8 @@ const PRECACHE_URLS = [
     '/corners/corner_tr.png',
     '/corners/corner_bl.png',
     '/corners/corner_br.png',
+    // The document pages' shared stylesheet: fixed name, same reasoning.
+    '/pages.css',
     // NOTE: rating_to_rank.json (M) and population_constants.json are no longer
     // precached or fetched — they are inlined into the JS bundle at build time
     // (see pwa/js/rank-decomposition.js + population-constants.js), so they ride

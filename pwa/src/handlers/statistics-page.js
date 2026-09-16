@@ -193,26 +193,24 @@ function renderPage(view) {
 <title>onlymove — Statistics</title>
 <style>
   ${baseCss(640)}
-  h1 .hnote { font-size: .62em; font-weight: 400; opacity: .55; }
-  ul.totals { list-style: none; padding: 0; margin: 0 0 .5rem; opacity: .85; font-variant-numeric: tabular-nums; }
-  ul.totals li.size { padding-left: 1rem; opacity: .8; }
-  .chart h2 { font-size: 1rem; margin: 1.4rem 0 .45rem; }
+  ul.totals { list-style: none; padding: 0; margin: 0.75rem 0 .5rem; font-variant-numeric: tabular-nums; }
+  ul.totals li { margin-bottom: 0.15rem; }
+  ul.totals li.size { padding-left: 1rem; color: var(--ink-muted); }
+  .chart h2 { font-size: 1rem; margin: 2rem 0 .6rem; padding-top: 1rem; }
   .bars { display: flex; flex-direction: column; gap: 2px; }
   .bar { display: flex; align-items: center; gap: .5rem; font-variant-numeric: tabular-nums; }
   .bar .label { flex: 0 0 auto; min-width: 4.5rem; }
-  .bar .track { flex: 1; height: .8rem; border-radius: 2px;
-                background: color-mix(in srgb, currentColor 12%, transparent); }
-  .bar .fill { display: block; height: 100%; border-radius: 2px; background: #2e9e5b; }
+  .bar .track { flex: 1; height: .8rem; border-radius: 3px; background: var(--surface); }
+  .bar .fill { display: block; height: 100%; border-radius: 3px; background: #2e9e5b; }
   .bar .value { flex: 0 0 auto; min-width: 2.5rem; text-align: right; }
   /* The reader's own bin: warm highlight on the fill and a bold label, so "where
      am I" reads at a glance against the green community bars; the legend at the
      bottom names the colour. */
-  .bar.you .label, .bar.you .value { font-weight: 600; color: #d2691e; }
-  .bar.you .fill { background: #d2691e; }
-  .bar.you .track { box-shadow: 0 0 0 1px #d2691e; }
-  .legend { display: flex; align-items: center; gap: .4rem; margin-top: 1.3rem; opacity: .85; font-size: .9rem; }
-  .swatch { display: inline-block; width: .9rem; height: .9rem; border-radius: 2px; background: #d2691e; }
-  .empty { opacity: .5; padding: 2rem 0; text-align: center; }
+  .bar.you .label, .bar.you .value { font-weight: 600; color: var(--accent); }
+  .bar.you .fill { background: var(--accent); }
+  .bar.you .track { box-shadow: 0 0 0 1px var(--accent); }
+  .legend { display: flex; align-items: center; gap: .4rem; margin-top: 1.3rem; color: var(--ink-muted); font-size: .9rem; }
+  .swatch { display: inline-block; width: .9rem; height: .9rem; border-radius: 3px; background: var(--accent); }
   @media (max-width: 420px) {
     body { padding-left: .6rem; padding-right: .6rem; }
   }

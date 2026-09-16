@@ -159,143 +159,23 @@ function linkSectionReferences(html, toc) {
     }).join('');
 }
 
+// Page-specific rules only; typography, palette, tables and the footer come
+// from the shared document stylesheet (pwa/pages.css).
 const PAGE_STYLE = `
-        /* Palette mirrors the main app (style.css): dark by default with a
-           prefers-color-scheme: light override. Kept in sync with about.html /
-           changelog.html / privacy.html. */
-        :root {
-            --bg: #222;
-            --text: #ddd;
-            --heading: #fff;
-            --accent: #d2691e;
-            --muted: #888;
-            --rule: #444;
-            --code-bg: rgba(255, 255, 255, 0.08);
-            --code-text: #eee;
-        }
-
-        @media (prefers-color-scheme: light) {
-            :root {
-                --bg: #f0f0f0;
-                --text: #333;
-                --heading: #222;
-                --accent: #c25e16;
-                --muted: #777;
-                --rule: #ccc;
-                --code-bg: rgba(0, 0, 0, 0.06);
-                --code-text: #222;
-            }
-        }
-
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-            line-height: 1.6;
-            color: var(--text);
-            max-width: 800px;
-            margin: 0 auto;
-            padding: 20px;
-            background-color: var(--bg);
-        }
-
-        h1 {
-            color: var(--heading);
-            text-align: center;
-            border-bottom: 2px solid var(--accent);
-            padding-bottom: 10px;
-        }
-
         h1.chapter {
-            text-align: left;
-            border-bottom: none;
-            margin-top: 2.5em;
-            font-size: 1.6em;
-        }
-
-        h2 {
-            color: var(--heading);
-            margin-top: 2em;
-            font-size: 1.2em;
-            border-bottom: 1px solid var(--rule);
-            padding-bottom: 6px;
-        }
-
-        strong { color: var(--heading); }
-
-        a {
-            color: var(--accent);
-            text-decoration: none;
-        }
-
-        a:hover { text-decoration: underline; }
-
-        code {
-            background-color: var(--code-bg);
-            color: var(--code-text);
-            padding: 0.1em 0.4em;
-            border-radius: 4px;
-            font-size: 0.9em;
-        }
-
-        /* Display formulas and diagrams: they carry meaningful alignment, so they
-           scroll sideways rather than wrap. */
-        pre {
-            background-color: var(--code-bg);
-            color: var(--code-text);
-            padding: 12px 14px;
-            border-radius: 6px;
-            overflow-x: auto;
-            font-size: 0.85em;
-            line-height: 1.45;
-        }
-
-        pre code {
-            background: none;
-            padding: 0;
-            font-size: inherit;
-        }
-
-        .table-wrap { overflow-x: auto; }
-
-        table {
-            border-collapse: collapse;
-            margin: 1em 0;
-            font-size: 0.92em;
-        }
-
-        th, td {
-            border: 1px solid var(--rule);
-            padding: 6px 10px;
-            text-align: left;
-            vertical-align: top;
-        }
-
-        th { color: var(--heading); }
-
-        hr {
-            border: none;
-            border-top: 1px solid var(--rule);
-            margin: 2.5em 0;
-        }
-
-        blockquote {
-            border-left: 3px solid var(--rule);
-            margin-left: 0;
-            padding-left: 1em;
-            color: var(--muted);
-        }
-
-        .toc {
-            border: 1px solid var(--rule);
-            border-radius: 6px;
-            padding: 14px 20px;
-            margin: 2em 0;
+            margin-top: 3.5rem;
+            font-size: 1.6rem;
         }
 
         .toc h2 {
-            margin: 0 0 8px;
-            border: none;
+            margin: 0 0 0.5rem;
             padding: 0;
-            font-size: 1em;
+            border: none;
+            font-size: 0.72rem;
+            font-weight: 600;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--ink-muted);
         }
 
         .toc ul {
@@ -306,15 +186,9 @@ const PAGE_STYLE = `
 
         .toc li { margin: 3px 0; }
         .toc li.section { padding-left: 1.2em; font-size: 0.95em; }
-        .toc li.chapter { margin-top: 10px; font-weight: bold; }
-
-        .footer {
-            text-align: center;
-            margin-top: 40px;
-            padding-top: 20px;
-            border-top: 1px solid var(--rule);
-            color: var(--muted);
-        }
+        .toc li.chapter { margin-top: 10px; font-weight: 600; }
+        .toc a { color: var(--ink); }
+        .toc a:hover { color: var(--accent-hi); }
 `;
 
 function renderPage({ title, toc, body }) {
@@ -331,6 +205,7 @@ function renderPage({ title, toc, body }) {
     <meta name="color-scheme" content="dark light">
     <title>Methodology — onlymove.net</title>
     <meta name="description" content="How onlymove.net builds problem ratings, ranks and motifs, and how they are used.">
+    <link rel="stylesheet" href="pages.css">
     <style>${PAGE_STYLE}    </style>
 </head>
 
