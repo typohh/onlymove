@@ -171,12 +171,12 @@ function currentStoneSeed() {
 
 // The stones and the wood wear with use: how many problems the user has
 // answered in the current run without a break, where a break is
-// STREAK_GAP_MS with no attempt. Walked back from the newest attempt; a run
+// STREAK_GAP_MS (one minute) with no attempt. Walked back from the newest attempt; a run
 // whose last attempt is older than the gap has ended, and counts zero. The
 // run's FIRST problem also names the sitting: the wood's wear is seeded from
 // it, so the marks stay put for the whole run (a run of zero is the problem
 // on screen, which becomes that first row once answered).
-const STREAK_GAP_MS = 15 * 60 * 1000;
+const STREAK_GAP_MS = 60 * 1000;
 function solvingRun() {
     const rows = getMergedAnswerHistory();
     let last = Date.now();
@@ -195,12 +195,8 @@ function solvingRun() {
 
 // Everything a board reads to draw its wear, set together so the stone set,
 // the stones' wear and the wood's wear describe one sitting.
-// TEMPORARY, for looking at the wear by hand: a non-null value stands in for
-// the run's length. Set back to null before a deploy.
-const WEAR_LEVEL_OVERRIDE = null;
 function applyWear(board) {
     const run = solvingRun();
-    if (WEAR_LEVEL_OVERRIDE != null) run.length = WEAR_LEVEL_OVERRIDE;
     board.stoneSeed = currentStoneSeed();
     board.stoneFlawRate = flawRateForStreak(run.length);
     board.wearSeed = hashSeed(run.firstId);
