@@ -192,6 +192,8 @@ function renderPage(rows, belowMin) {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>onlymove — Weekly Leaderboard</title>
+<meta name="description" content="Weekly leaderboard of Only Move solvers who linked their EGF or AGA player record, with their estimated and verified ranks.">
+<link rel="canonical" href="https://onlymove.net/leaderboard">
 <style>
   ${baseCss(760)}
   /* The activity window, inline after the title — the board IS the past week, so

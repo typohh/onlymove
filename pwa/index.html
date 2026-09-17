@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <!-- viewport-fit=cover: take the WHOLE screen, cutout and all, rather than the
@@ -29,6 +29,34 @@
   <link rel="manifest" href="manifest.json" />
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
   <title id="app-title">Only Move</title>
+  <!-- What a crawler is told the page IS. The app renders its whole UI from JS,
+       so without these a search engine assembles its snippet from whatever chrome
+       its renderer saw (menu labels, an error overlay) — hence a description here,
+       `data-nosnippet` on the chrome below, and a canonical: /9 and /13 are
+       entry-only size hints that serve this same document. -->
+  <meta name="description" content="Free Go (Baduk, Weiqi) tsumego trainer for 9x9 and 13x13. Problems are generated and rated by KataGo, served at your level, and your rank is estimated from your solving.">
+  <link rel="canonical" href="https://onlymove.net/">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Only Move">
+  <meta property="og:title" content="Only Move — Go tsumego trainer">
+  <meta property="og:description" content="Free Go (Baduk, Weiqi) tsumego trainer for 9x9 and 13x13. Problems are generated and rated by KataGo, served at your level, and your rank is estimated from your solving.">
+  <meta property="og:url" content="https://onlymove.net/">
+  <meta property="og:image" content="https://onlymove.net/horizontal.png">
+  <meta property="og:image:width" content="1920">
+  <meta property="og:image:height" content="1080">
+  <meta name="twitter:card" content="summary_large_image">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebApplication",
+    "name": "Only Move",
+    "url": "https://onlymove.net/",
+    "applicationCategory": "GameApplication",
+    "operatingSystem": "Any",
+    "description": "Free Go (Baduk, Weiqi) tsumego trainer for 9x9 and 13x13. Problems are generated and rated by KataGo, served at your level, and your rank is estimated from your solving.",
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+  }
+  </script>
   <link rel="stylesheet" type="text/css" href="style.css">
   <!-- Critical, self-contained boot-splash CSS: inlined so the loading state
        paints on the very first frame, before the (deferred, module) JS bundle
@@ -135,7 +163,7 @@
 </head>
 <body>
   <!-- Pure-CSS animated 5x5 Triple Ko loading state shown from first paint until the app is ready -->
-  <div id="boot-splash">
+  <div id="boot-splash" data-nosnippet>
     <div class="boot-content">
       <div class="boot-board">
         <svg viewBox="0 0 240 240" width="240" height="240" aria-label="Loading animation">
@@ -230,13 +258,23 @@
        that same reason — a fetch that never runs the JS still finds them.
        initCornerMark (js/ui.js) swaps the label to the active language at boot,
        so the English here is a seed, not the final text. -->
-  <div id="corner-mark">
+  <div id="corner-mark" data-nosnippet>
     <span id="corner-brand">Only Move</span>
     <a id="corner-privacy" href="privacy.html" target="_blank" rel="noopener">Privacy policy</a>
   </div>
 
   <!-- New main container for Flexbox layout -->
-  <div id="main-container">
+  <!-- The one piece of the page a fetch that runs no JS can read as content:
+       a crawler that doesn't render, a link-preview bot, a text browser. Real
+       users never see it (the app needs JS and says so). -->
+  <noscript>
+    <div id="noscript-intro">
+      <h1>Only Move — Go tsumego trainer</h1>
+      <p>Free Go (Baduk, Weiqi) life-and-death problems on 9x9 and 13x13 boards, generated and rated by KataGo and served at your level. Your rank is estimated from your solving. This app needs JavaScript.</p>
+      <p><a href="about.html">About</a> · <a href="methodology.html">Methodology</a> · <a href="/leaderboard">Leaderboard</a> · <a href="/statistics">Statistics</a> · <a href="changelog.html">Changelog</a> · <a href="privacy.html">Privacy policy</a></p>
+    </div>
+  </noscript>
+  <div id="main-container" data-nosnippet>
     <div id="title-container">
       <div id="title" class="info-text"></div>
       <div id="captures-container" class="captures-container">
@@ -313,15 +351,15 @@
         </div>
         <div class="menu-category">
           <div class="menu-category-label" id="menu-cat-community"></div>
-          <a href="/leaderboard" id="menu-leaderboard" class="menu-item btn" target="_blank" rel="noopener"></a>
-          <a href="/statistics" id="menu-statistics" class="menu-item btn" target="_blank" rel="noopener"></a>
-          <a href="https://discord.gg/ZU7jJNnkbB" id="menu-discord" class="menu-item btn" target="_blank" rel="noopener"></a>
+          <a href="/leaderboard" id="menu-leaderboard" class="menu-item btn" target="_blank" rel="noopener">Leaderboard</a>
+          <a href="/statistics" id="menu-statistics" class="menu-item btn" target="_blank" rel="noopener">Statistics</a>
+          <a href="https://discord.gg/ZU7jJNnkbB" id="menu-discord" class="menu-item btn" target="_blank" rel="noopener">Discord</a>
         </div>
         <div class="menu-category">
           <div class="menu-category-label" id="menu-cat-more"></div>
           <a href="#" id="menu-stats" class="menu-item btn" role="button" tabindex="0"></a>
           <a href="#" id="menu-account" class="menu-item btn" role="button" tabindex="0"></a>
-          <a href="about.html" id="menu-about" class="menu-item btn" target="_blank" rel="noopener"></a>
+          <a href="about.html" id="menu-about" class="menu-item btn" target="_blank" rel="noopener">About</a>
         </div>
       </div>
     </div>

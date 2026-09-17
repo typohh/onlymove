@@ -1,0 +1,11 @@
+# Served as a static asset ahead of the Worker, so it never hits the SPA fallback.
+User-agent: *
+Disallow: /tsumegos/
+Disallow: /lookup.txt
+Disallow: /lookup.
+Disallow: /server-stats
+Disallow: /profile
+Disallow: /push/
+Allow: /
+
+Sitemap: https://onlymove.net/sitemap.xml

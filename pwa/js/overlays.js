@@ -120,6 +120,7 @@ export function displayOverlay(message, duration, callback, color = 'rgba(139, 0
     // `app-blocking-overlay` lets onboarding.js hold a bubble back until this
     // transition lifts (so a callout never floats over the fade screen).
     overlay.className = 'overlay app-blocking-overlay result-overlay';
+    overlay.setAttribute('data-nosnippet', '');
     overlay.style.backgroundColor = color;
 
     const content = document.createElement('div');
@@ -277,6 +278,7 @@ export function hideLoading() {
 export function showModal({ build, dismissable = true, onDismiss } = {}) {
     const overlay = document.createElement('div');
     overlay.id = 'ios-install-overlay';
+    overlay.setAttribute('data-nosnippet', '');
     const modal = document.createElement('div');
     modal.id = 'ios-install-modal';
     overlay.appendChild(modal);

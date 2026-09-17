@@ -205,6 +205,7 @@ function renderPage({ title, toc, body }) {
     <meta name="color-scheme" content="dark light">
     <title>Methodology — onlymove.net</title>
     <meta name="description" content="How onlymove.net builds problem ratings, ranks and motifs, and how they are used.">
+    <link rel="canonical" href="https://onlymove.net/methodology.html">
     <link rel="stylesheet" href="pages.css">
     <style>${PAGE_STYLE}    </style>
 </head>

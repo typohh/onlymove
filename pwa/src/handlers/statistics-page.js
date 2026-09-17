@@ -191,6 +191,8 @@ function renderPage(view) {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>onlymove — Statistics</title>
+<meta name="description" content="Community statistics for Only Move: attempts, solvers, rank distribution and served difficulty over the past week.">
+<link rel="canonical" href="https://onlymove.net/statistics">
 <style>
   ${baseCss(640)}
   ul.totals { list-style: none; padding: 0; margin: 0.75rem 0 .5rem; font-variant-numeric: tabular-nums; }
