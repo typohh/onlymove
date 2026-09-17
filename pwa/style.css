@@ -2148,6 +2148,15 @@ body {
     z-index: 10500;
 }
 
+/* Opened by hover and not yet pinned by a click: the whole bubble is inert, so
+   a bubble the viewport clamp lands over its own anchor cannot steal the hover
+   that is holding it open (see openHint). The class is dropped the moment a
+   click pins it, restoring the painted parts' tap absorption. */
+.ui-bubble.ui-bubble-passthrough .ui-bubble-body,
+.ui-bubble.ui-bubble-passthrough .ui-bubble-arrow {
+    pointer-events: none;
+}
+
 /* A word that opens a hint (hintAnchor on a motif name): a dotted underline
    is the whole affordance, so it reads as a term with a definition behind it
    rather than as a link. */

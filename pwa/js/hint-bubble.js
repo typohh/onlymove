@@ -50,9 +50,19 @@ function onKey(e) {
     if (e.key === 'Escape') closeHint();
 }
 
-function openHint(button, text) {
+function openHint(button, text, passthrough) {
     closeHint();
     const bubble = createBubble(text, { topLayer: true });
+    // A hover-opened bubble must not take the pointer. It is placed against the
+    // anchor but clamped into the viewport, so one too tall to fit on either
+    // side lands ON its own anchor — and a painted surface appearing under a
+    // stationary cursor re-hit-tests, firing pointerleave on the anchor, which
+    // closes it, which puts the cursor back on the anchor, which reopens it.
+    // The hint then flickers and never settles, on exactly the longest
+    // explanations. Pointer-transparent until PINNED, which costs nothing: a
+    // tap always pins (touch has no hover), so the tap-absorption the painted
+    // parts exist for is untouched.
+    bubble.classList.toggle('ui-bubble-passthrough', !!passthrough);
     document.body.appendChild(bubble);
     placeBubble(bubble, button.getBoundingClientRect());
     requestAnimationFrame(() => bubble.classList.add('ui-bubble-visible'));
@@ -81,7 +91,14 @@ export function hintAnchor(anchor, text) {
 
     const toggle = () => {
         if (openFor === anchor && pinned) { closeHint(); return; }
-        openHint(anchor, resolve());
+        // Already up from hover: pin it in place rather than tearing it down and
+        // rebuilding it, which would re-run the transition under the pointer.
+        if (openFor === anchor && openEl) {
+            openEl.classList.remove('ui-bubble-passthrough');
+            pinned = true;
+            return;
+        }
+        openHint(anchor, resolve(), false);
         pinned = true;
     };
 
@@ -96,7 +113,7 @@ export function hintAnchor(anchor, text) {
         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
     });
     anchor.addEventListener('pointerenter', () => {
-        if (canHover() && openFor !== anchor) { openHint(anchor, resolve()); pinned = false; }
+        if (canHover() && openFor !== anchor) { openHint(anchor, resolve(), true); pinned = false; }
     });
     anchor.addEventListener('pointerleave', () => {
         if (canHover() && openFor === anchor && !pinned) closeHint();
