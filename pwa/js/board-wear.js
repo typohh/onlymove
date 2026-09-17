@@ -10,8 +10,10 @@
 // current run without a break — so the marks stay in the same places for the
 // whole sitting; the level is that run's length, and every mark is drawn
 // from it monotonically: each has a birth level, then grows in length,
-// spread and depth with the levels since. So consecutive problems differ
-// only a little, and nothing ever moves or vanishes mid-session. Nothing here
+// spread and depth with the levels since. A mark is born INVISIBLE — its
+// depth or opacity starts at zero and only its size has a floor — so
+// consecutive problems differ only a little, and nothing ever moves,
+// vanishes or pops into existence mid-session. Nothing here
 // reads Math.random.
 
 const FULL_AT = 200;            // the level at which the set of marks is complete
@@ -48,7 +50,7 @@ function birthOf(rnd) {
 
 // A crack along the grain: mostly vertical (the wood texture's grain runs
 // top to bottom), wandering a little, growing from its origin in both
-// directions as it ages, and darkening. Drawn as a dark hairline with a
+// directions as it ages, and darkening from nothing. Drawn as a dark hairline with a
 // lighter line beside it where the split's far edge catches light.
 function drawCrack(ctx, W, H, rnd, level) {
     const birth = birthOf(rnd);
@@ -62,7 +64,7 @@ function drawCrack(ctx, W, H, rnd, level) {
     const age = ageOf(level, birth);
     if (age <= 0) return;
     const len = fullLen * (0.25 + 0.75 * age);
-    const depth = depthMax * (0.5 + 0.5 * age);
+    const depth = depthMax * age;
     const half = len / 2, step = len / segs;
     const pts = [];
     let x = ox, y = oy - half, heading = Math.PI / 2 + lean;
@@ -90,7 +92,8 @@ function drawCrack(ctx, W, H, rnd, level) {
 }
 
 // A splotch: an irregular stain, its outline a circle with a few harmonics,
-// filled with a soft radial falloff. Spreads and deepens with age.
+// filled with a soft radial falloff. Spreads and deepens with age, from
+// invisible at birth.
 function drawSplotch(ctx, W, H, rnd, level) {
     const birth = birthOf(rnd);
     const cx = W * (0.08 + rnd() * 0.84), cy = H * (0.08 + rnd() * 0.84);
@@ -102,7 +105,7 @@ function drawSplotch(ctx, W, H, rnd, level) {
     const age = ageOf(level, birth);
     if (age <= 0) return;
     const r = fullR * (0.4 + 0.6 * age);
-    const alpha = alphaMax * (0.55 + 0.45 * age);
+    const alpha = alphaMax * age;
     ctx.save();
     ctx.beginPath();
     const N = 48;
@@ -127,7 +130,8 @@ function drawSplotch(ctx, W, H, rnd, level) {
 
 // A patch where the lines are rubbed faint, as they go where stones are set
 // down and slid most: a soft disc ERASED from the grid layer, so the wood
-// underneath shows through the lines. Widens and deepens with age.
+// underneath shows through the lines. Widens and deepens with age, from
+// nothing at birth.
 function rubPatch(ctx, W, H, rnd, level) {
     const birth = birthOf(rnd);
     const cx = W * (0.15 + rnd() * 0.7), cy = H * (0.15 + rnd() * 0.7);
@@ -138,7 +142,7 @@ function rubPatch(ctx, W, H, rnd, level) {
     const age = ageOf(level, birth);
     if (age <= 0) return;
     const r = fullR * (0.5 + 0.5 * age);
-    const strength = strengthMax * (0.45 + 0.55 * age);
+    const strength = strengthMax * age;
     ctx.save();
     ctx.globalCompositeOperation = 'destination-out';
     ctx.translate(cx, cy);
