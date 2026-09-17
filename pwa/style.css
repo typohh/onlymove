@@ -599,6 +599,29 @@ input, textarea, [contenteditable],
         width: 80%;
     }
 
+    /* --- Constant header height across modes ---
+       The buttons flow below the title, the captures token and the header
+       slot, so anything in those that changes with the mode slides the whole
+       button stack. Three things do: the mode name wraps to two lines or one
+       ("Challenge mode" against "Review mode"), the rank's progress bar is
+       drawn in the value's bottom padding and exists only while solving, and
+       in view mode both the label and the value are empty. Reserve all three
+       unconditionally, so the stack is where it was after a mode switch. */
+    #title-h {
+        /* Two line boxes plus .info-text's own vertical padding. */
+        min-height: calc(2 * 1.25em + 2 * 0.4286em);
+    }
+    #text1-h {
+        padding-bottom: 0.7em;   /* the same reserve .progress-bar-wrapper takes */
+    }
+    #text1-h-label:empty {
+        display: block;
+        min-height: 1em;
+    }
+    #text1-h:empty::before {
+        content: '\200B';
+    }
+
     .btn {
         /* The rounding will now be visible and correct */
         border-radius: 0 var(--radius) var(--radius) 0;
