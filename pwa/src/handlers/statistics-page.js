@@ -36,8 +36,7 @@ const STR = {
         agoHours: '{n}h ago',
         agoDays: '{n}d ago',
         activeUsers: 'Active users: {count}',
-        attemptsPerDay: 'Attempts per day: {count}',
-        attemptsSolved: 'Attempts: {count} ({rate}% solved)',
+        attemptsSolved: 'Attempts per week: {count} ({rate}% solved)',
         bySizeLine: '{size}×{size}: {attempts} attempts, {users} users',
         usersByAttemptsPerDay: 'Attempts per day (average)',
         solvingTimeMedian: 'Solving time (median)',
@@ -56,8 +55,7 @@ const STR = {
         agoHours: '{n} 小时前',
         agoDays: '{n} 天前',
         activeUsers: '活跃用户：{count}',
-        attemptsPerDay: '每日尝试次数：{count}',
-        attemptsSolved: '尝试次数：{count}（{rate}% 已解决）',
+        attemptsSolved: '每周尝试次数：{count}（{rate}% 已解决）',
         bySizeLine: '{size}×{size}：{attempts} 次尝试，{users} 名用户',
         usersByAttemptsPerDay: '每日尝试次数（平均）',
         solvingTimeMedian: '解题时间（中位数）',
@@ -76,8 +74,7 @@ const STR = {
         agoHours: '{n} 時間前',
         agoDays: '{n} 日前',
         activeUsers: 'アクティブユーザー：{count}',
-        attemptsPerDay: '1日あたりの挑戦数：{count}',
-        attemptsSolved: '挑戦数：{count}（{rate}% 正解）',
+        attemptsSolved: '週あたりの挑戦数：{count}（{rate}% 正解）',
         bySizeLine: '{size}×{size}：挑戦 {attempts} 回、{users} 人',
         usersByAttemptsPerDay: '1日あたりの挑戦数（平均）',
         solvingTimeMedian: '解答時間（中央値）',
@@ -96,8 +93,7 @@ const STR = {
         agoHours: '{n}시간 전',
         agoDays: '{n}일 전',
         activeUsers: '활성 사용자: {count}',
-        attemptsPerDay: '하루 시도 횟수: {count}',
-        attemptsSolved: '시도: {count} ({rate}% 해결)',
+        attemptsSolved: '주간 시도 횟수: {count} ({rate}% 해결)',
         bySizeLine: '{size}×{size}: 시도 {attempts}회, 사용자 {users}명',
         usersByAttemptsPerDay: '하루 시도 횟수 (평균)',
         solvingTimeMedian: '풀이 시간 (중앙값)',
@@ -138,7 +134,6 @@ function buildView(data, youCountry) {
     const bucketSec = data.bucketSec || 10;
     const attempts = data.totals.attempts || 0;
     const wins = data.totals.wins || 0;
-    const dayCount = Array.isArray(data.daily) ? data.daily.length : 0;
     const charts = [];
     if (Array.isArray(data.attemptsPerUserDist) && data.attemptsPerUserDist.length) {
         charts.push({ key: 'apd', title: 'usersByAttemptsPerDay',
@@ -176,7 +171,6 @@ function buildView(data, youCountry) {
         users: data.totals.users,
         attempts,
         rate: attempts ? Math.round(wins / attempts * 100) : 0,
-        attemptsPerDay: dayCount ? Math.round(attempts / dayCount) : 0,
         bySize: (data.bySize || []).map(s => ({ size: s.size, attempts: s.attempts, users: s.users })),
         charts,
     };
@@ -271,7 +265,6 @@ function renderPage(view) {
 
   var totals = document.getElementById('totals');
   totals.appendChild(el('li', null, t('activeUsers', { count: VIEW.users })));
-  totals.appendChild(el('li', null, t('attemptsPerDay', { count: VIEW.attemptsPerDay })));
   totals.appendChild(el('li', null, t('attemptsSolved', { count: VIEW.attempts, rate: VIEW.rate })));
   VIEW.bySize.forEach(function (s) {
     totals.appendChild(el('li', 'size', t('bySizeLine', { size: s.size, attempts: s.attempts, users: s.users })));
