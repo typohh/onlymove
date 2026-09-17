@@ -23,7 +23,7 @@ import { SHIPPED_K } from './data-version.js';
 export function communityYouFragment(history, rankContext) {
     const you = computeUserCommunityBuckets(history, TIME_BINS, rankContext);
     const p = new URLSearchParams();
-    for (const [key, field] of [['apd', 'attemptsPerDay'], ['solve', 'solve'], ['review', 'review'], ['recall', 'recall']]) {
+    for (const [key, field] of [['apd', 'attemptsPerDay'], ['total', 'totalAttempts'], ['solve', 'solve'], ['review', 'review'], ['recall', 'recall']]) {
         if (you[field] >= 0) p.set(key, String(you[field]));
     }
     if (you.rankLabel != null) p.set('rank', you.rankLabel);
@@ -38,10 +38,13 @@ export function communityYouFragment(history, rankContext) {
 // shared/community-bins.js — the SAME table the Worker folds the page's bars
 // into, so a median lands in the bin its bar is drawn in).
 // `rankContext` carries the rank half, which is NOT derived here — see the rank
-// block at the bottom: `shownRank` is state.displayRank (the badge's own number)
-// and `usableAttempts` is the flattened first-time count that gates it.
+// block at the bottom — and `totalAttempts`, the account's lifetime attempt
+// count as the server last echoed it (the sync state's lastSeq), which the
+// local history cannot supply once its cold tail is evicted. On the rank half,
+// `shownRank` is state.displayRank (the badge's own number) and
+// `usableAttempts` is the flattened first-time count that gates it.
 export function computeUserCommunityBuckets(history, timeBins, rankContext = {}) {
-    const out = { attemptsPerDay: -1, solve: -1, review: -1, recall: -1, rankLabel: null };
+    const out = { attemptsPerDay: -1, totalAttempts: -1, solve: -1, review: -1, recall: -1, rankLabel: null };
     if (!Array.isArray(history) || !history.length) return out;
 
     const cutoff = Date.now() - 7 * 24 * 3600e3;
@@ -65,6 +68,14 @@ export function computeUserCommunityBuckets(history, timeBins, rankContext = {})
     const PER_USER_BINS = [[0, 1], [1, 2], [2, 5], [5, 10], [10, 20], [20, 50], [50, Infinity]];
     const rate = recent.length / 7;
     out.attemptsPerDay = PER_USER_BINS.findIndex(([lo, hi]) => rate >= lo && rate < hi);
+
+    // Lifetime attempts, from the server's own count. Bins mirror TOTAL_BINS in
+    // computeServerStats.
+    const TOTAL_BINS = [[1, 100], [100, 300], [300, 1000], [1000, 3000], [3000, 10000], [10000, Infinity]];
+    const { totalAttempts = null } = rankContext;
+    if (Number.isFinite(totalAttempts)) {
+        out.totalAttempts = TOTAL_BINS.findIndex(([lo, hi]) => totalAttempts >= lo && totalAttempts < hi);
+    }
 
     // Solving time: median of per-attempt solve times (ms), then coarse-binned.
     const solveMed = median(recent.map(a => a.timeTaken).filter(t => typeof t === 'number' && t > 0));

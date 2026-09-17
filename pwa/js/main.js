@@ -85,7 +85,7 @@ import { enterAnalysisMode, undoLastMove } from './analysis.js';
 import { initMotifBubble } from './motif-bubble.js';
 import { initCoordInput } from './coord-input.js';
 import { showLoading, hideLoading, showModal, modalTitle, modalButton, modalButtonRow, showConfirm } from './overlays.js';
-import { hasPendingAccountSwitch, pendingAccountSwitchKind, maybeFinishAccountSwitch, consumeAccountSwitchFailure, startBackgroundSync } from './account-sync.js';
+import { hasPendingAccountSwitch, pendingAccountSwitchKind, maybeFinishAccountSwitch, consumeAccountSwitchFailure, startBackgroundSync, syncedAttemptTotal } from './account-sync.js';
 import { showAccountModal } from './account-ui.js';
 import { performShare } from './share.js';
 import { APP_MODES } from './constants.js';
@@ -280,6 +280,7 @@ function wireMenu() {
         const frag = communityYouFragment(merged, {
             shownRank: state.displayRank,
             usableAttempts: flattenAttempts(merged).length,
+            totalAttempts: syncedAttemptTotal(),
         });
         e.currentTarget.href = '/statistics' + (frag ? '#' + frag : '');
         closeMenu();

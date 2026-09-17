@@ -133,6 +133,13 @@ function readSyncState() {
     return null;
 }
 
+// The account's lifetime attempt count as the server last reported it, or null
+// before any /report or sync has answered for this account.
+export function syncedAttemptTotal() {
+    const sync = readSyncState();
+    return sync && Number.isFinite(sync.lastSeq) ? sync.lastSeq : null;
+}
+
 function writeSyncState(sync) {
     writeJSON(SYNC_STATE_KEY, sync);
 }

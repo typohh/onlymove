@@ -4,6 +4,8 @@ import { CORS_HEADERS, jsonResponse } from './http.js';
 import { normalizeCountry, readActivePlayers } from './leaderboard.js';
 
 const SEVEN_DAYS_MS = 7 * 24 * 3600 * 1000;
+const TOTAL_BINS = [[1, 100], [100, 300], [300, 1000], [1000, 3000], [3000, 10000], [10000, Infinity]];
+const TOTAL_LABELS = ['<100', '100–300', '300–1k', '1k–3k', '3k–10k', '10k+'];
 
 // Per-isolate recompute dedup: right after a deploy every Community-tab open
 // sees a version-stale blob, and without this each concurrent request would run
@@ -90,7 +92,7 @@ async function computeServerStats(env) {
   // the whole table), and sharing a single SELECT across every metric keeps D1
   // rows-read to roughly one window's worth per recompute.
   const rows = (await env.DB.prepare(
-    `SELECT user_id, problem, success, size, time_used, review_time, is_repeat, created_at, substr(created_at, 1, 10) AS day
+    `SELECT user_id, problem, success, size, time_used, review_time, is_repeat, user_seq, created_at, substr(created_at, 1, 10) AS day
      FROM tsumego_reports WHERE created_at >= ?`
   ).bind(since).all()).results || [];
 
@@ -107,7 +109,7 @@ async function computeServerStats(env) {
   // and earlier repeats are dropped to avoid massive double counting.
   const userSolve = new Map();   // user → number[] of time_used (ms)
   const userReview = new Map();  // user → Map<problem, { t, at }> last cumulative review_time
-  const perUserActivity = new Map(); // user → { attempts }
+  const perUserActivity = new Map(); // user → { attempts, total }
   // Recall time: how soon a user comes back to a problem they FAILED. Collect
   // each (user, problem)'s attempt timeline; below we measure the gap from a
   // failure to the very next attempt on that problem (the "first recall after a
@@ -143,8 +145,12 @@ async function computeServerStats(env) {
     }
 
     let u = perUserActivity.get(r.user_id);
-    if (!u) { u = { attempts: 0 }; perUserActivity.set(r.user_id, u); }
+    if (!u) { u = { attempts: 0, total: 0 }; perUserActivity.set(r.user_id, u); }
     u.attempts++;
+    // A user's newest row carries their LIFETIME attempt number (user_seq, the
+    // insert's running count), and a user active in the window has that row in
+    // it, so the career total costs no read beyond this scan.
+    if (r.user_seq > u.total) u.total = r.user_seq;
 
     const ts = Date.parse(r.created_at);
     if (Number.isFinite(ts)) {
@@ -250,6 +256,13 @@ async function computeServerStats(env) {
     const i = PER_USER_BINS.findIndex(([lo, hi]) => rate >= lo && rate < hi);
     if (i >= 0) attemptsPerUserDist[i].value += 1;
   }
+  // Per-user lifetime attempts, binned. Mirrored by the client's TOTAL_BINS
+  // (js/stats-compute.js) for the page's "you" marker.
+  const totalAttemptsDist = TOTAL_LABELS.map(label => ({ label, value: 0 }));
+  for (const u of perUserActivity.values()) {
+    const i = TOTAL_BINS.findIndex(([lo, hi]) => u.total >= lo && u.total < hi);
+    if (i >= 0) totalAttemptsDist[i].value += 1;
+  }
 
   // Rank histogram (weakest→strongest) and country distribution of active players,
   // both from ONE scan of the leaderboard table — the same small, weekly-pruned
@@ -267,7 +280,7 @@ async function computeServerStats(env) {
     windowDays: 7,
     totals,
     bucketSec: SOLVE_BUCKET_SEC,
-    daily, attemptsPerUserDist, bySize, solveHist, reviewHist, recallDist, ranks, countries,
+    daily, attemptsPerUserDist, totalAttemptsDist, bySize, solveHist, reviewHist, recallDist, ranks, countries,
   };
 
   await env.DB.prepare(

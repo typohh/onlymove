@@ -39,6 +39,7 @@ const STR = {
         attemptsSolved: 'Attempts per week: {count} ({rate}% solved)',
         bySizeLine: '{size}×{size}: {attempts} attempts, {users} users',
         usersByAttemptsPerDay: 'Attempts per day (average)',
+        usersByTotalAttempts: 'Attempts (total)',
         solvingTimeMedian: 'Solving time (median)',
         reviewTimeMedian: 'Review time (median)',
         recallTime: 'Recall time',
@@ -58,6 +59,7 @@ const STR = {
         attemptsSolved: '每周尝试次数：{count}（{rate}% 已解决）',
         bySizeLine: '{size}×{size}：{attempts} 次尝试，{users} 名用户',
         usersByAttemptsPerDay: '每日尝试次数（平均）',
+        usersByTotalAttempts: '尝试次数（总计）',
         solvingTimeMedian: '解题时间（中位数）',
         reviewTimeMedian: '复习时间（中位数）',
         recallTime: '回忆时间',
@@ -77,6 +79,7 @@ const STR = {
         attemptsSolved: '週あたりの挑戦数：{count}（{rate}% 正解）',
         bySizeLine: '{size}×{size}：挑戦 {attempts} 回、{users} 人',
         usersByAttemptsPerDay: '1日あたりの挑戦数（平均）',
+        usersByTotalAttempts: '挑戦数（累計）',
         solvingTimeMedian: '解答時間（中央値）',
         reviewTimeMedian: '復習時間（中央値）',
         recallTime: '想起までの時間',
@@ -96,6 +99,7 @@ const STR = {
         attemptsSolved: '주간 시도 횟수: {count} ({rate}% 해결)',
         bySizeLine: '{size}×{size}: 시도 {attempts}회, 사용자 {users}명',
         usersByAttemptsPerDay: '하루 시도 횟수 (평균)',
+        usersByTotalAttempts: '시도 횟수 (누적)',
         solvingTimeMedian: '풀이 시간 (중앙값)',
         reviewTimeMedian: '복습 시간 (중앙값)',
         recallTime: '회상 시간',
@@ -138,6 +142,10 @@ function buildView(data, youCountry) {
     if (Array.isArray(data.attemptsPerUserDist) && data.attemptsPerUserDist.length) {
         charts.push({ key: 'apd', title: 'usersByAttemptsPerDay',
                       rows: data.attemptsPerUserDist.map(b => ({ label: b.label, value: b.value })) });
+    }
+    if (Array.isArray(data.totalAttemptsDist) && data.totalAttemptsDist.length) {
+        charts.push({ key: 'total', title: 'usersByTotalAttempts',
+                      rows: data.totalAttemptsDist.map(b => ({ label: b.label, value: b.value })) });
     }
     if (Array.isArray(data.solveHist) && data.solveHist.length) {
         charts.push({ key: 'solve', title: 'solvingTimeMedian', rows: binHist(data.solveHist, bucketSec) });
