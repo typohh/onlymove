@@ -2118,30 +2118,57 @@ body {
        lines; a one-line hint is unaffected. */
     white-space: pre-line;
 }
-/* Arrow = a bordered square rotated 45°, sitting behind the body (z 0) with its
-   inner half covered by the body — a border-triangle can't carry an outline, so
-   it would disappear on same-tone backgrounds. JS sets its `left`; the transform
-   centres it there. */
+/* Arrow = a square rotated 45°, carrying the outline on its two OUTER edges
+   only — a border-triangle can't carry an outline, so it would disappear on
+   same-tone backgrounds. It sits IN FRONT of the body (z 2) and straddles the
+   body's border line, so its fill erases the stretch of that border the arrow's
+   base crosses: the triangle and the box read as one shape rather than as a
+   triangle stuck onto a closed box. (Behind the body instead, the body's own
+   border draws straight across the base — that dark line is the thing this
+   arrangement exists to avoid.) The two INNER edges keep their 2px so the
+   square's size is placement-independent, but transparent, which paints the
+   fill rather than the outline. JS sets the coordinate ALONG the bubble edge;
+   the transform centres the square on it. */
 .ui-bubble-arrow {
     position: absolute;
     left: 0;
     width: 20px;
     height: 20px;
-    z-index: 0;
+    z-index: 2;
     pointer-events: auto;
     background: var(--ui-bubble-bg);
-    border: 2px solid var(--ui-bubble-border);
-}
-/* Bubble BELOW its anchor → arrow at the body's top edge, pointing up. The 2px
-   inset lets the body's border cover the arrow's base seam cleanly. */
-.ui-bubble.ui-arrow-top .ui-bubble-arrow {
-    top: 2px;
+    border: 2px solid transparent;
     transform: translate(-50%, -50%) rotate(45deg);
+}
+/* Rotated 45°, the square's top-left corner becomes its TOP vertex, so its top
+   and left borders are the two edges meeting there; each placement below names
+   the pair that faces away from the body. The 1px offsets land the square's two
+   side vertices in the MIDDLE of the body's 2px border, where the arrow's
+   outline meets it without a step. */
+/* Bubble BELOW its anchor → arrow at the body's top edge, pointing up. */
+.ui-bubble.ui-arrow-top .ui-bubble-arrow {
+    top: 0;
+    border-top-color: var(--ui-bubble-border);
+    border-left-color: var(--ui-bubble-border);
 }
 /* Bubble ABOVE its anchor → arrow at the body's bottom edge, pointing down. */
 .ui-bubble.ui-arrow-bottom .ui-bubble-arrow {
-    top: calc(100% - 2px);
-    transform: translate(-50%, -50%) rotate(45deg);
+    top: 100%;
+    border-bottom-color: var(--ui-bubble-border);
+    border-right-color: var(--ui-bubble-border);
+}
+/* Bubble BESIDE its anchor (the placer's choice when neither vertical side has
+   room to sit clear): the arrow moves to the vertical edge facing the anchor
+   and JS sets its `top` instead of its `left`. */
+.ui-bubble.ui-arrow-left .ui-bubble-arrow {
+    left: 0;
+    border-left-color: var(--ui-bubble-border);
+    border-bottom-color: var(--ui-bubble-border);
+}
+.ui-bubble.ui-arrow-right .ui-bubble-arrow {
+    left: 100%;
+    border-top-color: var(--ui-bubble-border);
+    border-right-color: var(--ui-bubble-border);
 }
 /* Opened from inside a modal (z 10000), so it has to clear one. */
 .ui-bubble.ui-bubble-top {

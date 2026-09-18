@@ -15,8 +15,12 @@
 
 const MARGIN = 8;    // keep the bubble this far inside the viewport
 const GAP = 10;      // clearance between the anchor edge and the arrow tip
-const ARROW_H = 14;  // protrusion of the rotated-square arrow (see .ui-bubble-arrow)
-const ARROW_HALF = 14;
+const ARROW_H = 14;   // clearance reserved for the arrow between the anchor and the bubble
+// Half the arrow's span ALONG the bubble's edge: the rotated square's diagonal,
+// halved. Plus the slack that keeps its base off the body's rounded corners,
+// which it would otherwise nick — it is painted in FRONT of the body.
+const ARROW_HALF = 17;
+const ARROW_CORNER_SLACK = 8;
 
 /**
  * Build a bubble carrying `text`. Returned detached and invisible: append it,
@@ -39,11 +43,16 @@ export function createBubble(text, { topLayer = false } = {}) {
 
 /**
  * Place `bubble` against `rect` (a viewport-space DOMRect), arrow pointing at
- * the anchor's horizontal centre. `placement` ('above' | 'below' | 'auto') is a
- * PREFERENCE — it flips whenever the preferred side would run off screen, so a
- * caller never has to know how much room there is. `overAnchor` treats the
- * anchor's CENTRE as the edge, which puts the bubble on top of a large target
- * (the board) pointing inward instead of floating clear of it.
+ * the anchor. `placement` ('above' | 'below' | 'auto') is a PREFERENCE for the
+ * VERTICAL side and nothing more: the placer tries the preferred side, its
+ * flip, and then the LEFT and RIGHT of the anchor, taking the first that lets
+ * the whole bubble sit CLEAR of the anchor. Only if none does is the preference
+ * honoured anyway and the bubble clamped into the viewport, where it may land
+ * on its own anchor. This is why a tall bubble beside a control in a side
+ * column goes out across the free space rather than up into the top margin.
+ * `overAnchor` treats the anchor's CENTRE as its edge, which puts the bubble on
+ * top of a large target (the board) pointing inward; a target one deliberately
+ * covers has no "beside" worth having, so that mode stays vertical.
  *
  * The bubble must already be in the document: its own width and height are
  * measured here.
@@ -52,38 +61,76 @@ export function placeBubble(bubble, rect, { placement = 'auto', overAnchor = fal
     const vw = window.innerWidth;
     const vh = window.innerHeight;
     const anchorX = rect.left + rect.width / 2;
-    const centreY = rect.top + rect.height / 2;
+    const anchorY = rect.top + rect.height / 2;
 
     const bw = Math.min(bubble.offsetWidth, vw - 2 * MARGIN);
     const bh = bubble.offsetHeight;
 
-    const edgeTop = overAnchor ? centreY : rect.top;
-    const edgeBottom = overAnchor ? centreY : rect.bottom;
-    let below;
-    if (placement === 'below') below = true;
-    else if (placement === 'above') below = false;
-    else below = (edgeBottom + GAP + bh + ARROW_H) <= (vh - MARGIN);
-    // Flip if the preferred side overflows and the other one doesn't.
-    if (below && (edgeBottom + GAP + bh + ARROW_H) > vh - MARGIN && (edgeTop - GAP - bh - ARROW_H) >= MARGIN) below = false;
-    if (!below && (edgeTop - GAP - bh - ARROW_H) < MARGIN && (edgeBottom + GAP + bh + ARROW_H) <= vh - MARGIN) below = true;
+    const edgeTop = overAnchor ? anchorY : rect.top;
+    const edgeBottom = overAnchor ? anchorY : rect.bottom;
+    const edgeLeft = overAnchor ? anchorX : rect.left;
+    const edgeRight = overAnchor ? anchorX : rect.right;
 
-    let top = below ? (edgeBottom + GAP + ARROW_H) : (edgeTop - GAP - ARROW_H - bh);
+    // What the arrow + its clearance cost on the side the bubble stands out on.
+    const OUT = GAP + ARROW_H;
+    const room = {
+        below: (vh - MARGIN) - (edgeBottom + OUT),
+        above: (edgeTop - OUT) - MARGIN,
+        right: (vw - MARGIN) - (edgeRight + OUT),
+        left: (edgeLeft - OUT) - MARGIN,
+    };
+    const fits = (side) => (side === 'below' || side === 'above')
+        ? room[side] >= bh
+        // Beside the anchor the bubble is centred on it, so its full height has
+        // to fit the viewport as well as its width fitting the gap.
+        : !overAnchor && room[side] >= bw && bh <= vh - 2 * MARGIN;
+
+    const vertical = (placement === 'below' || (placement === 'auto' && fits('below')))
+        ? ['below', 'above'] : ['above', 'below'];
+    const horizontal = room.right >= room.left ? ['right', 'left'] : ['left', 'right'];
+    const order = [...vertical, ...horizontal];
+    const side = order.find(fits) || vertical[0];
+    const beside = side === 'left' || side === 'right';
+
+    let left, top;
+    if (beside) {
+        left = side === 'right' ? (edgeRight + OUT) : (edgeLeft - OUT - bw);
+        top = anchorY - bh / 2;
+    } else {
+        left = anchorX - bw / 2;
+        top = side === 'below' ? (edgeBottom + OUT) : (edgeTop - OUT - bh);
+    }
     top = Math.max(MARGIN, Math.min(top, vh - MARGIN - bh));
-
-    let left = anchorX - bw / 2;
     left = Math.max(MARGIN, Math.min(left, vw - MARGIN - bw));
 
     bubble.style.left = `${Math.round(left)}px`;
     bubble.style.top = `${Math.round(top)}px`;
     bubble.style.maxWidth = `${Math.round(vw - 2 * MARGIN)}px`;
 
-    // Arrow: on the edge nearest the anchor, horizontally under the anchor
-    // centre — but never past the bubble's own rounded corners, so a bubble
-    // shoved sideways by the viewport clamp still points as close as it can.
+    // Arrow: on the bubble edge nearest the anchor, and along that edge it
+    // tracks the anchor's centre — but never past the bubble's own rounded
+    // corners, so a bubble shoved by the viewport clamp still points as close
+    // as it can. The CSS class fixes the edge and the inline coordinate the
+    // position along it, so the other coordinate is cleared rather than left
+    // over from a previous placement.
     const arrow = bubble.querySelector('.ui-bubble-arrow');
-    let arrowLeft = anchorX - left;
-    arrowLeft = Math.max(ARROW_HALF + 4, Math.min(arrowLeft, bw - ARROW_HALF - 4));
-    arrow.style.left = `${Math.round(arrowLeft)}px`;
-    bubble.classList.toggle('ui-arrow-top', below);       // arrow on the bubble's TOP edge when it sits below
-    bubble.classList.toggle('ui-arrow-bottom', !below);
+    if (beside) {
+        arrow.style.left = '';
+        arrow.style.top = `${Math.round(clampAlong(anchorY - top, bh))}px`;
+    } else {
+        arrow.style.top = '';
+        arrow.style.left = `${Math.round(clampAlong(anchorX - left, bw))}px`;
+    }
+    // Arrow edge = the one facing the anchor, so it is the OPPOSITE of the side
+    // the bubble was placed on.
+    bubble.classList.toggle('ui-arrow-top', side === 'below');
+    bubble.classList.toggle('ui-arrow-bottom', side === 'above');
+    bubble.classList.toggle('ui-arrow-left', side === 'right');
+    bubble.classList.toggle('ui-arrow-right', side === 'left');
+}
+
+// Keep the arrow inside the straight run of an edge, clear of both corners.
+function clampAlong(offset, extent) {
+    const inset = ARROW_HALF + ARROW_CORNER_SLACK;
+    return Math.max(inset, Math.min(offset, extent - inset));
 }

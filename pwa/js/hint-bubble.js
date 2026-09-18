@@ -53,9 +53,10 @@ function onKey(e) {
 function openHint(button, text, passthrough) {
     closeHint();
     const bubble = createBubble(text, { topLayer: true });
-    // A hover-opened bubble must not take the pointer. It is placed against the
-    // anchor but clamped into the viewport, so one too tall to fit on either
-    // side lands ON its own anchor — and a painted surface appearing under a
+    // A hover-opened bubble must not take the pointer. The placer looks for a
+    // side with room to sit clear — beside the anchor as well as above and
+    // below it — but where none has any it clamps into the viewport and lands
+    // ON its own anchor, and a painted surface appearing under a
     // stationary cursor re-hit-tests, firing pointerleave on the anchor, which
     // closes it, which puts the cursor back on the anchor, which reopens it.
     // The hint then flickers and never settles, on exactly the longest
