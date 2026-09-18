@@ -9,7 +9,7 @@ initDebugLog();
 import { state, setAppMode, setAcceptClicks, setDeferredInstallPrompt, setUserHasInteracted, updateAnswerHistory, setReviewStartTime, setBoardSize, SUPPORTED_BOARD_SIZES, registerAcceptClicksHook, getAnswerHistoryForSize, getMergedAnswerHistory, initHistoryStorage, addIgnoredProblem } from './state.js';
 import { DATA_VERSION, RATINGS_VERSION } from './data-version.js';
 import { maybeShowRankSurvey } from './rank-survey-prompt.js';
-import { showRankTranslation } from './rank-translation.js';
+import { rankTranslationContent } from './rank-translation.js';
 registerAcceptClicksHook(maybeShowRankSurvey);
 
 try {
@@ -33,7 +33,7 @@ try {
     console.error("Sentry initialization failed:", error);
 }
 
-import { updateAllUI, updateBoardSize, showCaptureDetails, handleInstallClick, refreshNotifState, initCornerMark } from './ui.js';
+import { updateAllUI, updateBoardSize, captureDetailsText, handleInstallClick, refreshNotifState, initCornerMark } from './ui.js';
 import { getRecallCandidates } from './recall-model.js';
 import { showDetailedStats } from './stats-ui.js';
 import { maybeUploadSchedule, syncRecallNotification } from './notifications.js';
@@ -41,6 +41,7 @@ import { recordShareEvent } from './attempt-recorder.js';
 import { redraw, initializeBoard } from './board.js';
 import { tsumegoIdOf } from './sgf.js';
 import { getTerm } from './i18n.js';
+import { hintAnchor } from './hint-bubble.js';
 import { initOnboarding, onResume as onboardingResume, onPreviousClicked as onboardingPreviousClicked } from './onboarding.js';
 
 /**
@@ -307,14 +308,22 @@ function wireMenu() {
     });
 }
 
-// Tapping the rank display shows how it translates to ranks on other servers
-// (showRankTranslation no-ops outside solving mode). The elements are
-// persistent, so this listener is registered once rather than on every repaint.
-function wireRankDisplayTap() {
-    ['text1', 'text1-h'].forEach((id) => {
+// The rank badge and the capture score are READINGS of themselves: pointing at
+// either says how the number shown is arrived at — the rank on each surveyed
+// server, the komi and captures behind the score. Both are hint anchors
+// (js/hint-bubble.js), so they hover open on a mouse, tap open on a touchscreen,
+// and dismiss themselves. Each resolver declines outside the mode its reading
+// belongs to, which leaves the control inert there; the elements are persistent,
+// so this runs once rather than on every repaint.
+function wireHeaderReadingHints() {
+    for (const id of ['text1', 'text1-h']) {
         const el = document.getElementById(id);
-        if (el) el.addEventListener('click', () => showRankTranslation());
-    });
+        if (el) hintAnchor(el, rankTranslationContent);
+    }
+    for (const id of ['capture-score', 'capture-score-h']) {
+        const el = document.getElementById(id);
+        if (el) hintAnchor(el, captureDetailsText);
+    }
 }
 
 // The four action buttons; behavior keys off state.appMode.
@@ -391,16 +400,6 @@ function wireActionButtons() {
             e.preventDefault();
             undoLastMove();
         }
-    });
-
-    // Handle capture score click
-    document.getElementById('capture-score').addEventListener('click', (e) => {
-        e.preventDefault();
-        showCaptureDetails();
-    });
-    document.getElementById('capture-score-h').addEventListener('click', (e) => {
-        e.preventDefault();
-        showCaptureDetails();
     });
 
     // Handle button4 click - Install (solving/linked). Ignore lives in the
@@ -749,7 +748,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     wireRoleButtonKeys();
     initMotifBubble();
     initCoordInput();
-    wireRankDisplayTap();
+    wireHeaderReadingHints();
     wireActionButtons();
 
     // Normalize answer-history storage to the unified working set + IndexedDB

@@ -23,17 +23,26 @@ const ARROW_HALF = 17;
 const ARROW_CORNER_SLACK = 8;
 
 /**
- * Build a bubble carrying `text`. Returned detached and invisible: append it,
- * place it, then add `ui-bubble-visible` (on the next frame, so the transition
- * runs). `topLayer` raises it above modals — right for a hint the user opened
- * from inside one, wrong for an ambient tip that must not cover a dialog.
+ * Build a bubble carrying `content` — a string, or a Node for a reading that is
+ * a small table rather than a sentence (the rank translation). Returned
+ * detached and invisible: append it, place it, then add `ui-bubble-visible` (on
+ * the next frame, so the transition runs). `topLayer` raises it above modals —
+ * right for a hint the user opened from inside one, wrong for an ambient tip
+ * that must not cover a dialog.
  */
-export function createBubble(text, { topLayer = false } = {}) {
+export function createBubble(content, { topLayer = false } = {}) {
     const bubble = document.createElement('div');
     bubble.className = topLayer ? 'ui-bubble ui-bubble-top' : 'ui-bubble';
     const body = document.createElement('div');
     body.className = 'ui-bubble-body';
-    body.textContent = text;
+    if (content instanceof Node) {
+        // A structured body sets its own spacing, so the sentence layout
+        // (pre-line, a single measure) would only fight it.
+        body.classList.add('ui-bubble-rich');
+        body.appendChild(content);
+    } else {
+        body.textContent = content;
+    }
     const arrow = document.createElement('div');
     arrow.className = 'ui-bubble-arrow';
     bubble.appendChild(body);

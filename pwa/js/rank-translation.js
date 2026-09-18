@@ -1,6 +1,9 @@
 // js/rank-translation.js
 //
-// Tap your rank → see the equivalent rank on each surveyed go server.
+// Tap your rank → see the equivalent rank on each surveyed go server, in a hint
+// bubble beside the badge (js/hint-bubble.js). A bubble rather than a dialog
+// because this is a READING of the thing the user pointed at, not a task: it
+// wants no decision, no dismissal and nothing behind it hidden.
 //
 // The mapping (pwa/tsumegos/rank_map.json) is produced by
 // pipeline.map_rating_to_rank as per-server interpolation knots
@@ -19,7 +22,7 @@ import { APP_MODES } from './constants.js';
 import { interpExtrap, rankToLabel, clampRankBand, rankProgress } from '../shared/rank-math.js';
 import { rankAfterRatingDelta } from './rank-decomposition.js';
 import { timeAdjustDeltaRating } from './population-constants.js';
-import { showModal, modalTitle, modalButton, modalButtonRow, modalRankGrid } from './overlays.js';
+import { modalRankGrid } from './overlays.js';
 // rank_map.json is inlined at build time (like rating_to_rank.json in
 // rank-decomposition.js / src/index.js), so it's never fetched at runtime —
 // build.mjs drops the served copy from dist. A curve re-fit
@@ -55,23 +58,27 @@ export function internalRankToServerRank(rank, server) {
     return interpExtrap(rank, c.our, c.server);
 }
 
-export async function showRankTranslation() {
-    // Only meaningful for the user's own rank in solving mode (analysis/linked
-    // modes show a problem's rank or nothing).
-    if (state.appMode !== APP_MODES.SOLVING) return;
-    // displayRank, NOT userRank: this modal answers "what is the rank on the
-    // badge, on each server", so it must translate the number the badge shows or
-    // the two disagree by the whole conservatism offset. Translating the
-    // conservative value is self-consistent — the couplings are fitted on the
-    // backend from surveys, never from anything the client displays, so no
-    // calibration loop closes here.
+/**
+ * The bubble body for the rank badge: one row per ranking system, OnlyMove
+ * first. Returns null wherever the badge is not the user's own rank — analysis
+ * and view mode show a problem's rank or nothing — which the hint anchor reads
+ * as "nothing to say here", so the badge is simply inert in those modes.
+ */
+export function rankTranslationContent() {
+    if (state.appMode !== APP_MODES.SOLVING) return null;
+    // displayRank, NOT userRank: this answers "what is the rank on the badge, on
+    // each server", so it must translate the number the badge shows or the two
+    // disagree by the whole conservatism offset. Translating the conservative
+    // value is self-consistent — the couplings are fitted on the backend from
+    // surveys, never from anything the client displays, so no calibration loop
+    // closes here.
     const rating = state.displayRank;
-    if (typeof rating !== 'number' || !Number.isFinite(rating)) return;
+    if (typeof rating !== 'number' || !Number.isFinite(rating)) return null;
 
     const history = getMergedAnswerHistory();
     const rankValue = rating;                     // continuous internal rank
 
-    // The 95% CI on the rank now lives in the stats Rank tab (buildRankSummaryText
+    // The 95% CI on the rank lives in the stats Rank tab (buildRankSummaryText
     // in stats-rank-pane.js), not here.
 
     // OnlyMove keeps the raw, untimed consensus rank; the server translations —
@@ -80,65 +87,58 @@ export async function showRankTranslation() {
     // timed strength. Same single-point correction the Rank-chart server views use
     // (whole-history median solve time → rating delta → mapped via M).
     const deltaRating = timeAdjustDeltaRating(history);
-    const adjusted = deltaRating !== null;
-    const adjValue = adjusted ? rankAfterRatingDelta(rankValue, deltaRating) : rankValue;
+    const adjValue = deltaRating !== null ? rankAfterRatingDelta(rankValue, deltaRating) : rankValue;
     const adjRank = Number.isFinite(adjValue) ? adjValue : rankValue;
 
-    showModal({
-        build: (modal, close) => {
-            modal.appendChild(modalTitle(getTerm('rankTranslationTitle')));
+    const frag = document.createDocumentFragment();
 
-            // Caption under the header explaining the parenthetical percentage on
-            // each row; small + muted so it reads as a note, not a heading.
-            const caption = document.createElement('div');
-            caption.textContent = getTerm('rankProgressCaption');
-            caption.className = 'modal-note';
-            modal.appendChild(caption);
+    const title = document.createElement('div');
+    title.className = 'ui-bubble-title';
+    title.textContent = getTerm('rankTranslationTitle');
+    frag.appendChild(title);
 
-            // One system per row: bold name on the left, "<rank> (<progress>%)" on
-            // the right. rankProgress (shared/rank-math.js) is THE decimal-rank →
-            // {label, percent} decomposition — round band, progress from the band's
-            // lower edge, GoR/EGF-consistent. `labelFor` selects the label space
-            // (index for OnlyMove, ladder-clamped server-scalar for the servers).
-            // The percentage is a smaller, muted span so the rank stays the focus.
-            const grid = modalRankGrid();
-            const addRow = (name, value, labelFor) => {
-                const { label: rankLabel, percent } = rankProgress(value, labelFor);
-                const label = document.createElement('div');
-                label.textContent = name;
-                label.className = 'modal-rank-label';
-                const val = document.createElement('div');
-                // Left-set (.modal-rank-value): the grid sits inside a
-                // text-align:center modal, so without it narrower rows (a
-                // 1-digit percent) drift right and open an uneven gap.
-                val.className = 'modal-rank-value';
-                val.textContent = rankLabel + ' ';
-                const pct = document.createElement('span');
-                pct.textContent = `(${percent}%)`;
-                pct.className = 'modal-rank-pct';
-                val.appendChild(pct);
-                grid.appendChild(label);
-                grid.appendChild(val);
-            };
+    // Explains the parenthetical percentage on each row; small + muted so it
+    // reads as a note, not a heading.
+    const caption = document.createElement('div');
+    caption.className = 'modal-note';
+    caption.textContent = getTerm('rankProgressCaption');
+    frag.appendChild(caption);
 
-            // OnlyMove is one ranking system among the servers, listed first. Its
-            // rank is the raw, untimed value, labelled straight off the shared ladder
-            // (no clamp — see internalRankToServerRank).
-            addRow('OnlyMove', rankValue, rankToLabel);
+    // One system per row: bold name on the left, "<rank> (<progress>%)" on the
+    // right. rankProgress (shared/rank-math.js) is THE decimal-rank →
+    // {label, percent} decomposition — round band, progress from the band's
+    // lower edge, GoR/EGF-consistent. `labelFor` selects the label space (index
+    // for OnlyMove, ladder-clamped server-scalar for the servers). The
+    // percentage is a smaller, muted span so the rank stays the focus.
+    const grid = modalRankGrid();
+    const addRow = (name, value, labelFor) => {
+        const { label: rankLabel, percent } = rankProgress(value, labelFor);
+        const label = document.createElement('div');
+        label.textContent = name;
+        label.className = 'modal-rank-label';
+        const val = document.createElement('div');
+        val.className = 'modal-rank-value';
+        val.textContent = rankLabel + ' ';
+        const pct = document.createElement('span');
+        pct.textContent = `(${percent}%)`;
+        pct.className = 'modal-rank-pct';
+        val.appendChild(pct);
+        grid.appendChild(label);
+        grid.appendChild(val);
+    };
 
-            // Then each server: the time-adjusted rank translated through its
-            // coupling to a continuous server scalar, labels ladder-clamped.
-            const serverLabel = band => rankToLabel(clampRankBand(band));
-            for (const server of RANK_TRANSLATION_SERVERS) {
-                const s = internalRankToServerRank(adjRank, server);
-                if (Number.isFinite(s)) addRow(server, s, serverLabel);
-            }
+    // OnlyMove is one ranking system among the servers, listed first. Its rank is
+    // the raw, untimed value, labelled straight off the shared ladder (no clamp —
+    // see internalRankToServerRank).
+    addRow('OnlyMove', rankValue, rankToLabel);
 
-            modal.appendChild(grid);
-
-            modal.appendChild(modalButtonRow([
-                modalButton(getTerm('rankTranslationClose'), close),
-            ]));
-        },
-    });
+    // Then each server: the time-adjusted rank translated through its coupling to
+    // a continuous server scalar, labels ladder-clamped.
+    const serverLabel = band => rankToLabel(clampRankBand(band));
+    for (const server of RANK_TRANSLATION_SERVERS) {
+        const v = internalRankToServerRank(adjRank, server);
+        if (Number.isFinite(v)) addRow(server, v, serverLabel);
+    }
+    frag.appendChild(grid);
+    return frag;
 }

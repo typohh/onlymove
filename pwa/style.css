@@ -362,8 +362,8 @@ input, textarea, [contenteditable],
     justify-content: center;
     margin-top: 0.1429em;
 }
-/* Two-column (label, value) grid shared by the rank-survey and
-   rank-translation dialogs. */
+/* Two-column (label, value) grid shared by the rank-survey dialog and the
+   rank-translation bubble. */
 .modal-rank-grid {
     display: grid;
     grid-template-columns: max-content max-content;
@@ -915,9 +915,9 @@ input, textarea, [contenteditable],
 
 
 /* --- Modal notes and captions ----------------------------------------------
-   A line of explanation under a dialog's title: small and muted, so it reads
-   as a note rather than a second heading. Shared by the rank survey and the
-   rank translation dialog. */
+   A line of explanation under a title: small and muted, so it reads as a note
+   rather than a second heading. Shared by the rank-survey dialog and the
+   rank-translation bubble. */
 .modal-note {
     font-size: 0.8em;
     color: var(--ink-muted);
@@ -925,8 +925,8 @@ input, textarea, [contenteditable],
     margin: 0 auto 0.3571em;
     text-align: center;
 }
-/* A value cell in the rank grid: left-set inside the centred modal, so rows of
-   different widths keep one edge against their labels. */
+/* A value cell in the rank grid: left-set inside its centred container, so rows
+   of different widths keep one edge against their labels. */
 .modal-rank-value {
     text-align: left;
 }
@@ -2118,6 +2118,26 @@ body {
        lines; a one-line hint is unaffected. */
     white-space: pre-line;
 }
+/* A bubble whose body is a small table rather than a sentence (the rank
+   translation). The sentence layout — one narrow measure, pre-line — is what a
+   structured body has to be freed from, and the grid inside brings its own
+   muted tones, which are mixed toward the bubble's own ink so they read on the
+   blue fill instead of against the app's background. */
+.ui-bubble-body.ui-bubble-rich {
+    max-width: min(24em, calc(0.9 * var(--app-w)));
+    white-space: normal;
+    text-align: center;
+}
+.ui-bubble-rich .modal-note,
+.ui-bubble-rich .modal-rank-pct {
+    color: color-mix(in srgb, var(--ui-bubble-fg) 62%, transparent);
+}
+/* The first line of a rich body, naming what the reading is. */
+.ui-bubble-title {
+    font-weight: bold;
+    margin-bottom: 0.2em;
+}
+
 /* Arrow = a square rotated 45°, carrying the outline on its two OUTER edges
    only — a border-triangle can't carry an outline, so it would disappear on
    same-tone backgrounds. It sits IN FRONT of the body (z 2) and straddles the

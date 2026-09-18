@@ -373,9 +373,10 @@ const updateSolvingModeUI = () => {
         text1Elements.forEach(element => {
             element.classList.add('progress-bar-wrapper');
             element.style.setProperty('--progress', `${progress}%`);
-            // Tappable: opens the server rank-translation modal (main.js).
+            // Tappable: opens the server rank-translation bubble (main.js wires
+            // the hint). No `title` — the native tooltip would stand beside the
+            // bubble saying the same thing.
             element.style.cursor = 'pointer';
-            element.title = getTerm('rankTranslationTitle');
         });
 
 
@@ -596,20 +597,20 @@ import { displayOverlay, fadeOverlay, showModal, modalTitle } from './overlays.j
 
 
 
-// Function to show capture details when user clicks on capture score
-export function showCaptureDetails() {
-    if (!state.kifuReader) return;
+/**
+ * The bubble body behind the header's capture score: how the one number shown
+ * is arrived at. Returns null with no position loaded, which the hint anchor
+ * reads as "nothing to say", so the readout is inert rather than empty.
+ */
+export function captureDetailsText() {
+    if (!state.kifuReader) return null;
     const { komi, blackCaptures, whiteCaptures, score } = computeCaptureScore();
-
-    const detailText = `${getTerm('komi')}: ${komi}
-` +
-        `${getTerm('blackCaptures')}: ${blackCaptures}
-` +
-        `${getTerm('whiteCaptures')}: ${whiteCaptures}
-` +
-        `${getTerm('whiteAdjustment')}: ${formatScore(score)}`;
-
-    alert(detailText);
+    return [
+        `${getTerm('komi')}: ${komi}`,
+        `${getTerm('blackCaptures')}: ${blackCaptures}`,
+        `${getTerm('whiteCaptures')}: ${whiteCaptures}`,
+        `${getTerm('whiteAdjustment')}: ${formatScore(score)}`,
+    ].join('\n');
 }
 
 export function updateBoardSize() {

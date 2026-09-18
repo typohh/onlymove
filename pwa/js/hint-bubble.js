@@ -16,6 +16,12 @@
 // pointerdown anywhere else, and on a resize or scroll — the last because the
 // bubble is placed once against the anchor's position and does not follow it.
 //
+// A hint's content is a sentence, or a Node where the reading is a small table
+// (the rank translation). Either way it is resolved AT OPEN, and a resolver
+// that returns nothing DECLINES: the anchor stays inert for that moment rather
+// than opening an empty bubble. That is what lets a permanently-wired control
+// carry a hint that only applies in one app mode.
+//
 // The bubble itself is js/bubble.js, shared with the onboarding tips; styling is
 // the `ui-bubble` + `.hint-btn` blocks in style.css.
 
@@ -78,17 +84,20 @@ function openHint(button, text, passthrough) {
 }
 
 /**
- * Make `anchor` (any element) open a hint bubble with `text` — a string, or a
- * function returning one, resolved each time the bubble opens so a reading
- * that is costly or that changes with state is computed on demand rather than
- * at render. The anchor keeps its own content; this wires the interaction only.
- * The text doubles as the accessible name when it is a string.
+ * Make `anchor` (any element) open a hint bubble with `content` — a string or a
+ * Node, or a function returning one, resolved each time the bubble opens so a
+ * reading that is costly or that changes with state is computed on demand
+ * rather than at render. A resolver returning null, undefined or '' declines,
+ * and nothing opens. The anchor keeps its own content; this wires the
+ * interaction only. A string doubles as the accessible name; anything else
+ * leaves the anchor to be named by its own content, which is what a hint ON a
+ * readout wants — the readout's value is the name, in every mode.
  */
-export function hintAnchor(anchor, text) {
-    const resolve = () => (typeof text === 'function' ? text() : text);
+export function hintAnchor(anchor, content) {
+    const resolve = () => (typeof content === 'function' ? content() : content);
     anchor.setAttribute('role', 'button');
     anchor.setAttribute('tabindex', '0');
-    if (typeof text === 'string') anchor.setAttribute('aria-label', text);
+    if (typeof content === 'string') anchor.setAttribute('aria-label', content);
 
     const toggle = () => {
         if (openFor === anchor && pinned) { closeHint(); return; }
@@ -99,7 +108,9 @@ export function hintAnchor(anchor, text) {
             pinned = true;
             return;
         }
-        openHint(anchor, resolve(), false);
+        const resolved = resolve();
+        if (!resolved) { closeHint(); return; }
+        openHint(anchor, resolved, false);
         pinned = true;
     };
 
@@ -114,7 +125,11 @@ export function hintAnchor(anchor, text) {
         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
     });
     anchor.addEventListener('pointerenter', () => {
-        if (canHover() && openFor !== anchor) { openHint(anchor, resolve(), true); pinned = false; }
+        if (!canHover() || openFor === anchor) return;
+        const resolved = resolve();
+        if (!resolved) return;
+        openHint(anchor, resolved, true);
+        pinned = false;
     });
     anchor.addEventListener('pointerleave', () => {
         if (canHover() && openFor === anchor && !pinned) closeHint();
