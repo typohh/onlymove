@@ -131,7 +131,7 @@ const localization = {
     confirmNo: '取消',
     shareLink: '分享链接',
     shareImage: '分享图片',
-    shareBoth: '分享两者',
+    shareBoth: '分享图片和链接',
     preparingImage: '正在准备图片…',
     shareFailed: '分享失败',
     copyLinkManually: '请手动复制此链接：',
@@ -198,7 +198,6 @@ const localization = {
     rankSurveySubmit: '提交',
     rankSurveyDismiss: '稍后再说',
     rankTranslationTitle: '你在各平台的段级位',
-    rankTranslationClose: '关闭',
     rankProgressCaption: '（升到下一段级位的进度）',
     rankConfidenceFormat: '您的段位估计精度为 ± {ci} 子（95% 置信区间）。',
 
@@ -352,7 +351,7 @@ const localization = {
     confirmNo: 'キャンセル',
     shareLink: 'リンクを共有',
     shareImage: '画像を共有',
-    shareBoth: '両方を共有',
+    shareBoth: '画像とリンクを共有',
     preparingImage: '画像を準備中…',
     shareFailed: '共有に失敗しました',
     copyLinkManually: 'このリンクを手動でコピーしてください：',
@@ -419,7 +418,6 @@ const localization = {
     rankSurveySubmit: '送信',
     rankSurveyDismiss: '後で',
     rankTranslationTitle: '各サーバーでのあなたの段級位',
-    rankTranslationClose: '閉じる',
     rankProgressCaption: '（次のランクへの進捗）',
     rankConfidenceFormat: 'あなたのランクは ± {ci} 子の精度で推定されています（95% 信頼区間）。',
 
@@ -573,7 +571,7 @@ const localization = {
     confirmNo: '취소',
     shareLink: '링크 공유',
     shareImage: '이미지 공유',
-    shareBoth: '모두 공유',
+    shareBoth: '이미지와 링크 공유',
     preparingImage: '이미지를 준비하는 중…',
     shareFailed: '공유 실패',
     copyLinkManually: '이 링크를 직접 복사하세요:',
@@ -640,7 +638,6 @@ const localization = {
     rankSurveySubmit: '제출',
     rankSurveyDismiss: '나중에',
     rankTranslationTitle: '각 서버에서의 내 급/단',
-    rankTranslationClose: '닫기',
     rankProgressCaption: '(다음 급/단까지의 진행도)',
     rankConfidenceFormat: '당신의 랭크는 ± {ci} 점 이내로 추정됩니다 (95% 신뢰구간).',
 
@@ -828,7 +825,7 @@ const localization = {
     confirmNo: 'Cancel',
     shareLink: 'Share link',
     shareImage: 'Share image',
-    shareBoth: 'Share both',
+    shareBoth: 'Share image and link',
     preparingImage: 'Preparing image…',
     shareFailed: 'Failed to share',
     copyLinkManually: 'Copy this link manually:',
@@ -895,7 +892,6 @@ const localization = {
     rankSurveySubmit: 'Submit',
     rankSurveyDismiss: 'Not now',
     rankTranslationTitle: 'Your rank on each server',
-    rankTranslationClose: 'Close',
     rankProgressCaption: '(progress towards next rank)',
     rankConfidenceFormat: 'Your rank is estimated to within ± {ci} ranks (95% confidence).'
   }
