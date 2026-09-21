@@ -2,18 +2,25 @@
 //
 // GET /leaderboard — a standalone, directly-linkable, server-rendered page (loads
 // without booting the tsumego SPA). Computes on read (no cron blob); a short edge
-// cache bounds D1 reads under traffic. Lists every player active in the past week
-// who has at least RANK_START_MIN solves here (so their onlymove rank is known):
-// a linked EGD/AGA identity shows its name, a player who chose a leaderboard
-// alias shows that, and everyone else shows "Anonymous".
-// Players still below the gate are only counted, in a footer tally.
+// cache bounds D1 reads under traffic. The default board is the WEEKLY one: every
+// player active in the past week who has at least RANK_START_MIN solves here (so
+// their onlymove rank is known). A PERIOD selector switches to any finished month
+// that has been frozen into `monthly_leaderboards` (`?month=YYYY-MM`), which shows
+// each player's PEAK rank during that month, among players active in it. In both
+// modes identity resolves the same way: a linked EGD/AGA identity shows its name, a
+// player who chose a leaderboard alias shows that, and everyone else shows
+// "Anonymous"; players below the gate are only counted, in a footer tally (weekly
+// only — the monthly snapshot contains only ranked players).
 // A UNITS selector — onlymove, or any ranking system we hold a coupling for
-// (RANK_SYSTEMS) — picks the frame both value columns speak. It reads `?units=`
+// (RANK_SYSTEMS) — picks the frame the value column speaks. It reads `?units=`
 // first (so /leaderboard?units=Fox opens on Fox), then the per-device preference in
 // localStorage; the selection is mirrored back into the URL, so the address bar is
 // always shareable. The RESPONSE does not depend on the param — every frame is
 // inlined in the row data and the switch is pure client work — so the param costs
-// only its own edge-cache entry, never a second D1 read path. Every value cell renders as "rank" or "rank (pct%)", the percent being
+// only its own edge-cache entry, never a second D1 read path. The PERIOD, in
+// contrast, does change the response (a different frozen month), so selecting one
+// is a navigation rather than a pure client switch.
+// Every value cell renders as "rank" or "rank (pct%)", the percent being
 // the floored progress toward the next rank in the selected frame; the raw GoR /
 // AGA rating numbers are never displayed, they only reach here as the shared-scale
 // scalars the cells sort by.
@@ -24,18 +31,25 @@
 //     readLeaderboardRows. A declaration is a band label, so it shows the band
 //     alone; a heartbeat resolves WITHIN the band and shows the percent too
 //     (GoR 2389 -> "4d (39%)"). Blank in onlymove units — an onlymove rank is
-//     measured here, never declared.
+//     measured here, never declared. WEEKLY ONLY: a declaration is a current
+//     claim with no historical counterpart, so the monthly board omits the column.
 //   * Predicted — the current estimate from their solving here, coupled into the
 //     selected system's frame (onlymove units: the untimed internal rank itself,
-//     matching the front-page rank list).
+//     matching the front-page rank list). In monthly mode this column is instead
+//     "Highest": the PEAK onlymove rank the player held during that month, and each
+//     system frame is that same peak time-adjusted and coupled.
 // Any header sorts (cells sort by their underlying continuous scalar).
 
-import { readLeaderboardRows, RANK_START_MIN, RANK_SYSTEMS } from '../leaderboard.js';
+import {
+    readLeaderboardRows, readMonthlyLeaderboard, listMonthlyLeaderboards,
+    RANK_START_MIN, RANK_SYSTEMS,
+} from '../leaderboard.js';
 import { rankProgress, rankToLabel, clampRankBand } from '../../shared/rank-math.js';
 import { composeAliasAll } from '../../shared/alias-words.js';
 import { baseCss, ESC_SNIPPET, flag } from './page-shell.js';
 
-const ACTIVE_DAYS = 7;   // the visible board = players active in the past week
+const ACTIVE_DAYS = 7;   // the visible weekly board = players active in the past week
+const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;   // a calendar-month key, 'YYYY-MM'
 
 // Shown when we can't resolve a country for a row (no GoR/binding/geo-IP, or a
 // hidden profile). The UN flag reads as "nation unspecified" and renders as a real
@@ -53,10 +67,14 @@ const UNKNOWN_FLAG = '🇺🇳';
 const STR = {
     en: {
         leaderboard: 'Weekly Leaderboard',
+        monthlyBoard: 'Monthly Leaderboard',
         activeWindow: '(active in the past {days} days)',
+        period: 'Period',
+        weekly: 'Weekly',
         player: 'Player',
         declared: 'Declared',
         predicted: 'Predicted',
+        highest: 'Highest',
         units: 'Units',
         anonymous: 'Anonymous',
         empty: 'No players yet.',
@@ -65,10 +83,14 @@ const STR = {
     },
     zh: {
         leaderboard: '每周排行榜',
+        monthlyBoard: '每月排行榜',
         activeWindow: '（过去 {days} 天内活跃）',
+        period: '期间',
+        weekly: '每周',
         player: '玩家',
         declared: '申报',
         predicted: '预测',
+        highest: '最高',
         units: '单位',
         anonymous: '匿名',
         empty: '暂无玩家。',
@@ -77,10 +99,14 @@ const STR = {
     },
     ja: {
         leaderboard: '週間ランキング',
+        monthlyBoard: '月間ランキング',
         activeWindow: '（過去{days}日間に活動）',
+        period: '期間',
+        weekly: '週間',
         player: 'プレイヤー',
         declared: '申告',
         predicted: '予測',
+        highest: '最高',
         units: '単位',
         anonymous: '匿名',
         empty: 'まだプレイヤーがいません。',
@@ -89,10 +115,14 @@ const STR = {
     },
     ko: {
         leaderboard: '주간 순위표',
+        monthlyBoard: '월간 순위표',
         activeWindow: '(지난 {days}일간 활동)',
+        period: '기간',
+        weekly: '주간',
         player: '플레이어',
         declared: '신고',
         predicted: '예측',
+        highest: '최고',
         units: '단위',
         anonymous: '익명',
         empty: '아직 플레이어가 없습니다.',
@@ -101,14 +131,23 @@ const STR = {
     },
 };
 
-export async function handleLeaderboard(env) {
+export async function handleLeaderboard(request, env) {
+    // The period selector's options: every frozen month, newest first. `?month=` is
+    // honoured only when it names one of them, so a hand-typed or stale month falls
+    // back to the weekly board rather than rendering an empty table.
+    const months = await listMonthlyLeaderboards(env);
+    let requested = null;
+    try { requested = new URL(request.url).searchParams.get('month'); } catch (e) { requested = null; }
+    const month = (requested && MONTH_RE.test(requested) && months.includes(requested)) ? requested : null;
+
     let rows = [], belowMin = 0;
     try {
-        ({ rows, belowMin } = await readLeaderboardRows(env, { activeDays: ACTIVE_DAYS }));
+        if (month) ({ rows } = await readMonthlyLeaderboard(env, month));
+        else ({ rows, belowMin } = await readLeaderboardRows(env, { activeDays: ACTIVE_DAYS }));
     } catch (e) {
         console.error('leaderboard read failed:', e);
     }
-    return new Response(renderPage(rows, belowMin), {
+    return new Response(renderPage({ rows, belowMin, month, months }), {
         status: 200,
         headers: {
             'Content-Type': 'text/html; charset=utf-8',
@@ -135,7 +174,7 @@ function cell(v, serverFrame, exact = true) {
     return exact ? { v, t: p.label, pct: p.percent } : { v, t: p.label };
 }
 
-function renderPage(rows, belowMin) {
+function renderPage({ rows, belowMin = 0, month = null, months = [] }) {
     // Per row, two maps keyed by unit mode ('om' or a RANK_SYSTEMS name), each entry
     // a cell as above:
     //   `est`  — the onlymove estimate. 'om' is the UNTIMED internal rank; each
@@ -143,9 +182,12 @@ function renderPage(rows, belowMin) {
     //            frame carries its OWN sort value, because the untimed and
     //            time-adjusted orders genuinely differ per user by the personal time
     //            dock — so switching units must re-sort by the displayed frame.
+    //            In MONTHLY mode the same two maps carry the month's PEAK instead of
+    //            the current rank (see readMonthlyLeaderboard).
     //   `decl` — the player's rank on that system (declaration, or the linked
     //            federation heartbeat where there is one — see readLeaderboardRows).
-    //            No 'om' entry: an onlymove rank is measured, never declared.
+    //            No 'om' entry: an onlymove rank is measured, never declared. Empty
+    //            in monthly mode, where the column is not rendered at all.
     const data = rows.map((r) => {
         const est = {};
         const om = cell(r.currentInternal, false);
@@ -187,26 +229,52 @@ function renderPage(rows, belowMin) {
     // rendered server-side rather than through the localization prelude.
     const unitOptions = ['<option value="om">OnlyMove</option>']
         .concat(RANK_SYSTEMS.map((s) => `<option value="${s}">${s}</option>`))
-        .join('\n  ');
+        .join('\n    ');
+    // The period selector: weekly (the empty value = the param's absence, the
+    // default) plus every frozen month, newest first. The values are the machine
+    // month keys; the prelude rewrites each label to the viewer's own month name.
+    const periodOptions = [`<option value="">Weekly</option>`]
+        .concat(months.map((m) => `<option value="${m}">${m}</option>`))
+        .join('\n    ');
     // Footer tally: active players still below the list-entry gate (no per-user
     // sample count is shown; this aggregate is the only nod to them). The English
-    // text here is the no-JS default; the prelude re-renders it localized.
-    const belowNote = belowMin
+    // text here is the no-JS default; the prelude re-renders it localized. Only the
+    // weekly board has sub-gate players to tally — a monthly snapshot holds only
+    // players who reached the gate — so it is omitted in monthly mode.
+    const belowNote = (!month && belowMin)
         ? `<p id="lbBelow">${belowMin} more active player${belowMin === 1 ? '' : 's'} ${belowMin === 1 ? 'has' : 'have'} fewer than ${RANK_START_MIN} solves and ${belowMin === 1 ? "isn't" : "aren't"} shown yet.</p>`
         : '';
+    // Heading sub-label: the week's activity window on the live board, the frozen
+    // month's own name (rewritten on the client) on a historical one.
+    const subSpan = month
+        ? `<span class="hnote" id="lbSub">${month}</span>`
+        : `<span class="hnote" id="lbActive">(active in the past ${ACTIVE_DAYS} days)</span>`;
+    // Weekly is the only mode with a Declared column and the only one whose value
+    // header is "Predicted"; the monthly board's single value column is "Highest".
+    const headCols = month
+        ? `<th class="player" data-sort="name" id="thPlayer">Player</th>
+      <th data-sort="est" id="thPred">Highest</th>`
+        : `<th class="player" data-sort="name" id="thPlayer">Player</th>
+      <th data-sort="decl" id="thDecl">Declared</th>
+      <th class="pred-start" data-sort="est" id="thPred">Predicted</th>`;
+    const colCount = month ? 3 : 4;
+    const pageTitle = month
+        ? `onlymove — Monthly Leaderboard (${month})`
+        : 'onlymove — Weekly Leaderboard';
 
     return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>onlymove — Weekly Leaderboard</title>
-<meta name="description" content="Weekly leaderboard of Only Move solvers who linked their EGF or AGA player record, with their estimated and verified ranks.">
+<title>${pageTitle}</title>
+<meta name="description" content="Leaderboard of Only Move solvers — the live week, and the highest rank each player reached in any finished month.">
 <link rel="canonical" href="https://onlymove.net/leaderboard">
 <style>
   ${baseCss(760)}
-  /* The activity window, inline after the title — the board IS the past week, so
-     it belongs in the heading rather than as a footnote about who is missing. */
+  /* The activity window / frozen month, inline after the title — the board IS
+     either the past week or one month, so it belongs in the heading rather than
+     as a footnote about who is missing. */
   th, td { padding: .5rem .5rem; text-align: right; white-space: nowrap; }
   td:nth-child(2) { text-align: left; width: 99%; }
   th.player { text-align: left; }
@@ -237,34 +305,35 @@ function renderPage(rows, belowMin) {
      AND no alias, "pseudo" means an alias was chosen. */
   .name.anon,
   .name.pseudo { color: var(--ink-muted); font-style: italic; }
-  /* Units selector — a dropdown above the table. There are as many options as
-     there are ranking systems we couple to, so this is a <select> rather than a
-     segmented control: the list grows with rank_map.json without ever wrapping.
-     Colours are the FORM-CONTROL system pair (Field/FieldText), not inherit +
-     transparent: the popup list is painted by the OS, which leaves it light in
-     dark mode, so inheriting the page's light-on-dark text renders the open list
-     white on white. The system pair flips with the theme on both parts. */
-  .units { margin: 0.6rem 0 1.2rem; }
-  .units select option { color: FieldText; background: Field; }
+  /* Period + Units selectors — a row of dropdowns above the table. Both lists grow
+     without wrapping (the months without bound, the systems with rank_map.json), so
+     they are <select>s rather than segmented controls. Colours are the FORM-CONTROL
+     system pair (Field/FieldText), not inherit + transparent: the popup list is
+     painted by the OS, which leaves it light in dark mode, so inheriting the page's
+     light-on-dark text renders the open list white on white. The system pair flips
+     with the theme on both parts. */
+  .controls { display: flex; flex-wrap: wrap; gap: .5rem; margin: 0.6rem 0 1.2rem; }
+  .controls select option { color: FieldText; background: Field; }
   @media (max-width: 420px) {
     body { padding-left: .6rem; padding-right: .6rem; }
   }
 </style>
 </head>
 <body>
-<h1><span id="lbH1">Weekly Leaderboard</span> <span class="hnote" id="lbActive">(active in the past ${ACTIVE_DAYS} days)</span></h1>
-<div class="units">
+<h1><span id="lbH1">${month ? 'Monthly Leaderboard' : 'Weekly Leaderboard'}</span> ${subSpan}</h1>
+<div class="controls">
+  <select id="periodSel" aria-label="Period">
+    ${periodOptions}
+  </select>
   <select id="unitsSel" aria-label="Units">
-  ${unitOptions}
+    ${unitOptions}
   </select>
 </div>
 <table>
   <thead>
     <tr>
       <th>#</th>
-      <th class="player" data-sort="name" id="thPlayer">Player</th>
-      <th data-sort="decl" id="thDecl">Declared</th>
-      <th class="pred-start" data-sort="est" id="thPred">Predicted</th>
+      ${headCols}
     </tr>
   </thead>
   <tbody id="rows"></tbody>
@@ -279,7 +348,8 @@ function renderPage(rows, belowMin) {
 // for the render script.
 (function () {
   var STR = ${strJson};
-  var CFG = { min: ${RANK_START_MIN}, belowMin: ${belowMin}, activeDays: ${ACTIVE_DAYS} };
+  var CFG = { min: ${RANK_START_MIN}, belowMin: ${belowMin}, activeDays: ${ACTIVE_DAYS},
+              month: ${JSON.stringify(month)}, colCount: ${colCount} };
   function getLang() {
     var l = navigator.language || 'en';
     if (l.indexOf('zh') === 0) return 'zh';
@@ -296,18 +366,39 @@ function renderPage(rows, belowMin) {
     }
     return s;
   }
+  // A 'YYYY-MM' key -> the viewer's own month name. Intl rather than four
+  // hand-written month tables: the page is edge-cached, so the language is only
+  // known here, and Intl already carries every language's names and order.
+  function monthLabel(key) {
+    try {
+      var p = String(key).split('-');
+      return new Intl.DateTimeFormat(LANG, { year: 'numeric', month: 'long' })
+        .format(new Date(Date.UTC(Number(p[0]), Number(p[1]) - 1, 1)));
+    } catch (e) { return String(key); }
+  }
   window.LB = { t: t, lang: LANG, cfg: CFG };
 
   function setText(id, s) { var el = document.getElementById(id); if (el) el.textContent = s; }
   document.documentElement.lang = LANG;
-  document.title = 'onlymove — ' + t('leaderboard');
-  setText('lbH1', t('leaderboard'));
+  document.title = 'onlymove — ' + (CFG.month ? t('monthlyBoard') + ' (' + monthLabel(CFG.month) + ')' : t('leaderboard'));
+  setText('lbH1', CFG.month ? t('monthlyBoard') : t('leaderboard'));
   setText('lbActive', t('activeWindow', { days: CFG.activeDays }));
+  setText('lbSub', CFG.month ? monthLabel(CFG.month) : '');
   setText('thPlayer', t('player'));
   setText('thDecl', t('declared'));
-  setText('thPred', t('predicted'));
+  setText('thPred', CFG.month ? t('highest') : t('predicted'));
   var us = document.getElementById('unitsSel');
   if (us) us.setAttribute('aria-label', t('units'));   // the only remaining use of the units string
+  // The period options render as raw month keys server-side (the page may be
+  // cached for a language it cannot know); localize them here, and the empty
+  // "Weekly" value with the weekly string.
+  var ps = document.getElementById('periodSel');
+  if (ps) {
+    ps.setAttribute('aria-label', t('period'));
+    for (var pi = 0; pi < ps.options.length; pi++) {
+      ps.options[pi].textContent = ps.options[pi].value ? monthLabel(ps.options[pi].value) : t('weekly');
+    }
+  }
   var below = document.getElementById('lbBelow');
   if (below && CFG.belowMin > 0) {
     below.textContent = t(CFG.belowMin === 1 ? 'belowNoteOne' : 'belowNoteMany',
@@ -318,6 +409,8 @@ function renderPage(rows, belowMin) {
 <script>
 (function () {
   var DATA = ${json};
+  var MONTHLY = !!window.LB.cfg.month;   // a frozen month, not the live week
+  var COLCOUNT = window.LB.cfg.colCount || 4;
   var sortKey = 'est'; // 'name' | 'decl' | 'est'
   var sortDir = -1;    // 1 ascending, -1 descending
   var tbody = document.getElementById('rows');
@@ -462,14 +555,17 @@ function renderPage(rows, belowMin) {
 
   function render() {
     updateHeaders();
-    if (!DATA.length) { tbody.innerHTML = '<tr><td colspan="4" class="empty">' + esc(window.LB.t('empty')) + '</td></tr>'; return; }
+    if (!DATA.length) { tbody.innerHTML = '<tr><td colspan="' + COLCOUNT + '" class="empty">' + esc(window.LB.t('empty')) + '</td></tr>'; return; }
     var sorted = DATA.slice().sort(cmp);
     tbody.innerHTML = sorted.map(function (r, i) {
-      return '<tr><td class="rank">' + (i + 1) + '</td>' +
+      // The Declared cell exists only on the weekly board (see the module note);
+      // COLCOUNT tracks the header so the empty-state row still spans the table.
+      var cells = '<td class="rank">' + (i + 1) + '</td>' +
         '<td>' + (r.flag ? r.flag + ' ' : '') +
-        '<span class="name' + (r.anon ? ' anon' : (r.alias ? ' pseudo' : '')) + '">' + esc(nameOf(r)) + '</span></td>' +
-        '<td class="decl">' + declText(r) + '</td>' +
-        '<td class="val pred-start">' + estText(r) + '</td></tr>';
+        '<span class="name' + (r.anon ? ' anon' : (r.alias ? ' pseudo' : '')) + '">' + esc(nameOf(r)) + '</span></td>';
+      if (!MONTHLY) cells += '<td class="decl">' + declText(r) + '</td>';
+      cells += '<td class="val' + (MONTHLY ? '' : ' pred-start') + '">' + estText(r) + '</td>';
+      return '<tr>' + cells + '</tr>';
     }).join('');
     fitToWidth();
   }
@@ -484,6 +580,22 @@ function renderPage(rows, belowMin) {
     syncUrl();
     render();
   });
+
+  // Period selector. Unlike units this is a NAVIGATION, not a display toggle: the
+  // server inlines only the selected month's rows, so switching re-requests the
+  // page with the month query param (weekly = the param's absence, so it stays
+  // canonical and remains the default). The unit selection is carried across in
+  // the URL and re-applied on load.
+  var periodSel = document.getElementById('periodSel');
+  if (periodSel) {
+    periodSel.value = window.LB.cfg.month || '';
+    periodSel.addEventListener('change', function () {
+      var u = new URL(location.href);
+      if (periodSel.value) u.searchParams.set('month', periodSel.value);
+      else u.searchParams.delete('month');
+      location.assign(u.pathname + u.search);
+    });
+  }
 
   syncUrl();
   render();

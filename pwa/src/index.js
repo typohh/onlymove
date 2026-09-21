@@ -17,7 +17,7 @@ import { handleProfileHide, handleProfile } from './handlers/profile.js';
 import { handleAlias } from './handlers/alias.js';
 import { handleGoogleSignIn, handleGoogleLink, handleGoogleUnlink } from './handlers/google.js';
 import { handleRefit } from './handlers/refit.js';
-import { reconcileBuffers, pruneIdleLeaderboardRows, refreshAgaRatings } from './leaderboard.js';
+import { reconcileBuffers, pruneIdleLeaderboardRows, refreshAgaRatings, recordMonthlyLeaderboards } from './leaderboard.js';
 
 // Per-IP rate-limited endpoints, checked BEFORE any handler touches D1 so a
 // flood is dropped by a cheap Worker invocation instead of spending D1 quota.
@@ -74,8 +74,10 @@ const GET_ROUTES = [
       headers: { ...CORS_HEADERS, 'Content-Type': 'text/plain' },
     }) },
   { path: '/server-stats', handler: (request, env) => handleServerStats(env, request) },
-  // Standalone EGD leaderboard page (HTML).
-  { path: '/leaderboard', handler: (request, env) => handleLeaderboard(env) },
+  // Standalone EGD leaderboard page (HTML). `?month=YYYY-MM` opens a frozen
+  // historical month instead of the live week; the handler validates it against
+  // the months that exist and falls back to weekly.
+  { path: '/leaderboard', handler: (request, env) => handleLeaderboard(request, env) },
   // Standalone community statistics page (HTML), rendered from the cached
   // server_stats blob; /server-stats above is its JSON form.
   { path: '/statistics', handler: (request, env) => handleStatistics(env, request) },
@@ -173,6 +175,12 @@ export default {
       ctx.waitUntil(pruneIdleLeaderboardRows(env).then(() => reconcileBuffers(env)));
       ctx.waitUntil(refreshAgaRatings(env));
     }
+    // Monthly historical leaderboard: freeze the calendar month that just ended
+    // into `monthly_leaderboards`. Runs on EVERY hourly tick rather than only at
+    // 00:00 on the 1st — the function no-ops once the month is written, so a tick
+    // dropped by the freeze or by the platform is repaired by the next one instead
+    // of losing the month. One small D1 read on the ticks that do nothing.
+    ctx.waitUntil(recordMonthlyLeaderboards(env));
   },
 };
 

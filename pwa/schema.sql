@@ -297,6 +297,18 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_external_ids_aga_id  ON external_ids(aga_i
 -- whose couplings are fitted against TIME-ADJUSTED ratings) can add it forward. It
 -- used to be baked into the stored rank and re-derived from `buffer` — a full buffer
 -- pass + weighted median per row — on every read.
+--
+-- `best_rank` / `best_rank_timed` / `best_rank_month` are the row's PEAK in the
+-- CURRENT UTC month: the highest (max) UNTIMED internal rank an OBSERVED attempt
+-- has reached this month, that same observation's TIME-ADJUSTED internal rank
+-- (the frame the server couplings speak), and the month those two belong to. A
+-- rank observed in a new month REPLACES the peak — the tracker resets at the
+-- boundary — and the month-change cron freezes the finished month into
+-- `monthly_leaderboards` without needing a reset of its own, since each row
+-- carries its own month key. The attempt paths and the offline re-rate rebuild
+-- (auxiliary/update_leaderboard_ranks.mjs) write these; the weekly reconcile does
+-- NOT, because a rebuild is not activity and would attribute an inactive user's
+-- recomputed rank to a month they never played.
 CREATE TABLE IF NOT EXISTS leaderboard (
     user_id            TEXT PRIMARY KEY,
     buffer             TEXT,
@@ -309,16 +321,37 @@ CREATE TABLE IF NOT EXISTS leaderboard (
     -- for the /leaderboard page: shows a flag for ANY active player, not just the
     -- registered/surveyed few. EGD-sourced country (GoR heartbeat, invitation) still
     -- wins over it — see readLeaderboardRows.
-    country            TEXT
+    country            TEXT,
+    best_rank          REAL,
+    best_rank_timed    REAL,
+    best_rank_month    TEXT
 );
 -- There is deliberately NO index on last_active. It would be maintained on
 -- EVERY novel /report (the hot-path UPDATE sets last_active each time, and D1
 -- bills index maintenance as rows written — thousands of writes/week), while
 -- the only queries it would serve (the /leaderboard page's active-past-week
--- filter, behind a 60s edge cache, and the weekly cron) full-scan a table the
--- weekly prune keeps at roughly weekly-active size — a few hundred rows read,
--- and D1 reads are ~1000x cheaper than writes. Revisit only if the table is
--- allowed to grow unbounded again.
+-- filter, behind a 60s edge cache, and the cron) full-scan a table the prune
+-- keeps small — a few hundred rows. The prune window is 5 weeks rather than one
+-- so a row active at the START of a month still exists at the month boundary for
+-- the monthly freeze; that is ~5x the weekly size and still a few thousand rows
+-- read, and D1 reads are ~1000x cheaper than writes. Revisit only if the table
+-- is allowed to grow unbounded again.
+--
+-- MONTHLY HISTORY. One row per finished UTC calendar month, written by the
+-- month-change cron (recordMonthlyLeaderboards) from the rows whose
+-- `best_rank_month` is that month. `data` is a JSON array of `[user_id,
+-- best_rank, best_rank_timed]` — RAW user ids by design: the snapshot must not
+-- bake in an identity, since a linked name can change or be unlinked, a
+-- self-chosen alias can be re-picked, and a profile can be hidden AFTER the
+-- month closed, and all three have to be respected by a later read. The page
+-- resolves identity on the fly off external_ids / user_aliases /
+-- hidden_profiles. A month is written once (the cron no-ops when the row
+-- exists), so a snapshot does not drift as the live rows are pruned or reset.
+CREATE TABLE IF NOT EXISTS monthly_leaderboards (
+    month      TEXT PRIMARY KEY,   -- 'YYYY-MM' (UTC)
+    data       TEXT NOT NULL,      -- JSON [[user_id, best_rank, best_rank_timed], ...]
+    created_at TEXT NOT NULL
+);
 
 -- RETIRED (2026-08-25). Registration invitations, from when reaching the
 -- leaderboard meant claiming a link an existing member minted for you. A user

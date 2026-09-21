@@ -265,11 +265,12 @@ async function computeServerStats(env) {
   }
 
   // Rank histogram (weakest→strongest) and country distribution of active players,
-  // both from ONE scan of the leaderboard table — the same small, weekly-pruned
-  // scan the /leaderboard page and cron already run, NOT another pass over the big
-  // tsumego_reports. Each player's rank is the real window MLE over their
-  // materialized attempt buffer, not a self-report and not a proxy off what they
-  // were served. See computeLeaderboardStats.
+  // both from ONE scan of the leaderboard table — the same small scan the
+  // /leaderboard page and cron already run (the table keeps 5 weeks of rows for the
+  // monthly freeze, but this reads only the trailing-week subset), NOT another pass
+  // over the big tsumego_reports. Each player's rank is the real window MLE over
+  // their materialized attempt buffer, not a self-report and not a proxy off what
+  // they were served. See computeLeaderboardStats.
   const { ranks, countries } = await computeLeaderboardStats(env);
 
   const data = {
@@ -309,9 +310,10 @@ async function computeServerStats(env) {
 // about that midpoint — a per-band offset whose VARIANCE averaging reduces, not its
 // bias, and which (with the pool of nearest loaded problems being one-sided out
 // there) reads a strong player too WEAK. A proper fit has neither, and needs no
-// serving assumption at all. D1 cost is unchanged — the leaderboard table is pruned
-// to roughly weekly-active size and was already scanned here for the country
-// distribution, so the histogram now rides that same scan instead of the
+// serving assumption at all. D1 cost is unchanged — the leaderboard table keeps 5
+// weeks of rows for the monthly freeze, but readActivePlayers filters to the
+// trailing week and the country distribution already scanned that subset here, so
+// the histogram now rides the same scan instead of the
 // lookup.txt + metadata.json asset walk it used to do.
 //
 // NOTE the population also changes: this counts players carrying a leaderboard rank

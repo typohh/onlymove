@@ -321,6 +321,15 @@ export function windowMLE(attempts) {
         const ll = attemptLogLik(attempts[j]);
         for (let i = 0; i < n; i++) lp[i] += w * ll[i];
     }
+    return posteriorFromLp(lp);
+}
+
+// The posterior (mean + se) from an UNNORMALISED log-density on the prior grid.
+// ONE definition, shared by windowMLE (which builds `lp` by summing the window)
+// and windowRankWalk (which maintains the same `lp` incrementally) — so the two
+// paths cannot normalize, centre or rescale differently.
+function posteriorFromLp(lp) {
+    const n = PRIOR_X.length;
     let mx = -Infinity;
     for (let i = 0; i < n; i++) if (lp[i] > mx) mx = lp[i];
     if (!Number.isFinite(mx)) return { R: PRIOR_MEAN, se: PRIOR_SD };
@@ -332,6 +341,94 @@ export function windowMLE(attempts) {
     if (!(s > 0)) return { R: PRIOR_MEAN, se: PRIOR_SD };
     const mean = sx / s;
     return { R: mean, se: Math.sqrt(Math.max(sxx / s - mean * mean, 0)) };
+}
+
+// Steps between from-scratch resyncs of the incremental sums below. The rescale
+// formulas are algebraically exact but accumulate floating-point error because
+// every step multiplies the whole `lp` vector, so `lp` is rebuilt from the window
+// every WALK_RESYNC steps to bound the drift. Resync is O(WIN_CAP·grid) and the
+// walks are hundreds of thousands of steps, so the amortised cost is negligible.
+const WALK_RESYNC = 256;
+
+// The SHOWN window rank after EVERY attempt in a history, in one forward pass —
+// the same posterior windowMLE computes (same trailing WIN_CAP positional
+// weights, same grid) but maintained incrementally instead of re-summed from
+// scratch at each step. `flatOrNull[i]` is the flattened i-th attempt in BUFFER
+// order (oldest -> newest), or null when the attempt is unusable (left the
+// corpus / malformed). Returns a Float64Array aligned 1:1 with the input, each
+// element displayRankFor(mean, se) or NaN below RANK_START_MIN usable attempts.
+//
+// Why incremental: the offline monthly-history rebuild walks a user's WHOLE
+// report history (hundreds of thousands of attempts corpus-wide), and calling
+// windowMLE per step is O(WIN_CAP) windows of grid work each — hours. `lp` here
+// is the weighted sum of the cached per-attempt log-likelihood vectors WITHOUT
+// the prior (which windowMLE folds in at construction and which no window update
+// touches), and the window only ever gains a tail and loses a head, so both
+// updates are O(grid):
+//
+//   append v (M -> M+1):  lp' = ll_v + (M/(M+1))·lp
+//   drop oldest u (M -> M-1):  lp' = (M/(M-1))·(lp - S/M),  S = Σ ll over the window
+//
+// (Appending shifts every remaining attempt one age older, which is exactly the
+// factor M/(M+1); dropping the oldest renormalises the remaining weights.) A
+// step that does both is the drop followed by the append. Only the valid
+// attempts enter `lp`, so M = usable count and never exceeds WIN_CAP. The prior
+// is added back once per output to form the full log-density.
+export function windowRankWalk(flatOrNull, cap = WIN_CAP) {
+    const n = flatOrNull.length;
+    const out = new Float64Array(n);
+    out.fill(NaN);
+    const G = PRIOR_X.length;
+    const lp = new Float64Array(G);   // weighted Σ ll, NO prior
+    const S = new Float64Array(G);    // Σ ll over the usable window
+    const full = new Float64Array(G); // PRIOR_LOG + lp, for the posterior
+    let len = 0;                      // usable attempts in the window (= M)
+    for (let i = 0; i < n; i++) {
+        if (i >= cap) {
+            const removed = flatOrNull[i - cap];
+            if (removed) {
+                const ll = attemptLogLik(removed);
+                if (len > 1) {
+                    const f = len / (len - 1);
+                    for (let k = 0; k < G; k++) lp[k] = f * (lp[k] - S[k] / len);
+                } else {
+                    lp.fill(0);
+                }
+                for (let k = 0; k < G; k++) S[k] -= ll[k];
+                len--;
+            }
+        }
+        const added = flatOrNull[i];
+        if (added) {
+            const ll = attemptLogLik(added);
+            const f = len / (len + 1);
+            for (let k = 0; k < G; k++) lp[k] = ll[k] + f * lp[k];
+            for (let k = 0; k < G; k++) S[k] += ll[k];
+            len++;
+        }
+        if (len >= RANK_START_MIN) {
+            for (let k = 0; k < G; k++) full[k] = PRIOR_LOG[k] + lp[k];
+            const p = posteriorFromLp(full);
+            out[i] = displayRankFor(p.R, p.se);
+        }
+        if ((i + 1) % WALK_RESYNC === 0) {
+            // Rebuild lp/S from the window in the SAME order windowMLE sums it.
+            const start = Math.max(0, i - cap + 1);
+            const usable = [];
+            for (let j = start; j <= i; j++) if (flatOrNull[j]) usable.push(flatOrNull[j]);
+            const M = usable.length;
+            lp.fill(0);
+            S.fill(0);
+            for (let a = 0; a < M; a++) {
+                const ll = attemptLogLik(usable[M - 1 - a]);
+                const w = (M - a) / M;
+                for (let k = 0; k < G; k++) lp[k] += w * ll[k];
+                for (let k = 0; k < G; k++) S[k] += ll[k];
+            }
+            len = M;
+        }
+    }
+    return out;
 }
 
 // Public window rank estimate from PRE-FLATTENED attempts (oldest -> newest).

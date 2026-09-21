@@ -16,9 +16,11 @@
 // whatever curve/params sit in pwa/tsumegos/ right now.
 //
 // Data flow (read-cost discipline — D1 bills rows read):
-//   reads  <- db/d1.sqlite  (the local mirror; run
+//   reads  <- db/d1.sqlite  for --remote / dry runs (the local mirror; run
 //             `./.venv/bin/python3 -m pipeline.fetch_database` FIRST so the
 //             leaderboard rows + tsumego_reports are fresh)
+//          <- the LOCAL miniflare D1 itself for --local, so the update is computed
+//             from the same data it writes and a dev session's newer rows are kept
 //   writes -> a generated SQL file, applied to the LOCAL miniflare D1
 //             (--local) or to production (--remote); neither = dry run
 //
@@ -51,6 +53,15 @@
 //                     (0 = the 1k/1d boundary) + its stones SE, plus the personal
 //                     time dock in rating units, each stored in its own column.
 // last_active is untouched.
+//
+// The monthly PEAK tracker (best_rank / best_rank_timed / best_rank_month) is
+// CLEARED for every row, not carried over: this script exists because the rank
+// scale changed, and a peak recorded on the old scale is not comparable with one
+// recorded on the new — keeping it would mix two scales in the same month's
+// snapshot, silently. Clearing can only OMIT a user from the current month's
+// board until their next novel /report seeds a fresh peak, whereas carrying a
+// stale-scale peak would publish a wrong number. The finished months already
+// frozen in monthly_leaderboards are untouched (they are history).
 //
 // (Before 2026-07-27 the columns held an EGF-frame rank, so this script's dry-run
 // output labelled a GoR scalar with the internal-rank labeller and printed nonsense
@@ -102,12 +113,17 @@
 // Usage (dry run by default; pick the apply target explicitly):
 //   node auxiliary/update_leaderboard_ranks.mjs                   # dry run: print + write SQL file
 //   node auxiliary/update_leaderboard_ranks.mjs --local           # ... and execute against the local miniflare D1
-//                                                                 #     (stop `npm run dev` first)
+//                                                                 #     (stop `npm run dev` first; the monthly columns
+//                                                                 #     and table are added automatically if missing)
 //   node auxiliary/update_leaderboard_ranks.mjs --remote          # ... against the REMOTE production D1
 //   node auxiliary/update_leaderboard_ranks.mjs --populate        # ALSO seed anonymous rows for users active in the
 //                                                                 #     past week with no leaderboard row (production
 //                                                                 #     only adds them lazily on their next /report)
 //   node auxiliary/update_leaderboard_ranks.mjs --user <id>       # limit to one user (repeatable; also scopes populate)
+//                                                                 #     and SKIPS the history rebuild (full-table only)
+//   node auxiliary/update_leaderboard_ranks.mjs --no-history      # skip the monthly-history rebuild (see below) and
+//                                                                 #     just CLEAR the peak columns, the pre-history
+//                                                                 #     behaviour for a re-rate
 //   node auxiliary/update_leaderboard_ranks.mjs --remote --keep-refresh
 //                                                                 #     take the in-window fetch into db/d1.sqlite
 //                                                                 #     itself (overwrites it + the dev D1; stop
@@ -118,6 +134,17 @@
 //   node auxiliary/update_leaderboard_ranks.mjs --remote --origin https://…
 //                                                                 #     probe a different origin (default: the custom
 //                                                                 #     domain in pwa/wrangler.toml)
+//
+// By DEFAULT the run also REBUILDS THE MONTHLY HISTORY. A re-rate changes the
+// rank scale, and monthly_leaderboards stores ranks, so every frozen month is
+// stale until the same reconstruction runs: for each user it walks their whole
+// NOVEL attempt history (created_at order) once, tracks the peak rank per UTC
+// month, and rewrites `monthly_leaderboards` for every FINISHED month plus the
+// live row's `best_*` for the current one. This is also what gives a fresh
+// deployment full history instead of only the months since the tracker shipped.
+// It is a full-table operation, so it is skipped (with a warning) when --user
+// scopes the run; `--no-history` opts out and merely clears the peak columns.
+// The walk is O(n) over the attempt log — see windowRankWalk.
 
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
@@ -159,6 +186,10 @@ const ACTIVE_WINDOW_DAYS = 7;
 const args = process.argv.slice(2);
 let applyLocal = false, applyRemote = false, populate = false, allowUnfrozen = false;
 let keepRefresh = false;
+// The monthly-history rebuild (see `--no-history`): ON by default, because a
+// re-rate invalidates the frozen monthly boards and the same walk that refreshes
+// the current ranks also reconstructs them.
+let history = true;
 let originOverride = null;
 const onlyUsers = new Set();
 let sqlOut = path.join(os.tmpdir(), 'leaderboard_rank_update.sql');
@@ -169,6 +200,7 @@ for (let i = 0; i < args.length; i++) {
     else if (a === '--populate') populate = true;
     else if (a === '--allow-unfrozen') allowUnfrozen = true;
     else if (a === '--keep-refresh') keepRefresh = true;
+    else if (a === '--no-history') history = false;
     else if (a === '--origin') originOverride = args[++i];
     else if (a === '--user') onlyUsers.add(args[++i]);
     else if (a === '--sql-out') sqlOut = path.resolve(args[++i]);
@@ -183,7 +215,8 @@ async function loadLeaderboardModule() {
     const res = await esbuild.build({
         stdin: {
             contents: `
-                export { computeRank, serializeBuffer, RANK_START_MIN, BUFFER_CAP } from './src/leaderboard.js';
+                export { computeRank, serializeBuffer, RANK_START_MIN, BUFFER_CAP, monthlyPeak,
+                         monthlyPeaksFromAttempts, monthKeyAt } from './src/leaderboard.js';
                 export { rankToLabel } from './shared/rank-math.js';
             `,
             resolveDir: PWA_DIR,
@@ -226,6 +259,29 @@ function sqliteJson(sql) {
     return text ? JSON.parse(text) : [];
 }
 
+// Same, against an explicit DB file (the miniflare target, which is not `mirrorDb`).
+function sqliteJsonOn(dbPath, sql) {
+    const out = execFileSync('sqlite3', ['-json', dbPath, sql], { encoding: 'utf8' });
+    const text = out.trim();
+    return text ? JSON.parse(text) : [];
+}
+
+// The schema the generated SQL names, added to a --local miniflare D1 when missing.
+// The guard, not the migration, is what makes this idempotent: the migration's
+// ALTERs would fail on a re-run, so it is only applied when a piece is absent.
+// (Remote is checked, not migrated — see remoteHasMonthlySchema.)
+const MONTHLY_MIGRATION = path.join(PWA_DIR, 'migrations', '2026-09-21_monthly_leaderboard.sql');
+
+function ensureLocalSchema(dbPath) {
+    const cols = new Set(sqliteJsonOn(dbPath, "PRAGMA table_info(leaderboard)").map((c) => c.name));
+    const has = (c) => cols.has(c);
+    const hasTable = sqliteJsonOn(dbPath,
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='monthly_leaderboards'").length > 0;
+    if (has('best_rank') && has('best_rank_timed') && has('best_rank_month') && hasTable) return;
+    console.log(`applying ${path.relative(REPO, MONTHLY_MIGRATION)} to the local miniflare D1...`);
+    execFileSync('sqlite3', [dbPath], { input: fs.readFileSync(MONTHLY_MIGRATION, 'utf8'), encoding: 'utf8' });
+}
+
 // --- production write-freeze preflight (--remote only) ------------------------------
 // The buffer rebuild is a read-modify-write against a snapshot, so it is only safe
 // while production cannot write. Both checks below are cheap: the freeze probe costs
@@ -248,6 +304,17 @@ function remoteQueryRows(sql) {
     const start = lines.findIndex((l) => l.trim() === '[');
     const text = start >= 0 ? lines.slice(start).join('\n') : (res.stdout || '');
     return JSON.parse(text)[0]?.results ?? [];
+}
+
+// The generated SQL names monthly_leaderboards and the leaderboard best_* columns,
+// so the remote target must already carry them. Refuse BEFORE the freeze/fetch
+// when it does not, rather than letting half the file apply and fail. Applying the
+// migration is a deliberate, separate step (see the migration header).
+function remoteHasMonthlySchema() {
+    const cols = new Set(remoteQueryRows("SELECT name FROM pragma_table_info('leaderboard')").map((r) => r.name));
+    const hasTable = remoteQueryRows(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='monthly_leaderboards'").length > 0;
+    return cols.has('best_rank') && cols.has('best_rank_timed') && cols.has('best_rank_month') && hasTable;
 }
 
 // Default to the custom domain declared in wrangler.toml rather than hardcoding it.
@@ -509,6 +576,26 @@ function fetchBufferAttempts(uid, cap) {
     }));
 }
 
+// The user's ENTIRE novel history for the monthly reconstruction, ascending id
+// order and deduped exactly like fetchBufferAttempts, plus each attempt's
+// `created_at` as `at` (ms). The month is taken from `at` — the month the attempt
+// HAPPENED, which is what a historical reconstruction wants; the live tracker
+// uses the report timestamp instead. NO REPEATS: the rank window is novel-only.
+function fetchHistoryAttempts(uid) {
+    return sqliteJson(
+        `SELECT p, s, t, at FROM (
+            SELECT MIN(id) AS id, problem AS p, success AS s, time_used AS t, created_at AS at
+              FROM tsumego_reports
+             WHERE user_id = ${uid} AND is_repeat = 0
+             GROUP BY problem, created_at)
+          ORDER BY id ASC`
+    ).map((r) => ({
+        p: r.p, s: r.s ? 1 : 0,
+        t: Number.isFinite(r.t) ? r.t : null,
+        at: Date.parse(r.at),
+    }));
+}
+
 // --- per-user recompute --------------------------------------------------------------
 // attempts: ascending id order, exact dups collapsed, [{ p, s, t }]. The buffer is
 // those attempts newest first (the live-buffer order).
@@ -545,11 +632,26 @@ function findMiniflareD1() {
 
 // --- main -------------------------------------------------------------------------------
 async function main() {
-    if (!fs.existsSync(DB_PATH)) {
-        throw new Error(`missing ${DB_PATH} — run: ./.venv/bin/python3 -m pipeline.fetch_database --full`);
-    }
     if (!fs.existsSync(PARAMS_BIN)) {
         throw new Error(`missing ${PARAMS_BIN} — run: ./.venv/bin/python3 -m pipeline.package_for_pwa`);
+    }
+    // --local reads the LOCAL D1 ITSELF, not the canonical mirror: the local
+    // database is the source of truth for its own data, so a dev session's writes
+    // since the last fetch_database are not rebuilt away from a stale snapshot.
+    // --remote and dry runs read the mirror (the freeze snapshot).
+    if (applyLocal) {
+        mirrorDb = findMiniflareD1();
+        console.log(`reading local D1: ${mirrorDb}`);
+    } else if (!fs.existsSync(DB_PATH)) {
+        throw new Error(`missing ${DB_PATH} — run: ./.venv/bin/python3 -m pipeline.fetch_database --full`);
+    }
+
+    // The generated SQL names the monthly schema, and the remote migration is a
+    // deliberate separate step, so refuse before freezing/fetching if it is absent.
+    if (applyRemote && !remoteHasMonthlySchema()) {
+        throw new Error('remote D1 is missing the monthly-leaderboard schema.\n'
+            + '  Apply migrations/2026-09-21_monthly_leaderboard.sql FIRST (its header has the\n'
+            + '  command), then deploy, then re-run this script.');
     }
 
     // Open the window BEFORE the per-user recompute, so a refusal costs seconds
@@ -584,7 +686,11 @@ async function main() {
         'SELECT user_id, pred_rank, pred_rank_se FROM leaderboard'
     );
     if (onlyUsers.size) rows = rows.filter((r) => onlyUsers.has(r.user_id));
-    if (!rows.length && !populate) { console.log('no leaderboard rows to update'); return; }
+    if (!rows.length && !populate && !history) { console.log('no leaderboard rows to update'); return; }
+
+    // Users the populate pass adds to the live table; the history pass must be able
+    // to write their current-month peak onto the row it creates.
+    const populatedUsers = new Set();
 
     const statements = [];
     for (const row of rows) {
@@ -602,7 +708,8 @@ async function main() {
         statements.push(
             `UPDATE leaderboard SET buffer = ${sqlStr(lb.serializeBuffer(out.buffer))}, `
             + `pred_rank = ${sqlNum(out.rank)}, pred_rank_se = ${sqlNum(out.se)}, `
-            + `time_delta_rating = ${sqlNum(out.deltaRating)} `
+            + `time_delta_rating = ${sqlNum(out.deltaRating)}, `
+            + `best_rank = NULL, best_rank_timed = NULL, best_rank_month = NULL `
             + `WHERE user_id = ${uid};`
         );
     }
@@ -634,21 +741,99 @@ async function main() {
                 continue;
             }
             const uid = sqlStr(a.user_id);
+            populatedUsers.add(a.user_id);
             const attempts = fetchBufferAttempts(uid, lb.BUFFER_CAP);
             const out = recomputeRow(lb, attempts, params);
             if (out.rank === null) unranked++; else ranked++;
             console.log(`  + ${a.user_id}  ${attempts.length} novel attempts  ${out.rank === null ? 'unranked' : fmtRank(lb, out.rank)}`);
+            // A seeded row's recomputed rank is its first PEAK for the current month
+            // (the row did not exist, so there is no earlier observation to keep).
+            const peak = out.rank === null ? null : lb.monthlyPeak(null, out.rank, out.deltaRating, Date.now());
             // Same seed shape as createLeaderboardRow; INSERT OR IGNORE is a no-op if
             // the row was created concurrently (a live report during a --remote apply).
             statements.push(
                 `INSERT OR IGNORE INTO leaderboard `
-                + `(user_id, buffer, pred_rank, pred_rank_se, time_delta_rating, last_active) `
+                + `(user_id, buffer, pred_rank, pred_rank_se, time_delta_rating, last_active, `
+                + `best_rank, best_rank_timed, best_rank_month) `
                 + `VALUES (${uid}, ${sqlStr(lb.serializeBuffer(out.buffer))}, `
                 + `${sqlNum(out.rank)}, ${sqlNum(out.se)}, ${sqlNum(out.deltaRating)}, `
-                + `${sqlStr(a.last_created)});`
+                + `${sqlStr(a.last_created)}, `
+                + `${peak ? sqlNum(peak.best_rank) : 'NULL'}, `
+                + `${peak ? sqlNum(peak.best_rank_timed) : 'NULL'}, `
+                + `${peak ? sqlStr(peak.best_rank_month) : 'NULL'});`
             );
         }
         console.log(`populate: ${ranked} ranked + ${unranked} unranked seeded (unranked rows stay hidden on the board until ${lb.RANK_START_MIN} novel attempts)`);
+    }
+
+    // --- monthly history: rebuild every finished month + the live peak --------------
+    // A re-rate changes the rank scale and monthly_leaderboards stores ranks, so the
+    // frozen months are stale until rebuilt; the same walk gives a fresh deploy full
+    // history. Per user we replay the WHOLE novel history once (created_at order) and
+    // take the peak rank in each UTC month. Finished months go to
+    // monthly_leaderboards; the CURRENT, still-open month goes to the live row's
+    // best_* (the cron freezes it when it ends). Full-table only: --user scopes the
+    // run and would rewrite a month from one user, so it opts out.
+    if (history && !onlyUsers.size) {
+        const curMonth = lb.monthKeyAt(Date.now());
+        // Only users who can possibly carry a rank (>= RANK_START_MIN novel attempts);
+        // the walk itself still applies the gate per month.
+        const histUsers = sqliteJson(
+            `SELECT user_id FROM tsumego_reports WHERE is_repeat = 0
+              GROUP BY user_id HAVING COUNT(*) >= ${lb.RANK_START_MIN}`
+        ).map((r) => r.user_id).filter((u) => USER_ID_RE.test(u));
+        console.log(`\nhistory: replaying ${histUsers.length} user(s) for the monthly boards...`);
+        const t0 = Date.now();
+        const months = new Map();       // month -> Map<userId, { rank, timed }>
+        const currentPeak = new Map();  // userId -> { rank, timed } for the open month
+        let replayed = 0;
+        for (const u of histUsers) {
+            const attempts = fetchHistoryAttempts(sqlStr(u));
+            if (attempts.length < lb.RANK_START_MIN) continue;
+            const peaks = lb.monthlyPeaksFromAttempts(attempts, params);
+            for (const [month, peak] of peaks) {
+                if (month === curMonth) { currentPeak.set(u, peak); continue; }
+                if (month > curMonth) continue;
+                let m = months.get(month);
+                if (!m) months.set(month, m = new Map());
+                m.set(u, peak);
+            }
+            if (++replayed % 250 === 0) console.log(`  ${replayed}/${histUsers.length}...`);
+        }
+        const nowIso = new Date().toISOString();
+        const orderedMonths = [...months.keys()].sort();
+        let entryCount = 0;
+        for (const month of orderedMonths) {
+            const entries = [...months.get(month).entries()]
+                .map(([u, p]) => [u, p.rank, Number.isFinite(p.timed) ? p.timed : null]);
+            entryCount += entries.length;
+            statements.push(
+                `INSERT INTO monthly_leaderboards (month, data, created_at) `
+                + `VALUES (${sqlStr(month)}, ${sqlStr(JSON.stringify(entries))}, ${sqlStr(nowIso)}) `
+                + `ON CONFLICT(month) DO UPDATE SET data = excluded.data, created_at = excluded.created_at;`
+            );
+        }
+        const liveUsers = new Set(rows.map((r) => r.user_id));
+        for (const u of populatedUsers) liveUsers.add(u);
+        let currentRows = 0;
+        for (const [u, p] of currentPeak) {
+            if (!liveUsers.has(u)) continue;   // no live row to hold it (UPDATE would no-op anyway)
+            currentRows++;
+            statements.push(
+                `UPDATE leaderboard SET best_rank = ${sqlNum(p.rank)}, `
+                + `best_rank_timed = ${sqlNum(p.timed)}, best_rank_month = ${sqlStr(curMonth)} `
+                + `WHERE user_id = ${sqlStr(u)};`
+            );
+        }
+        console.log(`history: ${orderedMonths.length} finished month(s), ${entryCount} entries; `
+            + `${currentRows} live row(s) get the ${curMonth} peak (${((Date.now() - t0) / 1000).toFixed(0)}s)`);
+        if (!orderedMonths.length) {
+            console.warn('history: no finished months reconstructed — nothing to write to monthly_leaderboards');
+        }
+    } else if (history && onlyUsers.size) {
+        console.warn('NOTE: --user scopes the run, so the monthly-history rebuild is SKIPPED (it is a\n'
+            + '  full-table operation and would rewrite a month from one user). The peak columns are\n'
+            + '  CLEARED instead; re-run without --user to rebuild history.');
     }
 
     if (!statements.length) { console.log('\nnothing to write'); return 0; }
@@ -664,8 +849,9 @@ async function main() {
         if (frozenWindow && !await postflightRemote(frozenWindow)) return 1;
         return 0;
     } else if (applyLocal) {
-        const dbPath = findMiniflareD1();
+        const dbPath = mirrorDb;
         console.log(`applying to local miniflare D1: ${dbPath} (stop npm run dev first)`);
+        ensureLocalSchema(dbPath);
         execFileSync('sqlite3', [dbPath, `.read ${sqlOut}`], { stdio: 'inherit' });
     } else {
         console.log('dry run — re-run with --local (miniflare D1) or --remote (production D1) to write.');

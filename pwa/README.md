@@ -90,7 +90,7 @@ The `lib/` bundles (WGo.js and JSZip) are loaded as classic scripts from `index.
 │   │                        #   report-backfill, sync, push, schedule, rank-survey,
 │   │                        #   share-event, profile, alias, register, leaderboard-page,
 │   │                        #   statistics-page, tournament-page, invite-tool)
-│   ├── leaderboard.js       # Leaderboard buffer maintenance + row resolution
+│   ├── leaderboard.js       # Leaderboard buffer maintenance, row resolution, monthly-history freeze/read
 │   ├── aliases.js           # Self-chosen leaderboard alias: validate against the word tables, set/clear
 │   ├── attempt-insert.js    # The shared INSERT (maintains the per-profile digest)
 │   ├── server-stats.js      # The community-stats blob: compute + cache (/server-stats, /statistics)
@@ -183,7 +183,7 @@ Served data is cache-busted by a separate content-addressed `DATA_VERSION` rathe
 
 ### 4.9. Cloudflare Worker (`src/`)
 
-`src/index.js` is a thin router over a route table plus a `scheduled()` cron handler; handlers and aggregation live in sibling modules. Beyond the two headline responsibilities below it serves account sync (`/sync`), the offline outbox (`/report-backfill`), Web Push (`/push/*`), the recall schedule (`/schedule`), surveys and analytics (`/rank-survey`, `/share-event`), profile visibility (`/profile/hide`) and the self-chosen leaderboard alias (`/profile/alias`), registration (`/register`), the cached community stats (`/server-stats`, and as the server-rendered `/statistics` page), and the server-rendered `/leaderboard` and `/tournament` pages. The cron delivers due recall reminders and refreshes the cached stats and the external rating heartbeats. `CLAUDE.md` carries the full route and D1-schema reference.
+`src/index.js` is a thin router over a route table plus a `scheduled()` cron handler; handlers and aggregation live in sibling modules. Beyond the two headline responsibilities below it serves account sync (`/sync`), the offline outbox (`/report-backfill`), Web Push (`/push/*`), the recall schedule (`/schedule`), surveys and analytics (`/rank-survey`, `/share-event`), profile visibility (`/profile/hide`) and the self-chosen leaderboard alias (`/profile/alias`), registration (`/register`), the cached community stats (`/server-stats`, and as the server-rendered `/statistics` page), and the server-rendered `/leaderboard` and `/tournament` pages. The cron delivers due recall reminders and refreshes the cached stats and the external rating heartbeats, and freezes each finished month into the monthly leaderboard history. `CLAUDE.md` carries the full route and D1-schema reference.
 
 - **`POST /report`** — validates and inserts an attempt row into the D1 `tsumego_reports` table (binding: `DB`), returning the row id, the per-profile attempt count and the sync digest. `OPTIONS` returns CORS headers.
 - **SPA fallback** — for navigation requests that don't match a static asset, serves `index.html` while preserving the URL so the front-end can read the size hint (`/9`, `/13`) from `window.location.pathname`. Non-navigation misses return a real 404 so a stale Service Worker cache can invalidate cleanly.

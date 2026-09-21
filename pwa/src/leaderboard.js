@@ -15,7 +15,7 @@ import { interpExtrap } from '../shared/rank-math.js';
 import { rankLabelToRank } from '../shared/rank-math.js';
 import {
     estimateWindowRankFromFlat, weightedMedianOverWindow, flattenAttempt, WIN_CAP,
-    applyM, slopeInRankSpace, seFloorForMeanInfo, RANK_START_MIN,
+    windowRankWalk, applyM, slopeInRankSpace, seFloorForMeanInfo, RANK_START_MIN,
 } from '../shared/rank-window.js';
 import { anchorInfo } from '../js/irt.js';
 import { fetchAgaPlayer } from './aga.js';
@@ -316,6 +316,54 @@ export function weekStartIso(ms) {
     return new Date((weekIdAt(ms) * 7 + 4) * 86400000).toISOString();
 }
 
+// --- month bucketing (UTC calendar month) ---------------------------------------
+// The monthly historical boards are frozen from a PEAK tracker that rides the live
+// `leaderboard` rows: `best_rank` / `best_rank_timed` / `best_rank_month` hold the
+// highest UNTIMED internal rank an observed attempt has reached in the CURRENT
+// month, the same observation's TIME-ADJUSTED internal rank, and the month key
+// those belong to. A rank observed in a NEW month replaces the peak (the tracker
+// resets at the boundary), and the month-change cron freezes the finished month
+// into `monthly_leaderboards` by reading `best_rank_month = M` — which is exactly
+// "users active in M who had reached the list-entry gate", with no reset step of
+// its own and no second source of truth for the month a peak belongs to.
+export function monthKeyAt(ms) {
+    return new Date(ms).toISOString().slice(0, 7);   // 'YYYY-MM'
+}
+
+// The calendar month BEFORE the one `ms` falls in, same key form. Used by the
+// month-change cron to name the month it is freezing.
+export function previousMonthKey(ms) {
+    const d = new Date(ms);
+    return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - 1, 1))
+        .toISOString().slice(0, 7);
+}
+
+// Fold one OBSERVED rank into a row's current-month peak, returning the three
+// values to store. Call it from the attempt paths ONLY — /report,
+// /report-backfill, createLeaderboardRow — never from the weekly reconcile: a
+// rebuild is not activity, and feeding it would roll an inactive user's
+// recomputed rank into the current month and put them on a board for a month they
+// never played. `row` is the existing row (or null when creating one); a peak
+// from an earlier month, or a rank higher than the stored one within the same
+// month, wins.
+export function monthlyPeak(row, rank, deltaRating, nowMs = Date.now()) {
+    const month = monthKeyAt(nowMs);
+    const carries = row && row.best_rank_month === month && Number.isFinite(row.best_rank);
+    if (carries && !(rank > row.best_rank)) {
+        return {
+            best_rank: row.best_rank,
+            best_rank_timed: row.best_rank_timed,
+            best_rank_month: month,
+        };
+    }
+    const timed = addTimeDockToInternalRank(rank, deltaRating);
+    return {
+        best_rank: rank,
+        best_rank_timed: Number.isFinite(timed) ? timed : rank,
+        best_rank_month: month,
+    };
+}
+
 // --- buffer (de)serialization ---------------------------------------------------
 // Stored as a JSON array of { p, s, t }, newest first, capped at BUFFER_CAP.
 export function parseBuffer(text) {
@@ -526,14 +574,19 @@ export async function buildRowStateFromReports(env, userId, params) {
 export async function updateLeaderboardOnReport(env, userId, problemId, success, timeUsed, country) {
     if (!env.DB) return;
     const row = await env.DB.prepare(
-        `SELECT buffer FROM leaderboard WHERE user_id = ?1`
+        `SELECT buffer, best_rank, best_rank_timed, best_rank_month
+           FROM leaderboard WHERE user_id = ?1`
     ).bind(userId).first();
     if (!row) { await createLeaderboardRow(env, userId, country); return; }
 
     const params = await getProblemParams(env);
     const buffer = pushBuffer(parseBuffer(row.buffer), problemId, success, timeUsed);
     const { rank, se, deltaRating } = computeRank(buffer, params);
-    const nowIso = new Date().toISOString();
+    // ONE `now` for the timestamp and the month key, so a report landing exactly on
+    // the month boundary cannot be stamped into one month and peak-folded into the
+    // other.
+    const nowMs = Date.now();
+    const nowIso = new Date(nowMs).toISOString();
     // Stamp the request's edge geo-IP country into the SAME row write (no extra
     // write) — this column is the universal flag fallback for anonymous rows.
     // COALESCE keeps the last KNOWN country when this report's geo is unknown/Tor
@@ -549,11 +602,14 @@ export async function updateLeaderboardOnReport(env, userId, problemId, success,
         ).bind(userId, serializeBuffer(buffer), nowIso, cc).run();
         return;
     }
+    const peak = monthlyPeak(row, rank, deltaRating, nowMs);
     await env.DB.prepare(
         `UPDATE leaderboard SET buffer = ?2, pred_rank = ?3, pred_rank_se = ?4,
-            time_delta_rating = ?5, last_active = ?6, country = COALESCE(?7, country)
+            time_delta_rating = ?5, last_active = ?6, country = COALESCE(?7, country),
+            best_rank = ?8, best_rank_timed = ?9, best_rank_month = ?10
           WHERE user_id = ?1`
-    ).bind(userId, serializeBuffer(buffer), rank, se, deltaRating, nowIso, cc).run();
+    ).bind(userId, serializeBuffer(buffer), rank, se, deltaRating, nowIso, cc,
+        peak.best_rank, peak.best_rank_timed, peak.best_rank_month).run();
 }
 
 // Same, for a BATCH of novel attempts landing at once — the outbox flush behind
@@ -575,7 +631,8 @@ export async function updateLeaderboardOnReport(env, userId, problemId, success,
 export async function updateLeaderboardOnBackfill(env, userId, attempts, country) {
     if (!env.DB || !attempts.length) return;
     const row = await env.DB.prepare(
-        `SELECT buffer FROM leaderboard WHERE user_id = ?1`
+        `SELECT buffer, best_rank, best_rank_timed, best_rank_month
+           FROM leaderboard WHERE user_id = ?1`
     ).bind(userId).first();
     // No row yet: seed from the full history, which already contains the rows
     // this batch just inserted — so the seed subsumes the push.
@@ -587,8 +644,11 @@ export async function updateLeaderboardOnBackfill(env, userId, attempts, country
     const { rank, se, deltaRating } = computeRank(buffer, params);
     // last_active tracks PRESENCE, not the attempts' event time: the user is
     // online right now to be flushing, so an old created_at must not leave them
-    // looking idle to pruneIdleLeaderboardRows.
-    const nowIso = new Date().toISOString();
+    // looking idle to pruneIdleLeaderboardRows. The peak month follows the same
+    // convention — a backfilled historical attempt is folded into the month the
+    // flush lands in, because that is the month the user was present.
+    const nowMs = Date.now();
+    const nowIso = new Date(nowMs).toISOString();
     const cc = normalizeCountry(country);
     if (rank === null) {
         await env.DB.prepare(
@@ -598,11 +658,14 @@ export async function updateLeaderboardOnBackfill(env, userId, attempts, country
         ).bind(userId, serializeBuffer(buffer), nowIso, cc).run();
         return;
     }
+    const peak = monthlyPeak(row, rank, deltaRating, nowMs);
     await env.DB.prepare(
         `UPDATE leaderboard SET buffer = ?2, pred_rank = ?3, pred_rank_se = ?4,
-            time_delta_rating = ?5, last_active = ?6, country = COALESCE(?7, country)
+            time_delta_rating = ?5, last_active = ?6, country = COALESCE(?7, country),
+            best_rank = ?8, best_rank_timed = ?9, best_rank_month = ?10
           WHERE user_id = ?1`
-    ).bind(userId, serializeBuffer(buffer), rank, se, deltaRating, nowIso, cc).run();
+    ).bind(userId, serializeBuffer(buffer), rank, se, deltaRating, nowIso, cc,
+        peak.best_rank, peak.best_rank_timed, peak.best_rank_month).run();
 }
 
 // First novel report from a row-less user (brand new, or pruned while idle): seed
@@ -614,13 +677,22 @@ export async function updateLeaderboardOnBackfill(env, userId, attempts, country
 async function createLeaderboardRow(env, userId, country) {
     const params = await getProblemParams(env);
     const st = await buildRowStateFromReports(env, userId, params);
-    const nowIso = new Date().toISOString();
+    const nowMs = Date.now();
+    const nowIso = new Date(nowMs).toISOString();
+    // A freshly seeded row carries this observation as its first peak — the user is
+    // reporting right now, so this IS their current-month activity. (A row created
+    // from /link goes through handlers/link.js' own upsert and does NOT seed a peak:
+    // linking is not an attempt.)
+    const peak = st.rank === null ? null : monthlyPeak(null, st.rank, st.deltaRating, nowMs);
     await env.DB.prepare(
         `INSERT OR IGNORE INTO leaderboard
-            (user_id, buffer, pred_rank, pred_rank_se, time_delta_rating, last_active, country)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)`
+            (user_id, buffer, pred_rank, pred_rank_se, time_delta_rating, last_active, country,
+             best_rank, best_rank_timed, best_rank_month)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)`
     ).bind(userId, serializeBuffer(st.buffer), st.rank, st.se, st.deltaRating, nowIso,
-        normalizeCountry(country)).run();
+        normalizeCountry(country),
+        peak ? peak.best_rank : null, peak ? peak.best_rank_timed : null,
+        peak ? peak.best_rank_month : null).run();
 }
 
 // (The old cron-side refreshGorForAll was removed: the Worker can't reach EGD —
@@ -630,18 +702,25 @@ async function createLeaderboardRow(env, userId, country) {
 // Every leaderboard row is fully rebuildable from tsumego_reports (registration
 // lives in external_ids; createLeaderboardRow re-seeds a returning user on their
 // next novel report — a <= BUFFER_CAP-row read + one insert), so idle rows are
-// deleted rather than kept forever: the table stays at roughly weekly-active
-// size, keeping every full-scan read (/leaderboard page, the reconcile below)
-// cheap without a last_active index — which would cost an index write per novel
-// report (see schema.sql). The >= 7-day cutoff matches the /leaderboard page's
-// active-past-week filter, so a pruned row is one the page had already stopped
-// listing — deletion loses nothing the system would ever serve.
-// A racing /report is harmless: its UPDATE against the deleted row is a no-op and
-// the attempt lives in tsumego_reports, so the next report re-seeds it in full.
+// deleted rather than kept forever: the table stays at roughly the retention
+// window's active size, keeping every full-scan read (/leaderboard page, the
+// reconcile below) cheap without a last_active index — which would cost an index
+// write per novel report (see schema.sql). The retention window is a superset of
+// the /leaderboard page's active-past-week filter, so the page's WHERE clause, not
+// this cutoff, is what limits the visible board. A racing /report is harmless: its
+// UPDATE against the deleted row is a no-op and the attempt lives in
+// tsumego_reports, so the next report re-seeds it in full.
+//
+// The window is 5 WEEKS (not 7 days) so the monthly FREEZE still has the rows it
+// needs: a user active on the first day of a month must survive until the month
+// boundary, up to 31 days later, for recordMonthlyLeaderboards to see their peak.
+// 35 days covers the longest month with margin, so the freeze is never racing a
+// prune. Rows older than that are not on any board.
+export const PRUNE_IDLE_DAYS = 35;
 export async function pruneIdleLeaderboardRows(env) {
     if (!env.DB) return;
     try {
-        const cutoff = new Date(Date.now() - 7 * 86400000).toISOString();
+        const cutoff = new Date(Date.now() - PRUNE_IDLE_DAYS * 86400000).toISOString();
         await env.DB.prepare(
             `DELETE FROM leaderboard
               WHERE last_active IS NULL OR last_active < ?1`
@@ -956,4 +1035,188 @@ export async function readLeaderboardRows(env, { activeDays = 7 } = {}) {
         visible.push({ name, country, registered, alias, currentInternal, est, decl });
     }
     return { rows: visible, belowMin };
+}
+
+// --- monthly history: RECONSTRUCT one user's peaks from raw reports ------------
+// The offline counterpart of the live tracker, used by
+// auxiliary/update_leaderboard_ranks.mjs to rebuild the monthly boards after a
+// re-rate (the frozen JSON holds ranks on the old scale) and to seed them for
+// months that predate the tracker. `attempts` is the user's NOVEL attempts in
+// buffer order (oldest -> newest, the id order every writer and rebuild shares),
+// each `{ p, s, t, at }` with `at` = the report's created_at in ms. Returns a
+// Map<'YYYY-MM', { rank, timed }>.
+//
+// The month a peak belongs to is the ATTEMPT's own created_at, not the upload
+// time the live tracker uses — a historical reconstruction wants the month the
+// attempt happened in. The rank after each attempt is the window estimator over
+// the trailing BUFFER_CAP attempts (flattened through the shared transform, which
+// drops problems no longer in the corpus), computed by the incremental
+// windowRankWalk; the dock is derived over that same window only when an attempt
+// actually sets a new monthly peak. Everything is capped at BUFFER_CAP exactly as
+// computeRank is, so this reproduces the live tracker's observation sequence.
+export function monthlyPeaksFromAttempts(attempts, params) {
+    const flat = new Array(attempts.length);
+    const validTime = new Array(attempts.length);
+    for (let i = 0; i < attempts.length; i++) {
+        const a = attempts[i];
+        const pp = a && typeof a.p === 'string' ? params.get(a.p) : null;
+        flat[i] = pp ? flattenAttempt(pp.rating, pp.slope, pp.floor, a.s, CURVE) : null;
+        validTime[i] = pp ? (Number.isFinite(a.t) ? a.t : NaN) : null;
+    }
+    const ranks = windowRankWalk(flat, BUFFER_CAP);
+    const peaks = new Map();
+    for (let i = 0; i < attempts.length; i++) {
+        const r = ranks[i];
+        if (!Number.isFinite(r)) continue;
+        const at = Number(attempts[i].at);
+        if (!Number.isFinite(at)) continue;
+        const month = monthKeyAt(at);
+        const cur = peaks.get(month);
+        if (cur && !(r > cur.rank)) continue;
+        // The dock over the same valid window computeRank's weighted median uses.
+        const start = Math.max(0, i - BUFFER_CAP + 1);
+        const times = [];
+        for (let j = start; j <= i; j++) if (validTime[j] !== null) times.push(validTime[j]);
+        peaks.set(month, { rank: r, timed: addTimeDockToInternalRank(r, timeDockFromTimes(times)) });
+    }
+    return peaks;
+}
+
+// --- monthly history: freeze one finished month into monthly_leaderboards -------
+// The month-change cron (src/index.js). FREEZES the calendar month that just
+// ended: every row whose `best_rank_month` is that month — i.e. a user who was
+// active in it and reached the list-entry gate at some point — becomes one JSON
+// entry `[user_id, best_rank, best_rank_timed]`. The raw user id is stored, NOT a
+// name: identity is resolved at READ time so an unlink, an alias re-pick or a hide
+// applies to history too.
+//
+// IDEMPOTENT and self-healing: the month is written once and the cron no-ops for
+// the rest of the month, so a missed hourly tick is repaired by the next one
+// instead of losing the month. A month with NO entries is not written at all —
+// it has no board, and the selector must not offer one. There is deliberately NO
+// reset of the live peak columns — each row carries its own `best_rank_month`, and
+// the next observed rank in a new month replaces it (monthlyPeak), so a row that
+// goes idle simply keeps the finished month's peak until the prune removes it, and
+// a row that plays on moves to the new month by itself.
+//
+// Returns { month, users } on a freeze, null when the month was already frozen.
+export async function recordMonthlyLeaderboards(env, { nowMs = Date.now() } = {}) {
+    if (!env.DB) return null;
+    const month = previousMonthKey(nowMs);
+    try {
+        const seen = await env.DB.prepare(
+            `SELECT 1 AS x FROM monthly_leaderboards WHERE month = ?1`
+        ).bind(month).first();
+        if (seen) return null;
+        const res = await env.DB.prepare(
+            `SELECT user_id, best_rank, best_rank_timed FROM leaderboard
+              WHERE best_rank_month = ?1 AND best_rank IS NOT NULL`
+        ).bind(month).all();
+        const entries = ((res && res.results) || [])
+            .filter((r) => Number.isFinite(Number(r.best_rank)))
+            .map((r) => [
+                r.user_id,
+                Number(r.best_rank),
+                Number.isFinite(Number(r.best_rank_timed)) ? Number(r.best_rank_timed) : null,
+            ]);
+        // No entries: do NOT create the row. An empty month has no board to show,
+        // and offering one in the period selector is worse than omitting it — this
+        // also keeps the deploy month out of the list, since no peak was tracked
+        // before the tracker shipped. The set can only shrink as the new month
+        // progresses (a peak can never move BACK into the finished month), so a
+        // later tick seeing it empty again is the same state, not a missed freeze.
+        if (!entries.length) return null;
+        await env.DB.prepare(
+            `INSERT INTO monthly_leaderboards (month, data, created_at)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(month) DO UPDATE SET data = excluded.data, created_at = excluded.created_at`
+        ).bind(month, JSON.stringify(entries), new Date(nowMs).toISOString()).run();
+        return { month, users: entries.length };
+    } catch (e) {
+        console.error('recordMonthlyLeaderboards failed:', e);
+        return null;
+    }
+}
+
+// The frozen months, newest first — the /leaderboard period selector's options
+// (weekly is the param's absence, so it is not in this list). Small table.
+export async function listMonthlyLeaderboards(env) {
+    if (!env.DB) return [];
+    try {
+        const res = await env.DB.prepare(
+            `SELECT month FROM monthly_leaderboards ORDER BY month DESC`
+        ).all();
+        return ((res && res.results) || []).map((r) => r.month).filter(Boolean);
+    } catch (e) {
+        console.error('listMonthlyLeaderboards failed:', e);
+        return [];
+    }
+}
+
+// One frozen month, resolved into the SAME row shape the weekly board uses, so the
+// page's units selector and sorter work unchanged. The only difference is the
+// value: `currentInternal` and every `est` frame carry the month's PEAK rank (the
+// untimed best for onlymove, the COUPLED time-adjusted best for each system),
+// not the current one. `decl` is always empty — a survey declaration is a CURRENT
+// claim and there is no honest historical one, so the monthly board shows no
+// Declared column.
+//
+// Identity is stitched here, off the same three small tables the weekly board
+// reads, and ONLY for the ids in the blob: a hidden profile withholds name, alias
+// and country exactly as it does live, and a row with neither a linked name nor an
+// alias renders Anonymous. `country` therefore comes from the binding alone (the
+// live row's geo-IP fallback is not part of the frozen data).
+export async function readMonthlyLeaderboard(env, month) {
+    if (!env.DB) return { rows: [], users: 0 };
+    const res = await env.DB.prepare(
+        `SELECT data FROM monthly_leaderboards WHERE month = ?1`
+    ).bind(month).first();
+    if (!res) return { rows: [], users: 0 };
+    let entries = [];
+    try { entries = JSON.parse(res.data) || []; } catch { entries = []; }
+    if (!Array.isArray(entries) || !entries.length) return { rows: [], users: 0 };
+    const ids = new Set(entries.map((e) => (Array.isArray(e) ? e[0] : null)).filter(Boolean));
+
+    const [xres, ares, hres] = await Promise.all([
+        env.DB.prepare(`SELECT user_id, display_name, country_code FROM external_ids`).all(),
+        env.DB.prepare(`SELECT user_id, adjective, color, animal FROM user_aliases`).all(),
+        env.DB.prepare(`SELECT user_id FROM hidden_profiles`).all(),
+    ]);
+    const hidden = new Set();
+    for (const h of ((hres && hres.results) || [])) hidden.add(h.user_id);
+    const ident = new Map();
+    for (const x of ((xres && xres.results) || [])) {
+        if (ids.has(x.user_id)) ident.set(x.user_id, x);
+    }
+    const aliasByUser = new Map();
+    for (const a of ((ares && ares.results) || [])) {
+        if (ids.has(a.user_id)) aliasByUser.set(a.user_id, a);
+    }
+
+    const rows = [];
+    for (const e of entries) {
+        if (!Array.isArray(e)) continue;
+        const userId = e[0];
+        const bestRank = Number(e[1]);
+        if (typeof userId !== 'string' || !Number.isFinite(bestRank)) continue;
+        const isHidden = hidden.has(userId);
+        const x = ident.get(userId) || null;
+        const a = aliasByUser.get(userId) || null;
+        const timed = Number.isFinite(Number(e[2])) ? Number(e[2]) : bestRank;
+        const est = {};
+        for (const server of RANK_SYSTEMS) {
+            const v = internalToServerRank(server, timed);
+            if (Number.isFinite(v)) est[server] = v;
+        }
+        rows.push({
+            name: isHidden ? null : (x ? x.display_name : null),
+            registered: !isHidden && !!x,
+            country: isHidden ? null : ((x && x.country_code) || null),
+            alias: (!isHidden && a) ? { adjective: a.adjective, color: a.color, animal: a.animal } : null,
+            currentInternal: bestRank,
+            est,
+            decl: {},
+        });
+    }
+    return { rows, users: rows.length };
 }
