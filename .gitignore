@@ -189,6 +189,10 @@ orchestration_state.json
 /all_pcs.html
 auxiliary/*.png
 auxiliary/labeler/cache/
+# Scratch report output of the auxiliary tools (their default --out directory, e.g.
+# auxiliary/user_novel_problems_csv.py and auxiliary/top_users_report.mjs). Generated,
+# regenerable, and sits beside pulled user data — never version-control it.
+/tmp/
 # Joint rank-model placement dumps (~MBs each): regenerable from
 # auxiliary/joint_rank_model*.py. The small rank_map_v2*.json result files are
 # tracked; the bulky per-problem CSVs are not.
