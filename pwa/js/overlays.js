@@ -187,23 +187,61 @@ export function displayOverlay(message, duration, callback, color = 'rgba(139, 0
     }
 }
 
+function captureBoardSnapshot(boardWrapper) {
+    if (!boardWrapper) return null;
+    const canvases = Array.from(boardWrapper.querySelectorAll('canvas'))
+        .sort((a, b) => (parseInt(a.style.zIndex, 10) || 0) - (parseInt(b.style.zIndex, 10) || 0));
+    if (!canvases.length) return null;
+
+    const first = canvases[0];
+    const snapshot = document.createElement('canvas');
+    snapshot.width = first.width;
+    snapshot.height = first.height;
+    snapshot.className = 'board-snapshot';
+
+    // Copy matching wood background from .wgo-board so the snapshot is 100% opaque
+    const wgoBoard = boardWrapper.querySelector('.wgo-board');
+    if (wgoBoard && wgoBoard.style.backgroundImage) {
+        snapshot.style.backgroundImage = wgoBoard.style.backgroundImage;
+    }
+    if (wgoBoard && wgoBoard.style.backgroundColor) {
+        snapshot.style.backgroundColor = wgoBoard.style.backgroundColor;
+    }
+
+    const ctx = snapshot.getContext('2d');
+    if (!ctx) return null;
+
+    for (const c of canvases) {
+        ctx.drawImage(c, 0, 0);
+    }
+    return snapshot;
+}
+
 // The default board fade is the established "correct answer / next problem"
 // cue (red = wrong answer) — callers signalling a NEUTRAL event (e.g. the
 // post-sync problem swap) pass their own colors so the fade isn't misread as
 // an answer result.
-// Overlays are scoped to the board (#board-container), progressively blurring
-// the board underneath and blending in the empty-board average color so the
-// next problem loads with no visual pop, then reversing to reveal the new board.
+// Overlays are scoped to the board (#board-container). For transparent transitions
+// (e.g. correct answers), a snapshot of the current board is captured and blurred,
+// holding the old position while the new problem loads underneath, then dissolving
+// into the new board as it unblurs — giving a seamless cross-fade with no color cover.
 // With `buttonText` the overlay is additionally held until the user taps the
 // button (the min-duration gate is skipped — the button IS the dismissal);
 // the swap gate still applies, so it can never lift onto an unready board.
 // Returns a promise that resolves when the fade-out starts, i.e. when the
 // board underneath becomes visible to the user.
-export function fadeOverlay(duration, callback, stats = null, message = null, colors = { background: EMPTY_BOARD_AVG_COLOR, text: INK_TEXT_COLOR }, { buttonText = null } = {}) {
+export function fadeOverlay(duration, callback, stats = null, message = null, colors = { background: 'transparent', text: 'white' }, { buttonText = null } = {}) {
     const parent = getOverlayParent();
     const boardWrapper = getBoardWrapper(parent);
     const existing = parent.querySelectorAll('.result-overlay');
     existing.forEach(el => el.remove());
+    const existingSnapshots = parent.querySelectorAll('.board-snapshot');
+    existingSnapshots.forEach(el => el.remove());
+
+    const snapshot = captureBoardSnapshot(boardWrapper);
+    if (snapshot) {
+        parent.appendChild(snapshot);
+    }
 
     const overlay = document.createElement('div');
     // See displayOverlay: marks this as a fullscreen transition so onboarding.js
@@ -231,18 +269,15 @@ export function fadeOverlay(duration, callback, stats = null, message = null, co
 
     parent.appendChild(overlay);
 
-    // Progressively blur the board and fade in the overlay
-    if (boardWrapper) {
-        boardWrapper.classList.add('board-blurred');
-    }
+    // Synchronously attach and blur on next frame so both elements blur in lockstep
     requestAnimationFrame(() => {
+        if (boardWrapper) boardWrapper.classList.add('board-blurred');
+        if (snapshot) snapshot.classList.add('board-blurred');
         overlay.style.transition = 'opacity 0.5s ease-in-out';
-        requestAnimationFrame(() => {
-            overlay.style.opacity = '1';
-        });
+        overlay.style.opacity = '1';
     });
 
-    // Halfway through the transition (at 500ms), under full blur and color cover,
+    // Halfway through the transition (at 500ms), under full blur cover,
     // run the callback (which loads the next problem). If it returns a promise,
     // hold the overlay until that work finishes — the cover must never lift onto
     // an unready board.
@@ -258,10 +293,16 @@ export function fadeOverlay(duration, callback, stats = null, message = null, co
         if (boardWrapper) {
             boardWrapper.classList.remove('board-blurred');
         }
+        if (snapshot) {
+            snapshot.style.opacity = '0';
+        }
         overlay.style.pointerEvents = 'none';
         overlay.style.transition = 'opacity 0.5s ease-in-out';
         overlay.style.opacity = '0';
-        setTimeout(() => overlay.remove(), 500);
+        setTimeout(() => {
+            if (snapshot) snapshot.remove();
+            overlay.remove();
+        }, 500);
     });
 }
 
