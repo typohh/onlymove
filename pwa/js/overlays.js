@@ -162,7 +162,7 @@ export function displayOverlay(message, duration, callback, color = 'rgba(139, 0
     }
 }
 
-// The default white fade is the established "correct answer / next problem"
+// The default grey fade is the established "correct answer / next problem"
 // cue (red = wrong answer) — callers signalling a NEUTRAL event (e.g. the
 // post-sync problem swap) pass their own colors so the fade isn't misread as
 // an answer result.
@@ -171,7 +171,7 @@ export function displayOverlay(message, duration, callback, color = 'rgba(139, 0
 // the swap gate still applies, so it can never lift onto an unready board.
 // Returns a promise that resolves when the fade-out starts, i.e. when the
 // board underneath becomes visible to the user.
-export function fadeOverlay(duration, callback, stats = null, message = null, colors = { background: 'white', text: 'black' }, { buttonText = null } = {}) {
+export function fadeOverlay(duration, callback, stats = null, message = null, colors = { background: 'grey', text: 'white' }, { buttonText = null } = {}) {
     const overlay = document.createElement('div');
     // See displayOverlay: marks this as a fullscreen transition so onboarding.js
     // defers any bubble until it lifts.
