@@ -112,10 +112,28 @@ function createOverlayContent(stats, message, textColor) {
     return container;
 }
 
+// Empty board average color: the spatial mean of the kaya wood texture (wood_1024.jpg).
+const EMPTY_BOARD_AVG_COLOR = '#e4b25c';
+const INK_TEXT_COLOR = '#211f1c';
+
+function getOverlayParent() {
+    return document.getElementById('board-container') || document.body;
+}
+
+function getBoardWrapper(parent) {
+    return document.getElementById('board-wrapper') || parent.querySelector('#board-wrapper') || parent.firstElementChild;
+}
+
 // Simple message overlay (errors, notices). The answer-result overlay with the
 // rank-change stats block is fadeOverlay below (which holds through the swap);
 // this one just shows a message and auto-dismisses (or waits for the button).
+// Scoped to the board (#board-container).
 export function displayOverlay(message, duration, callback, color = 'rgba(139, 0, 0, 1)', buttonText = null) {
+    const parent = getOverlayParent();
+    const boardWrapper = getBoardWrapper(parent);
+    const existing = parent.querySelectorAll('.result-overlay');
+    existing.forEach(el => el.remove());
+
     const overlay = document.createElement('div');
     // `app-blocking-overlay` lets onboarding.js hold a bubble back until this
     // transition lifts (so a callout never floats over the fade screen).
@@ -133,7 +151,11 @@ export function displayOverlay(message, duration, callback, color = 'rgba(139, 0
         content.appendChild(messageElement);
     }
     overlay.appendChild(content);
-    document.body.appendChild(overlay);
+    parent.appendChild(overlay);
+
+    if (boardWrapper) {
+        boardWrapper.classList.add('board-blurred');
+    }
 
     // Fast fade in/out for messages
     overlay.style.transition = 'opacity 0.3s ease-in-out';
@@ -142,6 +164,9 @@ export function displayOverlay(message, duration, callback, color = 'rgba(139, 0
     });
 
     const dismiss = () => {
+        if (boardWrapper) {
+            boardWrapper.classList.remove('board-blurred');
+        }
         overlay.style.opacity = '0';
         setTimeout(() => {
             overlay.remove();
@@ -162,16 +187,24 @@ export function displayOverlay(message, duration, callback, color = 'rgba(139, 0
     }
 }
 
-// The default grey fade is the established "correct answer / next problem"
+// The default board fade is the established "correct answer / next problem"
 // cue (red = wrong answer) — callers signalling a NEUTRAL event (e.g. the
 // post-sync problem swap) pass their own colors so the fade isn't misread as
 // an answer result.
+// Overlays are scoped to the board (#board-container), progressively blurring
+// the board underneath and blending in the empty-board average color so the
+// next problem loads with no visual pop, then reversing to reveal the new board.
 // With `buttonText` the overlay is additionally held until the user taps the
 // button (the min-duration gate is skipped — the button IS the dismissal);
 // the swap gate still applies, so it can never lift onto an unready board.
 // Returns a promise that resolves when the fade-out starts, i.e. when the
 // board underneath becomes visible to the user.
-export function fadeOverlay(duration, callback, stats = null, message = null, colors = { background: 'grey', text: 'white' }, { buttonText = null } = {}) {
+export function fadeOverlay(duration, callback, stats = null, message = null, colors = { background: EMPTY_BOARD_AVG_COLOR, text: INK_TEXT_COLOR }, { buttonText = null } = {}) {
+    const parent = getOverlayParent();
+    const boardWrapper = getBoardWrapper(parent);
+    const existing = parent.querySelectorAll('.result-overlay');
+    existing.forEach(el => el.remove());
+
     const overlay = document.createElement('div');
     // See displayOverlay: marks this as a fullscreen transition so onboarding.js
     // defers any bubble until it lifts.
@@ -196,9 +229,12 @@ export function fadeOverlay(duration, callback, stats = null, message = null, co
         overlay.appendChild(content);
     }
 
-    document.body.appendChild(overlay);
+    parent.appendChild(overlay);
 
-    // Fade in (0.5s)
+    // Progressively blur the board and fade in the overlay
+    if (boardWrapper) {
+        boardWrapper.classList.add('board-blurred');
+    }
     requestAnimationFrame(() => {
         overlay.style.transition = 'opacity 0.5s ease-in-out';
         requestAnimationFrame(() => {
@@ -206,9 +242,10 @@ export function fadeOverlay(duration, callback, stats = null, message = null, co
         });
     });
 
-    // Halfway through the fade-in, run the callback (which loads the next
-    // problem). If it returns a promise, hold the overlay until that work
-    // finishes — the white screen must never lift onto a board that isn't ready.
+    // Halfway through the transition (at 500ms), under full blur and color cover,
+    // run the callback (which loads the next problem). If it returns a promise,
+    // hold the overlay until that work finishes — the cover must never lift onto
+    // an unready board.
     const swapped = new Promise(resolve => setTimeout(resolve, 500))
         .then(() => (callback ? callback() : undefined));
     // ...but stay up at least `duration` so the transition never flickers when
@@ -218,6 +255,10 @@ export function fadeOverlay(duration, callback, stats = null, message = null, co
         : new Promise(resolve => setTimeout(resolve, duration));
 
     return Promise.all([swapped, minDisplay, buttonClicked]).catch(() => {}).then(() => {
+        if (boardWrapper) {
+            boardWrapper.classList.remove('board-blurred');
+        }
+        overlay.style.pointerEvents = 'none';
         overlay.style.transition = 'opacity 0.5s ease-in-out';
         overlay.style.opacity = '0';
         setTimeout(() => overlay.remove(), 500);
@@ -227,13 +268,19 @@ export function fadeOverlay(duration, callback, stats = null, message = null, co
 // Generic loading spinner shown while the app waits on async work (startup file
 // loads, the stats compute, etc.). Reference-counted so overlapping callers
 // don't tear down each other's spinner — the overlay lifts only when the last
-// showLoading() has been matched by a hideLoading().
+// showLoading() has been matched by a hideLoading(). Scoped to #board-container.
 let _loadingCount = 0;
 let _loadingEl = null;
 
 export function showLoading(message = null) {
     _loadingCount++;
     if (_loadingEl) return;
+    const parent = getOverlayParent();
+    const boardWrapper = getBoardWrapper(parent);
+    if (boardWrapper) {
+        boardWrapper.classList.add('board-blurred');
+    }
+
     const overlay = document.createElement('div');
     overlay.className = 'loading-overlay';
     const spinner = document.createElement('div');
@@ -249,7 +296,7 @@ export function showLoading(message = null) {
         label.textContent = message;
         overlay.appendChild(label);
     }
-    document.body.appendChild(overlay);
+    parent.appendChild(overlay);
     _loadingEl = overlay;
     requestAnimationFrame(() => overlay.classList.add('visible'));
 }
@@ -257,6 +304,11 @@ export function showLoading(message = null) {
 export function hideLoading() {
     _loadingCount = Math.max(0, _loadingCount - 1);
     if (_loadingCount > 0 || !_loadingEl) return;
+    const parent = getOverlayParent();
+    const boardWrapper = getBoardWrapper(parent);
+    if (boardWrapper) {
+        boardWrapper.classList.remove('board-blurred');
+    }
     const overlay = _loadingEl;
     _loadingEl = null;
     overlay.classList.remove('visible');

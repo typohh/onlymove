@@ -94,6 +94,8 @@ export function initializeBoard(size) {
 
     boardContainer.innerHTML = '';
     const boardWrapper = document.createElement('div');
+    boardWrapper.id = 'board-wrapper';
+    boardWrapper.className = 'board-wrapper';
     boardContainer.appendChild(boardWrapper);
 
     const board = new WGo.Board(boardWrapper, {
