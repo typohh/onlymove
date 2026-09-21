@@ -4,7 +4,8 @@
 // without booting the tsumego SPA). Computes on read (no cron blob); a short edge
 // cache bounds D1 reads under traffic. Lists every player active in the past week
 // who has at least RANK_START_MIN solves here (so their onlymove rank is known):
-// players who linked an EGD/AGA identity with their name, everyone else as "Anonymous".
+// a linked EGD/AGA identity shows its name, a player who chose a leaderboard
+// alias shows that, and everyone else shows "Anonymous".
 // Players still below the gate are only counted, in a footer tally.
 // A UNITS selector — onlymove, or any ranking system we hold a coupling for
 // (RANK_SYSTEMS) — picks the frame both value columns speak. It reads `?units=`
@@ -31,6 +32,7 @@
 
 import { readLeaderboardRows, RANK_START_MIN, RANK_SYSTEMS } from '../leaderboard.js';
 import { rankProgress, rankToLabel, clampRankBand } from '../../shared/rank-math.js';
+import { composeAliasAll } from '../../shared/alias-words.js';
 import { baseCss, ESC_SNIPPET, flag } from './page-shell.js';
 
 const ACTIVE_DAYS = 7;   // the visible board = players active in the past week
@@ -161,10 +163,17 @@ function renderPage(rows, belowMin) {
             if (c) decl[s] = c;
         }
         return {
-            // Anonymous (unregistered) rows carry anon: true and no name — the client
-            // renders a muted "Anonymous" label for them.
+            // Identity precedence is resolved HERE so the client's render is a
+            // plain pick: a linked federation name wins, then the player's own
+            // alias, then Anonymous. The alias is pre-composed in all four
+            // languages because the page is edge-cached and resolves its
+            // language on the CLIENT (see the STR note). `anon` is the THIRD
+            // state — no name AND no alias — not the negation of `registered`.
+            // Anonymous (unregistered, alias-less) rows carry anon: true and no
+            // name — the client renders a muted "Anonymous" label for them.
             name: r.registered ? (r.name || '—') : null,
-            anon: !r.registered,
+            alias: r.registered ? null : composeAliasAll(r.alias),
+            anon: !r.registered && !r.alias,
             flag: flag(r.country) || UNKNOWN_FLAG,
             decl,
             est,
@@ -221,8 +230,13 @@ function renderPage(rows, belowMin) {
   .pctn { display: inline-block; min-width: 2ch; text-align: right; font-variant-numeric: tabular-nums; }
   td.decl { color: var(--ink-muted); font-variant-numeric: tabular-nums; }
   .name { overflow: hidden; text-overflow: ellipsis; max-width: 16rem; display: inline-block; vertical-align: bottom; }
-  /* Unregistered players — muted so named (registered) rows stand out. */
-  .name.anon { color: var(--ink-muted); font-style: italic; }
+  /* Anonymous rows (no name and no alias) and rows showing a self-chosen alias
+     are BOTH unverified identities, so they share one treatment — muted and
+     italic — and a linked federation name is the only thing that stands out.
+     The classes stay distinct because the row data does: "anon" means no name
+     AND no alias, "pseudo" means an alias was chosen. */
+  .name.anon,
+  .name.pseudo { color: var(--ink-muted); font-style: italic; }
   /* Units selector — a dropdown above the table. There are as many options as
      there are ranking systems we couple to, so this is a <select> rather than a
      segmented control: the list grows with rank_map.json without ever wrapping.
@@ -344,7 +358,14 @@ function renderPage(rows, belowMin) {
 
   ${ESC_SNIPPET}
 
-  function nameOf(r) { return r.anon ? window.LB.t('anonymous') : (r.name || ''); }
+  function nameOf(r) {
+    // A chosen alias is already composed for this language server-side. The
+    // language comes off window.LB — the prelude is its own IIFE, so its LANG is
+    // not in scope here (referencing it directly is a ReferenceError at the
+    // first row that has an alias).
+    if (r.alias) return r.alias[window.LB.lang] || r.alias.en;
+    return r.anon ? window.LB.t('anonymous') : (r.name || '');
+  }
   // Declared cell: blank in onlymove units (an onlymove rank is measured, never
   // declared); otherwise this player's rank on the selected system, em-dash when
   // they have neither a declaration nor a linked account there.
@@ -446,7 +467,7 @@ function renderPage(rows, belowMin) {
     tbody.innerHTML = sorted.map(function (r, i) {
       return '<tr><td class="rank">' + (i + 1) + '</td>' +
         '<td>' + (r.flag ? r.flag + ' ' : '') +
-        '<span class="name' + (r.anon ? ' anon' : '') + '">' + esc(nameOf(r)) + '</span></td>' +
+        '<span class="name' + (r.anon ? ' anon' : (r.alias ? ' pseudo' : '')) + '">' + esc(nameOf(r)) + '</span></td>' +
         '<td class="decl">' + declText(r) + '</td>' +
         '<td class="val pred-start">' + estText(r) + '</td></tr>';
     }).join('');

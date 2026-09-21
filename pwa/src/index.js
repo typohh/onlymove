@@ -14,6 +14,7 @@ import { handleLeaderboard } from './handlers/leaderboard-page.js';
 import { handleStatistics } from './handlers/statistics-page.js';
 import { handleTournament } from './handlers/tournament-page.js';
 import { handleProfileHide, handleProfile } from './handlers/profile.js';
+import { handleAlias } from './handlers/alias.js';
 import { handleGoogleSignIn, handleGoogleLink, handleGoogleUnlink } from './handlers/google.js';
 import { handleRefit } from './handlers/refit.js';
 import { reconcileBuffers, pruneIdleLeaderboardRows, refreshAgaRatings } from './leaderboard.js';
@@ -42,6 +43,10 @@ const WRITE_ROUTES = [
   // "Hide my profile" toggle for the leaderboard (Account dialog, and the foot of
   // the rank survey). GET counterpart (read current state) is /profile.
   { path: '/profile/hide', method: 'POST', limiter: 'RL_WRITE', handler: handleProfileHide },
+  // The self-chosen leaderboard alias: set, replace or clear the three-word
+  // pseudonym shown on /leaderboard while no EGD/AGA identity is linked. GET
+  // counterpart (the account's current triplet) is /profile.
+  { path: '/profile/alias', method: 'POST', limiter: 'RL_WRITE', handler: handleAlias },
   // Google sign-in: a way back into an account code on a device that does not
   // have it. /google/signin only RESOLVES (which code, if any, this Google
   // account is bound to) and the client decides between logging in and linking;

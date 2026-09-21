@@ -1,11 +1,12 @@
 // js/account-ui.js
 //
-// The Account dialog (hamburger menu → More). Four values, each one a thing the
+// The Account dialog (hamburger menu → More). Five values, each one a thing the
 // user can change by clicking it:
 //
 //     Code       <user-id>            (?)
 //     Google     you@gmail.com       (?)
 //     Profile    Henry Hemming · 4d  (?)
+//     Alias      Brave Crimson Fox   (?)
 //     Anonymous  No                  (?)
 //
 // Google sits under Code because it is ABOUT the code: linking one is how a
@@ -34,10 +35,17 @@
 // refusal, so those go to a note line inside the dialog, where the user is
 // already looking, instead of a banner over the board.
 //
-// Code is local. Profile (which EGD/AGA player this account is) and Anonymous
-// (the leaderboard opt-out) are server state, read together in ONE
-// GET /profile and written only on an actual change — the rank survey offers the
-// same opt-out, so an unconditional write would let one dialog undo the other.
+// Code is local. Profile (which EGD/AGA player this account is), Alias (the
+// self-chosen leaderboard pseudonym) and Anonymous (the leaderboard opt-out) are
+// server state, read together in ONE GET /profile and written only on an actual
+// change — the rank survey offers the same opt-out, so an unconditional write
+// would let one dialog undo the other.
+//
+// The alias picker offers its words from shared/alias-words.js, the same module
+// the Worker renders the leaderboard from, so the choices work offline. What is
+// POSTed — and what comes back — is the ENGLISH triplet; the preview and the
+// overview row are the only places a translation is applied, and the language
+// is resolved locally, so one stored alias reads correctly in all four.
 //
 // The identity search runs in the BROWSER (js/identity-search.js): the Worker
 // cannot reach EGD at all, so a client-side search is the only kind there is.
@@ -47,7 +55,8 @@
 // to undo.
 
 import { state } from './state.js';
-import { getTerm } from './i18n.js';
+import { getTerm, getLang } from './i18n.js';
+import { ALIAS_ADJECTIVES, ALIAS_COLORS, ALIAS_ANIMALS, composeAlias } from '../shared/alias-words.js';
 import {
     showModal, modalTitle, modalButton, modalButtonRow, modalRankGrid,
     showConfirm,
@@ -158,6 +167,7 @@ class AccountPanel {
         this.linked = undefined;   // undefined = not read yet, null = none
         this.hidden = undefined;
         this.google = undefined;   // undefined = not read yet, bool = binding
+        this.alias = undefined;    // undefined = not read yet, null = none
         this.loadFailed = false;
         this.notice = '';          // the overview's one error line, '' when quiet
         this.load();
@@ -190,6 +200,7 @@ class AccountPanel {
             this.linked = profile.linked || null;
             this.hidden = !!profile.hidden;
             this.google = !!profile.google;
+            this.alias = profile.alias || null;
             // The server holds the binding; this device holds the address that
             // names it. When the two disagree the server wins and the local name
             // goes — an unlink from another device is exactly that disagreement.
@@ -202,12 +213,15 @@ class AccountPanel {
         }
     }
 
-    render(build, exitTerm, onExit) {
+    // `leadButtons` are laid out BEFORE the exit button, so a view that owns an
+    // action (the alias picker's Save/Clear) puts it in the same row as Cancel
+    // instead of growing a second button row inside the content.
+    render(build, exitTerm, onExit, leadButtons = []) {
         closeHint();
         this.host.textContent = '';
         this.footer.textContent = '';
         build(this.host);
-        this.footer.appendChild(modalButtonRow([modalButton(getTerm(exitTerm), onExit)]));
+        this.footer.appendChild(modalButtonRow([...leadButtons, modalButton(getTerm(exitTerm), onExit)]));
     }
 
     // --- the overview --------------------------------------------------------
@@ -221,6 +235,7 @@ class AccountPanel {
                 addRow(grid, 'accountRowGoogle', 'accountGoogleHint', this.googleValue());
             }
             addRow(grid, 'accountProfile', 'accountLinkIntro', this.profileValue());
+            addRow(grid, 'accountAlias', 'accountAliasHint', this.aliasValue());
             addRow(grid, 'accountAnonymous', 'accountHideLabel', this.anonymousValue());
             host.appendChild(grid);
             const note = document.createElement('div');
@@ -429,6 +444,111 @@ class AccountPanel {
         return valueEl(text, () => this.showSearch());
     }
 
+    // Alias: what the public board shows while no federation record is linked,
+    // rendered in the user's own language. Muted when unset, like the other
+    // "nothing chosen yet" values — an unset alias is Anonymous, not a name.
+    aliasValue() {
+        if (this.loadFailed) return valueEl(UNKNOWN, () => this.retry(), { muted: true });
+        if (this.alias === undefined) return valueEl(PENDING, () => {}, { muted: true });
+        if (!this.alias) return valueEl(getTerm('accountAliasNone'), () => this.showAlias(), { muted: true });
+        return valueEl(composeAlias(this.alias.adjective, this.alias.color, this.alias.animal, getLang()),
+            () => this.showAlias());
+    }
+
+    // The picker: the three word lists as three dropdowns SIDE BY SIDE, so they
+    // read left to right as the name itself — there is nothing to label and no
+    // separate preview of the result. The stored triplet is always English while
+    // the options are the localized words, which is what lets the leaderboard
+    // render one alias in four languages.
+    showAlias() {
+        this.view = 'alias';
+        this.notice = '';
+        const current = this.alias || {};
+        // Opening the picker with nothing stored starts from a RANDOM triplet
+        // rather than three first-list words, so the default is a suggestion
+        // instead of the same "Brave Crimson Fox" everybody would otherwise be
+        // offered. A word the module no longer holds (a retired one on an old
+        // alias) also falls back to a random pick from the current list, which
+        // keeps every select showing a value it actually offers.
+        const pick = (list, chosen) => list.some((w) => w.en === chosen)
+            ? chosen
+            : list[Math.floor(Math.random() * list.length)].en;
+        const picked = {
+            adjective: pick(ALIAS_ADJECTIVES, current.adjective),
+            color: pick(ALIAS_COLORS, current.color),
+            animal: pick(ALIAS_ANIMALS, current.animal),
+        };
+
+        const row = document.createElement('div');
+        row.className = 'account-alias-row';
+        for (const [part, list, labelTerm] of [
+            ['adjective', ALIAS_ADJECTIVES, 'accountAliasAdjective'],
+            ['color', ALIAS_COLORS, 'accountAliasColor'],
+            ['animal', ALIAS_ANIMALS, 'accountAliasAnimal'],
+        ]) {
+            const sel = document.createElement('select');
+            sel.className = 'account-select';
+            // No visible label: the part name survives as the accessible name.
+            sel.setAttribute('aria-label', getTerm(labelTerm));
+            for (const w of list) {
+                const opt = document.createElement('option');
+                opt.value = w.en;
+                opt.textContent = w[getLang()] || w.en;
+                sel.appendChild(opt);
+            }
+            sel.value = picked[part];
+            sel.addEventListener('change', () => { picked[part] = sel.value; });
+            row.appendChild(sel);
+        }
+
+        const message = document.createElement('div');
+        message.className = 'account-note';
+
+        const save = modalButton(getTerm('accountAliasSave'), async () => {
+            save.classList.add('disabled');
+            message.textContent = '';
+            let body = null;
+            try {
+                const res = await postJson('/profile/alias', {
+                    userId: state.userId,
+                    adjective: picked.adjective,
+                    color: picked.color,
+                    animal: picked.animal,
+                });
+                body = await res.json();
+            } catch (_) { body = null; }
+            save.classList.remove('disabled');
+            if (body && body.ok) { this.alias = body.alias; this.showOverview(); return; }
+            message.textContent = getTerm(body && body.error === 'alias_taken'
+                ? 'accountAliasTaken' : 'accountAliasFailed');
+        });
+
+        const buttons = [];
+        // Clear exists only when there is something to clear: an absent button
+        // states "nothing is set" better than a disabled one.
+        if (this.alias) {
+            const clear = modalButton(getTerm('accountAliasClear'), async () => {
+                clear.classList.add('disabled');
+                message.textContent = '';
+                let body = null;
+                try {
+                    const res = await postJson('/profile/alias', { userId: state.userId, clear: true });
+                    body = await res.json();
+                } catch (_) { body = null; }
+                clear.classList.remove('disabled');
+                if (body && body.ok) { this.alias = null; this.showOverview(); return; }
+                message.textContent = getTerm('accountAliasFailed');
+            });
+            buttons.push(clear);
+        }
+        buttons.push(save);
+
+        this.render((host) => {
+            host.appendChild(row);
+            host.appendChild(message);
+        }, 'accountCancel', () => this.showOverview(), buttons);
+    }
+
     anonymousValue() {
         if (this.loadFailed) return valueEl(UNKNOWN, () => this.retry(), { muted: true });
         if (this.hidden === undefined) return valueEl(PENDING, () => {}, { muted: true });
@@ -440,6 +560,7 @@ class AccountPanel {
         this.linked = undefined;
         this.hidden = undefined;
         this.google = undefined;
+        this.alias = undefined;
         this.showOverview();
         this.load({ announceFailure: true });
     }

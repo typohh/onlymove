@@ -1247,6 +1247,37 @@ input, textarea, [contenteditable],
     box-sizing: content-box;
 }
 
+/* The alias picker (js/account-ui.js): the three words sit side by side and read
+   as the name itself, so there are no labels and no separate preview. The system
+   FORM-CONTROL colour pair (Field/FieldText) rather than the panel tokens,
+   because the option popup is painted by the OS: inheriting the app's ink leaves
+   the open list white-on-white in dark mode, while Field/FieldText track
+   `color-scheme` (declared in index.html) on the closed control AND the list.
+   The selects share the row equally and may shrink, so the longest localized
+   words clip rather than pushing the row past the modal — the open list still
+   shows them in full. */
+.account-alias-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.2857em;
+}
+.account-select {
+    flex: 1 1 0;
+    min-width: 0;
+    max-width: 12ch;
+    font: inherit;
+    color: FieldText;
+    background: Field;
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius);
+    padding: 0.119em 0.3571em;
+}
+.account-select option {
+    color: FieldText;
+    background: Field;
+}
+
 /* Query and its button on one line — the button acts on the field beside it, so
    it belongs beside it. */
 .account-searchrow {

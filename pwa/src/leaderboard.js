@@ -790,11 +790,12 @@ export async function readLeaderboardRows(env, { activeDays = 7 } = {}) {
     // since a claim is a historical fact rather than a current state.
     const stmt = env.DB.prepare(
         `SELECT l.user_id, x.display_name, x.country_code, l.pred_rank, l.time_delta_rating,
-                l.buffer, l.country,
+                l.buffer, l.country, a.adjective, a.color, a.animal,
                 (x.user_id IS NOT NULL) AS registered
            FROM (SELECT *, user_id AS u FROM leaderboard
                   WHERE last_active >= ?1) l
-           LEFT JOIN external_ids x ON x.user_id = u`
+           LEFT JOIN external_ids x ON x.user_id = u
+           LEFT JOIN user_aliases a ON a.user_id = u`
     ).bind(new Date(Date.now() - activeDays * 86400000).toISOString());
     // Latest declaration per (user, server) — one pass over the (small)
     // rank_surveys table; stitched onto rows in JS below. `country`/`rank_label`/
@@ -944,7 +945,15 @@ export async function readLeaderboardRows(env, { activeDays = 7 } = {}) {
         const country = isHidden ? null
             : (egdCountry || r.country_code || r.country || surveyCountry || null);
         const registered = isHidden ? false : !!r.registered;
-        visible.push({ name, country, registered, currentInternal, est, decl });
+        // The self-chosen alias, withheld from a hidden profile exactly like the
+        // name and the declared ranks. It rides ALONGSIDE `registered` rather
+        // than replacing it: which one the page shows is the page's precedence
+        // decision (linked name > alias > Anonymous), and a linked player who
+        // keeps an alias still has it to fall back on after an unlink.
+        const alias = (!isHidden && r.adjective && r.color && r.animal)
+            ? { adjective: r.adjective, color: r.color, animal: r.animal }
+            : null;
+        visible.push({ name, country, registered, alias, currentInternal, est, decl });
     }
     return { rows: visible, belowMin };
 }

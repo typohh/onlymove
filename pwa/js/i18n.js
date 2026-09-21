@@ -191,7 +191,17 @@ const localization = {
     accountLinkTaken: '该棋手已被其他账户关联',
     accountLinkUnreachable: '无法连接段位数据库——请重试',
     accountLinkFailed: '关联失败——请重试',
-    accountHideLabel: '不在排行榜上显示您的姓名、国家/地区和申报段位。您的预测段位仍会显示，但为匿名。',
+    accountHideLabel: '不在排行榜上显示您的姓名、国家/地区、申报段位和别名。您的预测段位仍会显示，但为匿名。',
+    accountAlias: '别名',
+    accountAliasHint: '为公开排行榜挑选一个名字。其他玩家不能选择相同的名字。',
+    accountAliasNone: '未设置',
+    accountAliasAdjective: '形容词',
+    accountAliasColor: '颜色',
+    accountAliasAnimal: '动物',
+    accountAliasSave: '保存',
+    accountAliasClear: '清除',
+    accountAliasTaken: '该别名已被占用——请另选一个',
+    accountAliasFailed: '无法保存别名——请重试',
     accountHideFailed: '保存失败——请重试',
     rankSurveyTitle: '您目前活跃的段位有哪些？',
     rankSurveyIntro: '您的回答将用于改进所有人的段位预测。',
@@ -222,7 +232,7 @@ const localization = {
     onbBoardSize: '打开「菜单」即可在 9×9 和 13×13 之间切换。',
     onbTrainingFocus: '应用现在会针对您的弱项出题。此列表是它正在重点练习的弱点。详情请见菜单「我的统计」中的弱点页。',
     onbRecallButton: '有题目到了复习时间——徽章显示等待中的数量。它们会自动混入你的题目流，也可以点击「回忆」立即复习一道。',
-    onbLeaderboard: '你已经匿名出现在排行榜上了。在「菜单」中即可查看；在「账户」中关联 EGD 或 AGA 棋手记录，就能以真名参与竞争。',
+    onbLeaderboard: '你已经匿名出现在排行榜上了。在「菜单」中即可查看；在「账户」中关联 EGD 或 AGA 棋手记录，就能以真名参与竞争，也可以为自己挑选一个三词别名。',
     onbLinked: '这是别人分享的题目——尽管一试！它不会影响你的段位和历史记录。'
   },
   ja: {
@@ -413,7 +423,17 @@ const localization = {
     accountLinkTaken: 'この棋士はすでに別のアカウントと連携しています',
     accountLinkUnreachable: '段級位データベースに接続できませんでした — もう一度お試しください',
     accountLinkFailed: '連携できませんでした — もう一度お試しください',
-    accountHideLabel: 'ランキングに名前・国・申告した段級位を表示しません。予測ランクは匿名で引き続き表示されます。',
+    accountHideLabel: 'ランキングに名前・国・申告した段級位・別名を表示しません。予測ランクは匿名で引き続き表示されます。',
+    accountAlias: '別名',
+    accountAliasHint: '公開ランキングで使う名前を選べます。同じ名前を選べるのは一人だけです。',
+    accountAliasNone: '未設定',
+    accountAliasAdjective: '形容詞',
+    accountAliasColor: '色',
+    accountAliasAnimal: '動物',
+    accountAliasSave: '保存',
+    accountAliasClear: '解除',
+    accountAliasTaken: 'その別名はすでに使われています — 別のものを選んでください',
+    accountAliasFailed: '別名を保存できませんでした — もう一度お試しください',
     accountHideFailed: '保存できませんでした — もう一度お試しください',
     rankSurveyTitle: '現在の棋力（段位・級位）を教えてください（複数可）',
     rankSurveyIntro: 'ご回答は、みんなの段級位予測の精度を高めるために使われます。',
@@ -444,7 +464,7 @@ const localization = {
     onbBoardSize: '「メニュー」を開くと、9×9 と 13×13 を切り替えられます。',
     onbTrainingFocus: 'アプリはあなたの弱点に合わせて問題を出すようになりました。このリストは現在重点的に出題している弱点です。詳しくはメニューの「自分の統計」の弱点タブへ。',
     onbRecallButton: '復習の時期になった問題があります。バッジは待機中の数です。放っておいても出題に混ざりますが、「リコール」をタップすれば今すぐ解けます。',
-    onbLeaderboard: 'あなたはすでに匿名でランキングに載っています。「メニュー」から見られます。「アカウント」で EGD または AGA の棋士登録を連携すると、実名で参加できます。',
+    onbLeaderboard: 'あなたはすでに匿名でランキングに載っています。「メニュー」から見られます。「アカウント」で EGD または AGA の棋士登録を連携すると、実名で参加できます。自分で三語の別名を選ぶこともできます。',
     onbLinked: '共有された問題です。気軽に挑戦してください——ランクや履歴には影響しません。'
   },
   ko: {
@@ -635,7 +655,17 @@ const localization = {
     accountLinkTaken: '이 기사는 이미 다른 계정에 연결되어 있습니다',
     accountLinkUnreachable: '급/단 데이터베이스에 연결할 수 없습니다 — 다시 시도해 주세요',
     accountLinkFailed: '연결하지 못했습니다 — 다시 시도해 주세요',
-    accountHideLabel: '순위표에 이름, 국가, 신고한 급/단을 표시하지 않습니다. 예측 랭크는 익명으로 계속 표시됩니다.',
+    accountHideLabel: '순위표에 이름, 국가, 신고한 급/단, 별명을 표시하지 않습니다. 예측 랭크는 익명으로 계속 표시됩니다.',
+    accountAlias: '별명',
+    accountAliasHint: '공개 순위표에 쓸 이름을 고르세요. 같은 이름은 다른 플레이어가 선택할 수 없습니다.',
+    accountAliasNone: '없음',
+    accountAliasAdjective: '형용사',
+    accountAliasColor: '색',
+    accountAliasAnimal: '동물',
+    accountAliasSave: '저장',
+    accountAliasClear: '지우기',
+    accountAliasTaken: '이미 사용 중인 별명입니다 — 다른 것을 선택하세요',
+    accountAliasFailed: '별명을 저장하지 못했습니다 — 다시 시도해 주세요',
     accountHideFailed: '저장하지 못했습니다 — 다시 시도해 주세요',
     rankSurveyTitle: '현재 활동 중인 급수/단위를 모두 알려주세요',
     rankSurveyIntro: '답변은 모든 사용자의 급/단 예측을 개선하는 데 사용됩니다.',
@@ -666,7 +696,7 @@ const localization = {
     onbBoardSize: '「메뉴」를 열면 9×9 와 13×13 을 전환할 수 있습니다.',
     onbTrainingFocus: '앱이 이제 약점에 맞춰 문제를 냅니다. 이 목록은 현재 집중적으로 출제 중인 약점입니다. 자세한 내용은 메뉴 「내 통계」의 약점 탭에서 확인하세요.',
     onbRecallButton: '복습할 때가 된 문제가 있어요. 배지는 대기 중인 개수입니다. 그냥 두면 출제에 섞여 나오고, 「리콜」을 탭하면 지금 바로 풀 수 있습니다.',
-    onbLeaderboard: '이미 익명으로 순위표에 올라 있습니다. 「메뉴」에서 확인하세요. 「계정」에서 EGD 또는 AGA 기사 등록을 연결하면 실명으로 경쟁할 수 있습니다.',
+    onbLeaderboard: '이미 익명으로 순위표에 올라 있습니다. 「메뉴」에서 확인하세요. 「계정」에서 EGD 또는 AGA 기사 등록을 연결하면 실명으로 경쟁할 수 있고, 직접 세 단어 별명을 고를 수도 있습니다.',
     onbLinked: '공유된 문제입니다. 부담 없이 도전해 보세요——랭크나 기록에는 영향을 주지 않습니다.'
   },
   en: {
@@ -776,7 +806,7 @@ const localization = {
     onbBoardSize: 'Open the menu to switch between 9×9 and 13×13.',
     onbTrainingFocus: 'The app now aims some problems at your weak points. This list shows the weaknesses it is serving extra problems for. Details are under Weaknesses in My stats in the menu.',
     onbRecallButton: 'A problem is due for review — the badge counts the ones waiting. They mix into your feed on their own, or tap Recall to do one now.',
-    onbLeaderboard: 'You\'re already on the leaderboard — anonymously. Find it in the menu; link your EGD or AGA record under Account to compete under your name.',
+    onbLeaderboard: 'You\'re already on the leaderboard — anonymously. Find it in the menu; link your EGD or AGA record under Account to compete under your name, or pick a three-word alias of your own.',
     onbLinked: 'A shared problem — give it a try! It won\'t affect your rank or history.',
 
     statsFailed: 'No stats available right now, try completing another problem.',
@@ -891,7 +921,17 @@ const localization = {
     accountLinkTaken: 'That player is already linked to another account',
     accountLinkUnreachable: 'Couldn\'t reach the rating database — please try again',
     accountLinkFailed: 'Couldn\'t link — please try again',
-    accountHideLabel: 'Withholds your name, country, and declared ranks from the leaderboard. Your predicted rank still shows, but anonymously.',
+    accountHideLabel: 'Withholds your name, country, declared ranks, and your alias from the leaderboard. Your predicted rank still shows, but anonymously.',
+    accountAlias: 'Alias',
+    accountAliasHint: 'Pick a name for the public leaderboard. No other player can choose the same one.',
+    accountAliasNone: 'None',
+    accountAliasAdjective: 'Adjective',
+    accountAliasColor: 'Color',
+    accountAliasAnimal: 'Animal',
+    accountAliasSave: 'Save',
+    accountAliasClear: 'Clear',
+    accountAliasTaken: 'That alias is already taken — pick another',
+    accountAliasFailed: 'Couldn\'t save the alias — please try again',
     accountHideFailed: 'Couldn\'t save — please try again',
     rankSurveyTitle: "What are your current active ranks?",
     rankSurveyIntro: 'Your answers are used to improve the rank predictions for everyone.',
@@ -910,7 +950,7 @@ const localization = {
  * ('zh' | 'ja' | 'ko' | 'en'). Single source of truth for getTerm and
  * localizedMotif.
  */
-function getLang() {
+export function getLang() {
   const lang = navigator.language || 'en';
   if (lang.startsWith('zh')) return 'zh';
   if (lang.startsWith('ja')) return 'ja';

@@ -19,19 +19,25 @@
 // hides — so the flag lives in its own table, not on external_ids.
 //
 //   POST /profile/hide  { userId, hidden: bool }  -> { ok: true, hidden }
+//   POST /profile/alias { userId, adjective, color, animal } | { userId, clear: true }
 //   GET  /profile?userId=<id>
-//       -> { hidden: bool, linked: {...}|null, google: bool } (no-store)
+//       -> { hidden: bool, linked: {...}|null, google: bool,
+//            alias: {adjective, color, animal}|null } (no-store)
 //
 // The GET answers the Account dialog's whole panel — the flag, the current
-// federation binding, AND whether a Google account can sign in to this code — in
-// one request, so opening it costs one round trip rather than three. `google` is
-// a bare boolean because a bare boolean is all that is stored: the binding keeps
-// Google's opaque subject id and no address (see handlers/google.js).
+// federation binding, whether a Google account can sign in to this code, AND the
+// account's own leaderboard alias — in one request, so opening it costs one
+// round trip rather than four. `google` is a bare boolean because a bare boolean
+// is all that is stored: the binding keeps Google's opaque subject id and no
+// address (see handlers/google.js). `alias` is the raw ENGLISH triplet, not a
+// display string: the dialog localizes it with the same shared/alias-words.js
+// the picker offers, so what the user edits is exactly what is stored.
 
 import { jsonResponse, CORS_HEADERS } from '../http.js';
 import { isValidUserId } from '../guards.js';
 import { readLinkedIdentity } from './link.js';
 import { hasGoogleBinding } from './google.js';
+import { readAlias } from '../aliases.js';
 
 // POST: set/clear the hidden flag. INSERT OR IGNORE to hide, DELETE to unhide —
 // idempotent either way. Format-validated (isValidUserId + boolean) before any
@@ -60,22 +66,23 @@ export async function handleProfileHide(request, env) {
   }
 }
 
-// GET: the account's leaderboard profile — the hidden flag and the linked
-// federation identity, so a dialog renders both controls in their true state
-// without guessing. Three point lookups on their keys. no-store so the per-user
-// answer is never edge-cached against another user's request (the service worker
-// is told to skip this path too — see sw.js).
+// GET: the account's leaderboard profile — the hidden flag, the linked
+// federation identity and the chosen alias, so a dialog renders every control in
+// its true state without guessing. Four point lookups on their keys. no-store so
+// the per-user answer is never edge-cached against another user's request (the
+// service worker is told to skip this path too — see sw.js).
 export async function handleProfile(request, env) {
   const userId = new URL(request.url).searchParams.get('userId');
   if (!isValidUserId(userId)) return jsonResponse({ error: 'Invalid userId' }, 400);
   if (!env.DB) return jsonResponse({ error: 'Database not configured' }, 500);
   try {
-    const [row, linked, google] = await Promise.all([
+    const [row, linked, google, alias] = await Promise.all([
       env.DB.prepare(`SELECT 1 AS x FROM hidden_profiles WHERE user_id = ?1`).bind(userId).first(),
       readLinkedIdentity(env, userId),
       hasGoogleBinding(env, userId),
+      readAlias(env, userId),
     ]);
-    return new Response(JSON.stringify({ hidden: !!row, linked: linked || null, google }), {
+    return new Response(JSON.stringify({ hidden: !!row, linked: linked || null, google, alias }), {
       status: 200,
       headers: { ...CORS_HEADERS, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
     });
