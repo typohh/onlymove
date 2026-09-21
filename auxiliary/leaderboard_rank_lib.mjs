@@ -15,8 +15,15 @@
 //   * sqliteJson()/tableColumns() read the local mirror read-only.
 //   * rankStr()/durationStr() format the two quantities every such report prints.
 //
+// The bundle also re-exports the shared client helpers a report needs to treat a
+// country exactly as the Worker does — normalizeCountry (real ISO-alpha-2 only,
+// sentinels -> null) and flag (code -> flag emoji). They ride the bundle rather than a
+// direct import of pwa/shared/*.js because pwa/package.json has no "type": "module",
+// so a bare Node import of those ESM files is a type-less-package reparse warning.
+//
 // Extracted from auxiliary/leaderboard_player_stats.mjs, which held the only copy;
-// auxiliary/top_users_report.mjs is the second user. Nothing here writes.
+// auxiliary/top_users_report.mjs and auxiliary/share_stats.mjs are the other users.
+// Nothing here writes.
 
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
@@ -44,6 +51,7 @@ export async function loadRankModule() {
             contents: `
                 import { interpExtrap, rankToLabel, rankLabelToRank } from './shared/rank-math.js';
                 import { estimateWindowRankFromFlat, flattenAttempt } from './shared/rank-window.js';
+                import { flag } from './shared/flag.js';
                 import {
                     RANK_START_MIN, BUFFER_CAP, gorToRank, agaRatingToRank, shortRankLabel,
                     isVerifiedActive, internalToServerRank, timeDeltaRatingFromBuffer, parseBuffer,
@@ -56,7 +64,7 @@ export async function loadRankModule() {
 
                 export {
                     RANK_START_MIN, BUFFER_CAP, gorToRank, agaRatingToRank,
-                    isVerifiedActive, rankToLabel, parseBuffer, normalizeCountry,
+                    isVerifiedActive, rankToLabel, parseBuffer, normalizeCountry, flag,
                 };
 
                 // Mirrors leaderboard.js's (private) rankAfterRatingDelta.
