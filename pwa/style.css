@@ -963,6 +963,60 @@ input, textarea, [contenteditable],
     margin: 0 auto 0.3571em;
     text-align: center;
 }
+/* A several-sentence explanatory paragraph in a modal (the board-size
+   picker's pitch): the note's muted ink at paragraph length, but left-aligned,
+   because centered text runs badly past a single line. */
+.modal-body {
+    font-size: 0.8em;
+    color: var(--ink-muted);
+    max-width: 26em;
+    margin: 0;
+    text-align: left;
+    line-height: 1.6;
+}
+
+/* --- Board-size picker (js/main.js showBoardSizePicker) --------------------
+   The one dialog that is TWO cards rather than the shared single-panel shell:
+   the site's pitch on top, the question and its size buttons underneath. The
+   shared modal chrome is neutralised so each panel carries its own surface;
+   the shell still centres the stack and caps its width, and its flex `gap`
+   becomes the space between the two panels. */
+#ios-install-modal.board-size-picker {
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    padding: 0;
+    gap: 0.7143em;
+}
+.board-size-picker .picker-question,
+.board-size-picker .picker-pitch {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4286em;
+    padding: 0.5714em 0.8571em;
+    background-color: var(--panel);
+    border: 1px solid var(--panel-edge);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-card);
+}
+/* The pitch reads as prose, so its body is left-aligned rather than centred
+   like the question below it; the brand line above it is centred. */
+.board-size-picker .picker-pitch {
+    gap: 0.2857em;
+    text-align: left;
+}
+/* The pitch runs to two paragraphs. The panel gap keeps the brand close to the
+   first one, so the break between them gets extra margin to read as a break
+   rather than another line. */
+.board-size-picker .picker-pitch .modal-body + .modal-body {
+    margin-top: 0.2857em;
+}
+.board-size-picker .picker-brand {
+    font-weight: bold;
+    /* Matches #ios-install-title, so the two headings read at one size. */
+    font-size: 1.1em;
+    text-align: center;
+}
 /* A value cell in the rank grid: left-set inside its centred container, so rows
    of different widths keep one edge against their labels. */
 .modal-rank-value {

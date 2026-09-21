@@ -59,18 +59,48 @@ function getBoardSizeFromPath() {
  * Cold-start picker shown to brand-new users (no `boardSize` in localStorage
  * and no URL hint). Returns a Promise that resolves to the chosen size.
  */
-function showBoardSizePicker({ dismissable = false } = {}) {
+function showBoardSizePicker({ dismissable = false, showIntro = false } = {}) {
     return new Promise((resolve) => {
         showModal({
             dismissable,
             onDismiss: () => resolve(null),
             build: (modal, close) => {
                 modal.style.width = 'max-content';
-                modal.appendChild(modalTitle(getTerm('boardSizePickerTitle')));
-                modal.appendChild(modalButtonRow(
+                // The picker renders as stacked panels rather than the shared
+                // single-panel modal, so the dialog's own chrome is dropped and
+                // each panel supplies its surface (`.board-size-picker`, style.css).
+                modal.classList.add('board-size-picker');
+
+                // Top panel, first-time-only: who we are and why whole-board
+                // positions at the right difficulty beat games or a tsumego
+                // collection. A returning user switching sizes already knows
+                // the site. The copy is blank-line-separated paragraphs (the
+                // i18n convention), one left-aligned body block each.
+                if (showIntro) {
+                    const pitch = document.createElement('div');
+                    pitch.className = 'picker-pitch';
+                    const brand = document.createElement('div');
+                    brand.className = 'picker-brand';
+                    brand.textContent = getTerm('boardSizePickerBrand');
+                    pitch.appendChild(brand);
+                    for (const para of getTerm('boardSizePickerIntro').split('\n\n')) {
+                        const body = document.createElement('div');
+                        body.className = 'modal-body';
+                        body.textContent = para;
+                        pitch.appendChild(body);
+                    }
+                    modal.appendChild(pitch);
+                }
+
+                // Bottom panel: the question and its two answers.
+                const question = document.createElement('div');
+                question.className = 'picker-question';
+                question.appendChild(modalTitle(getTerm('boardSizePickerTitle')));
+                question.appendChild(modalButtonRow(
                     SUPPORTED_BOARD_SIZES.map((size) =>
                         modalButton(`${size}x${size}`, () => { close(); resolve(size); }))
                 ));
+                modal.appendChild(question);
             },
         });
     });
@@ -526,7 +556,7 @@ async function resolveInitialBoardSize(tsumegoId) {
         // real-looking board instead of empty void.
         initializeBoard(state.boardSize);
         hideBootSplash();
-        const chosen = await showBoardSizePicker();
+        const chosen = await showBoardSizePicker({ showIntro: true });
         setBoardSize(chosen);
         // Same reason as above — force-persist when chosen equals the default.
         localStorage.setItem('boardSize', String(chosen));
