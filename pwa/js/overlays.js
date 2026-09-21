@@ -158,10 +158,9 @@ export function displayOverlay(message, duration, callback, color = 'rgba(139, 0
     }
 
     // Fast fade in/out for messages
+    void overlay.offsetWidth;
     overlay.style.transition = 'opacity 0.3s ease-in-out';
-    requestAnimationFrame(() => {
-        overlay.style.opacity = '0.9';
-    });
+    overlay.style.opacity = '0.9';
 
     const dismiss = () => {
         if (boardWrapper) {
@@ -269,13 +268,15 @@ export function fadeOverlay(duration, callback, stats = null, message = null, co
 
     parent.appendChild(overlay);
 
-    // Synchronously attach and blur on next frame so both elements blur in lockstep
-    requestAnimationFrame(() => {
-        if (boardWrapper) boardWrapper.classList.add('board-blurred');
-        if (snapshot) snapshot.classList.add('board-blurred');
-        overlay.style.transition = 'opacity 0.5s ease-in-out';
-        overlay.style.opacity = '1';
-    });
+    // Commit initial state (opacity: 0 on overlay, clean snapshot) to layout
+    // before triggering the transition, so newly inserted DOM elements transition
+    // smoothly rather than snapping instantly to their target values.
+    if (snapshot) void snapshot.offsetWidth;
+    void overlay.offsetWidth;
+
+    if (boardWrapper) boardWrapper.classList.add('board-blurred');
+    if (snapshot) snapshot.classList.add('board-blurred');
+    overlay.style.opacity = '1';
 
     // Halfway through the transition (at 500ms), under full blur cover,
     // run the callback (which loads the next problem). If it returns a promise,
@@ -339,7 +340,8 @@ export function showLoading(message = null) {
     }
     parent.appendChild(overlay);
     _loadingEl = overlay;
-    requestAnimationFrame(() => overlay.classList.add('visible'));
+    void overlay.offsetWidth;
+    overlay.classList.add('visible');
 }
 
 export function hideLoading() {
