@@ -356,6 +356,20 @@ function wireHeaderReadingHints() {
     }
 }
 
+// Nothing in the app is dragged, so no drag may START here and no drop may
+// LAND here. The stylesheet's user-drag rule already stops anchors and images;
+// this also stops a dragged text selection, which that rule does not cover.
+// The reason is the freeze a stray drag causes: once a native drag session
+// starts, Blink discards every mouse event until the compositor ends it, and
+// on Wayland Chrome a drag begun from a press that has already released never
+// ends — the window stops responding entirely. A file dropped on the window
+// would otherwise NAVIGATE the installed app to that file.
+function wireNoDrag() {
+    document.addEventListener('dragstart', (e) => e.preventDefault());
+    document.addEventListener('dragover', (e) => e.preventDefault());
+    document.addEventListener('drop', (e) => e.preventDefault());
+}
+
 // The four action buttons; behavior keys off state.appMode.
 function wireActionButtons() {
     // Handle button1 click - behavior depends on current mode
@@ -780,6 +794,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     initCoordInput();
     wireHeaderReadingHints();
     wireActionButtons();
+    wireNoDrag();
 
     // Normalize answer-history storage to the unified working set + IndexedDB
     // tail (history-store.js): everything beyond the cap is evicted to IDB —

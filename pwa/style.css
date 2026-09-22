@@ -334,6 +334,16 @@ input, textarea, [contenteditable],
    opaque grey block: the canvas and the art show through, so the buttons read
    as part of the page rather than a bar laid over it. The edge is an inset
    shadow, not a border, so it adds nothing to the box the layout measures. */
+/* Nothing in the app is meant to be dragged, and the defaults are all
+   liabilities: an anchor or image drag starts a native drag session on a press
+   that moves a few pixels before it releases, after which Blink discards every
+   mouse event until the compositor ends the drag — and on Wayland Chrome a drag
+   begun from an already-released press never ends, freezing the window. Text
+   selection stays (the account code is copied from the page); dragging a
+   selection is blocked with the rest by the dragstart handler in main.js. */
+* {
+    -webkit-user-drag: none;
+}
 .btn {
     background-color: var(--surface);
     color: var(--ink);

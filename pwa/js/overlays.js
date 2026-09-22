@@ -1,7 +1,10 @@
 // js/overlays.js
 
-import { state } from './state.js';
+import { state, setAcceptClicks } from './state.js';
 import { getTerm, getDescriptiveRank } from './i18n.js';
+// Deliberate ESM cycle (ui.js imports this module): updateAllUI is only ever
+// called at runtime, never at module-eval time — same rule as board.js.
+import { updateAllUI } from './ui.js';
 
 // Sizes below are CSS token expressions, not measurements. The result overlay's
 // type is a fraction of --board-side (the board's edge length, which style.css
@@ -229,6 +232,7 @@ function captureBoardSnapshot(boardWrapper) {
 // the swap gate still applies, so it can never lift onto an unready board.
 // Returns a promise that resolves when the fade-out starts, i.e. when the
 // board underneath becomes visible to the user.
+let fadeGeneration = 0;
 export function fadeOverlay(duration, callback, stats = null, message = null, colors = { background: 'transparent', text: 'white' }, { buttonText = null } = {}) {
     const parent = getOverlayParent();
     const boardWrapper = getBoardWrapper(parent);
@@ -290,7 +294,25 @@ export function fadeOverlay(duration, callback, stats = null, message = null, co
         ? Promise.resolve()
         : new Promise(resolve => setTimeout(resolve, duration));
 
-    return Promise.all([swapped, minDisplay, buttonClicked]).catch(() => {}).then(() => {
+    // Clicks stay off until the cover LIFTS, not until the swap underneath
+    // has painted: the swap re-enables them (displayProblem, enterAnalysisMode),
+    // and the overlay covers only the board, so for the rest of the hold the
+    // action buttons were live over a board the user could not see — a
+    // Previous click there entered review under the correct-answer fade. The
+    // callback's own re-enable is undone here once it settles, and the lift
+    // restores it; a newer fade started meanwhile owns the lock instead.
+    const generation = ++fadeGeneration;
+    const relocked = swapped.catch(() => {}).then(() => {
+        if (generation !== fadeGeneration) return;
+        setAcceptClicks(false);
+        updateAllUI();
+    });
+
+    return Promise.all([relocked, minDisplay, buttonClicked]).catch(() => {}).then(() => {
+        if (generation === fadeGeneration) {
+            setAcceptClicks(true);
+            updateAllUI();
+        }
         if (boardWrapper) {
             boardWrapper.classList.remove('board-blurred');
         }
