@@ -16,6 +16,11 @@
 // is read back on open so an existing opt-out shows as already checked, and written
 // only when the user actually changes it, so submitting a survey can never silently
 // un-hide someone who opted out in Account.
+//
+// The same GET carries the account's latest declaration per server, and the
+// pickers open prefilled with it, so a returning user confirms or edits rather
+// than re-entering every server. A picker the user has already touched when the
+// answer lands is left as they set it.
 
 import { state, getAnswerHistoryForSize } from './state.js';
 import { getTerm } from './i18n.js';
@@ -93,10 +98,21 @@ function showRankSurvey() {
     const noneLabel = getTerm('rankSurveyNone');
     const rankOptions = buildRankOptions();
     const selects = {};
+    const buttonTexts = {};
     const selectedRanks = {};
+    const touched = new Set();
     for (const server of SERVERS) {
         selectedRanks[server] = '';
     }
+    const prefill = (declared) => {
+        for (const server of SERVERS) {
+            const rank = declared[server];
+            if (touched.has(server) || !rankOptions.includes(rank)) continue;
+            selectedRanks[server] = rank;
+            if (selects[server]) selects[server].value = rank;
+            if (buttonTexts[server]) buttonTexts[server].textContent = rank;
+        }
+    };
 
     // The leaderboard opt-out, reflected from the server on open (see the module
     // note) and written back on close only if the user moved it.
@@ -111,6 +127,7 @@ function showRankSurvey() {
                     hiddenAtOpen = j.hidden;
                     hideCheckbox.checked = j.hidden;
                 }
+                if (j && j.declared && typeof j.declared === 'object') prefill(j.declared);
             })
             .catch(() => {});
     }
@@ -176,6 +193,9 @@ function showRankSurvey() {
                         select.appendChild(opt);
                     }
 
+                    select.value = selectedRanks[server];
+                    select.addEventListener('change', () => touched.add(server));
+
                     const id = `rank-survey-${server.toLowerCase()}`;
                     select.id = id;
                     label.htmlFor = id;
@@ -189,12 +209,13 @@ function showRankSurvey() {
                     btn.className = 'survey-btn';
 
                     const textSpan = document.createElement('span');
-                    textSpan.textContent = noneLabel;
+                    textSpan.textContent = selectedRanks[server] || noneLabel;
                     const arrowSpan = document.createElement('span');
                     arrowSpan.textContent = '▼';
                     arrowSpan.className = 'survey-btn-arrow';
                     btn.appendChild(textSpan);
                     btn.appendChild(arrowSpan);
+                    buttonTexts[server] = textSpan;
 
                     btn.addEventListener('click', (e) => {
                         e.stopPropagation();
@@ -232,6 +253,7 @@ function showRankSurvey() {
 
                             opt.addEventListener('click', (ev) => {
                                 ev.stopPropagation();
+                                touched.add(server);
                                 selectedRanks[server] = val;
                                 textSpan.textContent = labelText;
                                 closeActivePopover();

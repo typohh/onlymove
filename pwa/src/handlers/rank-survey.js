@@ -4,6 +4,26 @@ import { isValidUserId } from '../guards.js';
 const SURVEY_SERVERS = ['OGS', 'KGS', 'Fox', 'Tygem', 'WBaduk', 'IGS', 'GoQuest', 'EGF', 'AGA'];
 const SURVEY_RANK_RE = /^(?:[1-9]|1\d|2[0-5])k$|^[1-9]d$/;
 
+// The account's latest human declaration per survey server, { server: rank }, so
+// the survey opens prefilled with what the user last said. Machine heartbeat rows
+// ('EGD'/'AGAR') are not survey answers and are excluded by the server list. The
+// newest row wins by id; a resubmitted unchanged answer adds a row the pipeline
+// collapses the same way (latest per user and server).
+export async function readDeclaredRanks(env, userId) {
+  if (!env.DB || !isValidUserId(userId)) return {};
+  const placeholders = SURVEY_SERVERS.map((_, i) => `?${i + 2}`).join(', ');
+  const { results } = await env.DB.prepare(
+    `SELECT server, rank FROM rank_surveys
+      WHERE user_id = ?1 AND server IN (${placeholders})
+      ORDER BY id DESC`
+  ).bind(userId, ...SURVEY_SERVERS).all();
+  const ranks = {};
+  for (const r of results || []) {
+    if (!(r.server in ranks) && SURVEY_RANK_RE.test(r.rank)) ranks[r.server] = r.rank;
+  }
+  return ranks;
+}
+
 export async function handleRankSurvey(request, env) {
   try {
     const data = await request.json();

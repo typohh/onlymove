@@ -22,7 +22,8 @@
 //   POST /profile/alias { userId, adjective, color, animal } | { userId, clear: true }
 //   GET  /profile?userId=<id>
 //       -> { hidden: bool, linked: {...}|null, google: bool,
-//            alias: {adjective, color, animal}|null } (no-store)
+//            alias: {adjective, color, animal}|null,
+//            declared: { <server>: <rank> } } (no-store)
 //
 // The GET answers the Account dialog's whole panel — the flag, the current
 // federation binding, whether a Google account can sign in to this code, AND the
@@ -32,12 +33,15 @@
 // address (see handlers/google.js). `alias` is the raw ENGLISH triplet, not a
 // display string: the dialog localizes it with the same shared/alias-words.js
 // the picker offers, so what the user edits is exactly what is stored.
+// `declared` is the account's latest survey answer per server, which the rank
+// survey (the other reader of this GET) prefills its pickers with.
 
 import { jsonResponse, CORS_HEADERS } from '../http.js';
 import { isValidUserId } from '../guards.js';
 import { readLinkedIdentity } from './link.js';
 import { hasGoogleBinding } from './google.js';
 import { readAlias } from '../aliases.js';
+import { readDeclaredRanks } from './rank-survey.js';
 
 // POST: set/clear the hidden flag. INSERT OR IGNORE to hide, DELETE to unhide —
 // idempotent either way. Format-validated (isValidUserId + boolean) before any
@@ -67,8 +71,8 @@ export async function handleProfileHide(request, env) {
 }
 
 // GET: the account's leaderboard profile — the hidden flag, the linked
-// federation identity and the chosen alias, so a dialog renders every control in
-// its true state without guessing. Four point lookups on their keys. no-store so
+// federation identity, the chosen alias and the latest survey declarations, so a
+// dialog renders every control in its true state without guessing. no-store so
 // the per-user answer is never edge-cached against another user's request (the
 // service worker is told to skip this path too — see sw.js).
 export async function handleProfile(request, env) {
@@ -76,13 +80,14 @@ export async function handleProfile(request, env) {
   if (!isValidUserId(userId)) return jsonResponse({ error: 'Invalid userId' }, 400);
   if (!env.DB) return jsonResponse({ error: 'Database not configured' }, 500);
   try {
-    const [row, linked, google, alias] = await Promise.all([
+    const [row, linked, google, alias, declared] = await Promise.all([
       env.DB.prepare(`SELECT 1 AS x FROM hidden_profiles WHERE user_id = ?1`).bind(userId).first(),
       readLinkedIdentity(env, userId),
       hasGoogleBinding(env, userId),
       readAlias(env, userId),
+      readDeclaredRanks(env, userId),
     ]);
-    return new Response(JSON.stringify({ hidden: !!row, linked: linked || null, google, alias }), {
+    return new Response(JSON.stringify({ hidden: !!row, linked: linked || null, google, alias, declared }), {
       status: 200,
       headers: { ...CORS_HEADERS, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
     });
