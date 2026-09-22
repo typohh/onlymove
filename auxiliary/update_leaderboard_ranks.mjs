@@ -216,7 +216,7 @@ async function loadLeaderboardModule() {
         stdin: {
             contents: `
                 export { computeRank, serializeBuffer, RANK_START_MIN, BUFFER_CAP, monthlyPeak,
-                         monthlyPeaksFromAttempts, monthKeyAt } from './src/leaderboard.js';
+                         monthlyPeaksFromAttempts, monthKeyAt, declaredJsonSql } from './src/leaderboard.js';
                 export { rankToLabel } from './shared/rank-math.js';
             `,
             resolveDir: PWA_DIR,
@@ -269,17 +269,24 @@ function sqliteJsonOn(dbPath, sql) {
 // The schema the generated SQL names, added to a --local miniflare D1 when missing.
 // The guard, not the migration, is what makes this idempotent: the migration's
 // ALTERs would fail on a re-run, so it is only applied when a piece is absent.
-// (Remote is checked, not migrated — see remoteHasMonthlySchema.)
+// (Remote is checked, not migrated — see remoteHasLeaderboardSchema.)
 const MONTHLY_MIGRATION = path.join(PWA_DIR, 'migrations', '2026-09-21_monthly_leaderboard.sql');
+const DECLARED_MIGRATIONS = ['2026-09-23_leaderboard_declared.sql', '2026-09-23_leaderboard_declared_backfill.sql']
+    .map((f) => path.join(PWA_DIR, 'migrations', f));
 
 function ensureLocalSchema(dbPath) {
     const cols = new Set(sqliteJsonOn(dbPath, "PRAGMA table_info(leaderboard)").map((c) => c.name));
     const has = (c) => cols.has(c);
     const hasTable = sqliteJsonOn(dbPath,
         "SELECT name FROM sqlite_master WHERE type='table' AND name='monthly_leaderboards'").length > 0;
-    if (has('best_rank') && has('best_rank_timed') && has('best_rank_month') && hasTable) return;
-    console.log(`applying ${path.relative(REPO, MONTHLY_MIGRATION)} to the local miniflare D1...`);
-    execFileSync('sqlite3', [dbPath], { input: fs.readFileSync(MONTHLY_MIGRATION, 'utf8'), encoding: 'utf8' });
+    const apply = (file) => {
+        console.log(`applying ${path.relative(REPO, file)} to the local miniflare D1...`);
+        execFileSync('sqlite3', [dbPath], { input: fs.readFileSync(file, 'utf8'), encoding: 'utf8' });
+    };
+    if (!(has('best_rank') && has('best_rank_timed') && has('best_rank_month') && hasTable)) {
+        apply(MONTHLY_MIGRATION);
+    }
+    if (!has('declared')) for (const file of DECLARED_MIGRATIONS) apply(file);
 }
 
 // --- production write-freeze preflight (--remote only) ------------------------------
@@ -310,11 +317,12 @@ function remoteQueryRows(sql) {
 // so the remote target must already carry them. Refuse BEFORE the freeze/fetch
 // when it does not, rather than letting half the file apply and fail. Applying the
 // migration is a deliberate, separate step (see the migration header).
-function remoteHasMonthlySchema() {
+function remoteHasLeaderboardSchema() {
     const cols = new Set(remoteQueryRows("SELECT name FROM pragma_table_info('leaderboard')").map((r) => r.name));
     const hasTable = remoteQueryRows(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='monthly_leaderboards'").length > 0;
-    return cols.has('best_rank') && cols.has('best_rank_timed') && cols.has('best_rank_month') && hasTable;
+    return cols.has('best_rank') && cols.has('best_rank_timed') && cols.has('best_rank_month') && hasTable
+        && cols.has('declared');
 }
 
 // Default to the custom domain declared in wrangler.toml rather than hardcoding it.
@@ -648,10 +656,11 @@ async function main() {
 
     // The generated SQL names the monthly schema, and the remote migration is a
     // deliberate separate step, so refuse before freezing/fetching if it is absent.
-    if (applyRemote && !remoteHasMonthlySchema()) {
-        throw new Error('remote D1 is missing the monthly-leaderboard schema.\n'
-            + '  Apply migrations/2026-09-21_monthly_leaderboard.sql FIRST (its header has the\n'
-            + '  command), then deploy, then re-run this script.');
+    if (applyRemote && !remoteHasLeaderboardSchema()) {
+        throw new Error('remote D1 is missing the monthly-leaderboard or declared-cache schema.\n'
+            + '  Apply migrations/2026-09-21_monthly_leaderboard.sql and/or\n'
+            + '  migrations/2026-09-23_leaderboard_declared.sql FIRST (their headers have the\n'
+            + '  commands and the order), then deploy, then re-run this script.');
     }
 
     // Open the window BEFORE the per-user recompute, so a refusal costs seconds
@@ -749,18 +758,21 @@ async function main() {
             // A seeded row's recomputed rank is its first PEAK for the current month
             // (the row did not exist, so there is no earlier observation to keep).
             const peak = out.rank === null ? null : lb.monthlyPeak(null, out.rank, out.deltaRating, Date.now());
-            // Same seed shape as createLeaderboardRow; INSERT OR IGNORE is a no-op if
-            // the row was created concurrently (a live report during a --remote apply).
+            // Same seed shape as createLeaderboardRow, the declared cache included (it
+            // is computed by the TARGET database from its own rank_surveys, not from the
+            // mirror); INSERT OR IGNORE is a no-op if the row was created concurrently
+            // (a live report during a --remote apply).
             statements.push(
                 `INSERT OR IGNORE INTO leaderboard `
                 + `(user_id, buffer, pred_rank, pred_rank_se, time_delta_rating, last_active, `
-                + `best_rank, best_rank_timed, best_rank_month) `
+                + `best_rank, best_rank_timed, best_rank_month, declared) `
                 + `VALUES (${uid}, ${sqlStr(lb.serializeBuffer(out.buffer))}, `
                 + `${sqlNum(out.rank)}, ${sqlNum(out.se)}, ${sqlNum(out.deltaRating)}, `
                 + `${sqlStr(a.last_created)}, `
                 + `${peak ? sqlNum(peak.best_rank) : 'NULL'}, `
                 + `${peak ? sqlNum(peak.best_rank_timed) : 'NULL'}, `
-                + `${peak ? sqlStr(peak.best_rank_month) : 'NULL'});`
+                + `${peak ? sqlStr(peak.best_rank_month) : 'NULL'}, `
+                + `${lb.declaredJsonSql(uid)});`
             );
         }
         console.log(`populate: ${ranked} ranked + ${unranked} unranked seeded (unranked rows stay hidden on the board until ${lb.RANK_START_MIN} novel attempts)`);

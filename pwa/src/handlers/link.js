@@ -35,7 +35,7 @@ import { jsonResponse } from '../http.js';
 import { isValidUserId } from '../guards.js';
 import {
     getProblemParams, buildRowStateFromReports, serializeBuffer,
-    invalidateStaleGor, shortRankLabel, gorToRank, agaRatingToRank,
+    invalidateStaleGor, shortRankLabel, gorToRank, agaRatingToRank, refreshDeclaredStmt,
 } from '../leaderboard.js';
 import { rankToLabel, rankBand, clampRankBand } from '../../shared/rank-math.js';
 import { fetchAgaPlayer, isValidAgaId } from '../aga.js';
@@ -52,8 +52,8 @@ const NAME_MAX = 100;
 // grade does not have to be relinked to say so. Prefer the federation's OWN label
 // ('4d', the same precedence readLeaderboardRows uses for its activity tier) and
 // derive one from the raw rating only for a legacy heartbeat written before that
-// column existed. The scan is a scan of ~700 rows, on a route that fires when
-// somebody opens a dialog.
+// column existed. An index read of this user's rows (idx_rank_surveys_user), on a
+// route that fires when somebody opens a dialog.
 export async function readLinkedIdentity(env, userId) {
     if (!env.DB || !isValidUserId(userId)) return null;
     const [row, beat] = await Promise.all([
@@ -100,7 +100,10 @@ function heartbeatLabel(beat) {
 // with it. They are keyed by user_id, not by player id, so one left behind keeps
 // reporting the PREVIOUS player's verified rating as this account's — on the
 // leaderboard's Declared column, under whatever name is linked next. The human
-// survey declarations ('EGF'/'AGA'/... rows) are the user's own and stay.
+// survey declarations ('EGF'/'AGA'/... rows) are the user's own and stay. Each
+// batch that clears them ends with refreshDeclaredStmt, so the leaderboard's
+// declared cache drops the old heartbeats too — and falls back to the user's own
+// EGF/AGA declaration where one exists.
 function clearHeartbeats(env, userId) {
     return env.DB.prepare(
         `DELETE FROM rank_surveys WHERE user_id = ?1 AND server IN ('EGD', 'AGAR')`
@@ -189,6 +192,8 @@ export async function handleLink(request, env) {
             ).bind(userId, String(agaPlayer.rating), nowIso,
                 agaPlayer.rankLabel, agaPlayer.latestEventDate || null));
         }
+        // Last, so it sees the cleared heartbeats, the new one and the upserted row.
+        stmts.push(refreshDeclaredStmt(env, 'user_id = ?1', userId));
         await env.DB.batch(stmts);
         if (!isAga) invalidateStaleGor();
 
@@ -222,6 +227,7 @@ export async function handleUnlink(request, env) {
         await env.DB.batch([
             clearHeartbeats(env, data.userId),
             env.DB.prepare(`DELETE FROM external_ids WHERE user_id = ?1`).bind(data.userId),
+            refreshDeclaredStmt(env, 'user_id = ?1', data.userId),
         ]);
         invalidateStaleGor();
         return jsonResponse({ ok: true });

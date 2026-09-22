@@ -169,11 +169,17 @@ CREATE TABLE IF NOT EXISTS rank_surveys (
     rank_label TEXT,
     last_game_at TEXT
 );
+-- Per-user reads (the survey prefill and linked identity on GET /profile, the
+-- declared-cache refresh, the heartbeats' once-a-week guard) find a user's rows
+-- through this; each entry also carries the rowid, so "latest by id" is read in
+-- index order.
+CREATE INDEX IF NOT EXISTS idx_rank_surveys_user ON rank_surveys(user_id);
 -- For an existing deployment, run once against the live D1 (order matters —
 -- the fetch_database dump is positional, so ALTERs must append in this order):
 --   ALTER TABLE rank_surveys ADD COLUMN country TEXT;
 --   ALTER TABLE rank_surveys ADD COLUMN rank_label TEXT;      (migrations/2026-07-21_rank_surveys_verified.sql)
 --   ALTER TABLE rank_surveys ADD COLUMN last_game_at TEXT;    (same file)
+--   CREATE INDEX idx_rank_surveys_user ...                    (migrations/2026-09-23_leaderboard_declared.sql)
 
 -- One row per share-link event. event_type is 'create' (user generated a share
 -- link) or 'open' (someone arrived via a shared link). referrer is the client's
@@ -324,7 +330,14 @@ CREATE TABLE IF NOT EXISTS leaderboard (
     country            TEXT,
     best_rank          REAL,
     best_rank_timed    REAL,
-    best_rank_month    TEXT
+    best_rank_month    TEXT,
+    -- CACHE of this user's latest rank_surveys row per server, as a JSON array of
+    -- {server, rank, country, rank_label, last_game_at}, so the /leaderboard page's
+    -- Declared column reads no rank_surveys rows. Derived only: every statement
+    -- that writes or deletes rank_surveys rows refreshes it in the same batch, and
+    -- a seeded row computes it inline (src/leaderboard.js declaredJsonSql). Appended
+    -- last, like every added column (migrations/2026-09-23_leaderboard_declared.sql).
+    declared           TEXT
 );
 -- There is deliberately NO index on last_active. It would be maintained on
 -- EVERY novel /report (the hot-path UPDATE sets last_active each time, and D1

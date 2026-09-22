@@ -1,5 +1,6 @@
 import { jsonResponse } from '../http.js';
 import { isValidUserId } from '../guards.js';
+import { refreshDeclaredStmt } from '../leaderboard.js';
 
 const SURVEY_SERVERS = ['OGS', 'KGS', 'Fox', 'Tygem', 'WBaduk', 'IGS', 'GoQuest', 'EGF', 'AGA'];
 const SURVEY_RANK_RE = /^(?:[1-9]|1\d|2[0-5])k$|^[1-9]d$/;
@@ -47,8 +48,14 @@ export async function handleRankSurvey(request, env) {
       ).bind(data.userId, server, rank, createdAt, country));
     }
 
-    if (statements.length > 0) await env.DB.batch(statements);
-    return jsonResponse({ ok: true, recorded: statements.length });
+    // The leaderboard's declared cache follows the log in the same batch (see
+    // declaredJsonSql); a user with no leaderboard row simply updates nothing.
+    const recorded = statements.length;
+    if (recorded > 0) {
+      statements.push(refreshDeclaredStmt(env, 'user_id = ?1', data.userId));
+      await env.DB.batch(statements);
+    }
+    return jsonResponse({ ok: true, recorded });
   } catch (err) {
     console.error('Error handling rank survey:', err);
     return jsonResponse({ error: 'Internal server error' }, 500);

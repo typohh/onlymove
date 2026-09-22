@@ -387,6 +387,52 @@ export function pushBuffer(buffer, problemId, success, timeUsed) {
     return next;
 }
 
+// --- declared-rank cache (leaderboard.declared) --------------------------------
+// `rank_surveys` is the LOG — every human declaration and every machine heartbeat,
+// kept for drift — and `leaderboard.declared` is a CACHE of its latest row per
+// server for that user, so the /leaderboard page reads its Declared column off the
+// rows it already fetches instead of grouping the whole log on every render. The
+// cache is DERIVED, never written directly: its one expression is below, and every
+// statement that inserts or deletes a rank_surveys row is followed in the same
+// batch by refreshDeclaredStmt for the affected user (the survey, the EGD and AGA
+// heartbeats, link and unlink). A row created later takes the expression inline
+// (createLeaderboardRow, the re-rate script's populate pass) or is refreshed after
+// it in the same batch (the link upsert). A user with no leaderboard row has no
+// cache and needs none — their next row is seeded from the log.
+//
+// The value is a JSON array of { server, rank, country, rank_label, last_game_at },
+// one per server, newest row per server by id; '[]' for a user with no rows.
+// `userIdSql` is the SQL expression naming the user (a bind parameter, or an outer
+// column), inlined into the correlated subquery.
+export function declaredJsonSql(userIdSql) {
+    return `(SELECT json_group_array(json_object(
+                'server', s.server, 'rank', s.rank, 'country', s.country,
+                'rank_label', s.rank_label, 'last_game_at', s.last_game_at))
+               FROM rank_surveys s
+              WHERE s.id IN (SELECT MAX(id) FROM rank_surveys
+                              WHERE user_id = ${userIdSql} GROUP BY server))`;
+}
+
+// Recompute one user's cache from the log. `whereSql` selects the leaderboard
+// row(s) to refresh and may carry its own bind parameters (`binds`), so a heartbeat
+// keyed by federation id can refresh the account that id is bound to.
+export function refreshDeclaredStmt(env, whereSql, ...binds) {
+    return env.DB.prepare(
+        `UPDATE leaderboard SET declared = ${declaredJsonSql('leaderboard.user_id')}
+          WHERE ${whereSql}`
+    ).bind(...binds);
+}
+
+// The cached array, parsed. Server order, so a reader that takes the first match
+// (the survey country) is deterministic.
+function parseDeclared(json) {
+    let arr;
+    try { arr = JSON.parse(json || '[]'); } catch { return []; }
+    if (!Array.isArray(arr)) return [];
+    return arr.filter((d) => d && typeof d.server === 'string')
+        .sort((a, b) => (a.server < b.server ? -1 : a.server > b.server ? 1 : 0));
+}
+
 // --- EGD lookup -----------------------------------------------------------------
 // Public JSON, no key. Returns { egd_name, gor, country_code } or null on a network
 // error / non-Ok retcode (callers keep the last known value on a transient miss).
@@ -467,6 +513,15 @@ export async function applyGorUpdates(env, updates) {
                                  WHERE s.user_id = x.user_id AND s.server = 'EGD'
                                    AND s.created_at >= ?5)`
         ).bind(pin, String(gor), nowIso, cc || null, weekStart, grade, lastGameAt));
+        // Refresh the bound account's declared cache, but only when the insert above
+        // actually landed — the week guard makes most re-submits a no-op, and an
+        // unconditional UPDATE would still bill a row written for each. The row this
+        // batch inserted is the one carrying this batch's timestamp.
+        stmts.push(refreshDeclaredStmt(env,
+            `user_id IN (SELECT user_id FROM external_ids WHERE egd_pin = ?1)
+             AND EXISTS (SELECT 1 FROM rank_surveys s WHERE s.user_id = leaderboard.user_id
+                          AND s.server = 'EGD' AND s.created_at = ?2)`,
+            pin, nowIso));
     }
     if (!stmts.length) return;
     try {
@@ -532,16 +587,26 @@ export async function refreshAgaRatings(env) {
         if (!player || !player.rankLabel || !Number.isFinite(player.rating)
             || player.rating < AGA_RATING_MIN || player.rating > AGA_RATING_MAX) continue;
         try {
-            await env.DB.prepare(
-                `INSERT INTO rank_surveys (user_id, server, rank, created_at, country, rank_label, last_game_at)
-                 SELECT x.user_id, 'AGAR', ?2, ?3, NULL, ?4, ?5
-                   FROM external_ids x
-                  WHERE x.aga_id = ?1
-                    AND NOT EXISTS (SELECT 1 FROM rank_surveys s
-                                     WHERE s.user_id = x.user_id AND s.server = 'AGAR'
-                                       AND s.created_at >= ?6)`
-            ).bind(agaId, String(player.rating), new Date().toISOString(),
-                player.rankLabel, player.latestEventDate || null, weekStart).run();
+            const nowIso = new Date().toISOString();
+            // Heartbeat + the bound account's declared cache, the refresh guarded to
+            // an insert that landed (the same shape as applyGorUpdates).
+            await env.DB.batch([
+                env.DB.prepare(
+                    `INSERT INTO rank_surveys (user_id, server, rank, created_at, country, rank_label, last_game_at)
+                     SELECT x.user_id, 'AGAR', ?2, ?3, NULL, ?4, ?5
+                       FROM external_ids x
+                      WHERE x.aga_id = ?1
+                        AND NOT EXISTS (SELECT 1 FROM rank_surveys s
+                                         WHERE s.user_id = x.user_id AND s.server = 'AGAR'
+                                           AND s.created_at >= ?6)`
+                ).bind(agaId, String(player.rating), nowIso,
+                    player.rankLabel, player.latestEventDate || null, weekStart),
+                refreshDeclaredStmt(env,
+                    `user_id IN (SELECT user_id FROM external_ids WHERE aga_id = ?1)
+                     AND EXISTS (SELECT 1 FROM rank_surveys s WHERE s.user_id = leaderboard.user_id
+                                  AND s.server = 'AGAR' AND s.created_at = ?2)`,
+                    agaId, nowIso),
+            ]);
         } catch (e) {
             console.error('refreshAgaRatings insert failed:', e);
         }
@@ -684,11 +749,14 @@ async function createLeaderboardRow(env, userId, country) {
     // from /link goes through handlers/link.js' own upsert and does NOT seed a peak:
     // linking is not an attempt.)
     const peak = st.rank === null ? null : monthlyPeak(null, st.rank, st.deltaRating, nowMs);
+    // The declared cache is seeded from the log in the same write (see
+    // declaredJsonSql), so a player returning after the idle prune gets their
+    // Declared column back with the row.
     await env.DB.prepare(
         `INSERT OR IGNORE INTO leaderboard
             (user_id, buffer, pred_rank, pred_rank_se, time_delta_rating, last_active, country,
-             best_rank, best_rank_timed, best_rank_month)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)`
+             best_rank, best_rank_timed, best_rank_month, declared)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ${declaredJsonSql('?1')})`
     ).bind(userId, serializeBuffer(st.buffer), st.rank, st.se, st.deltaRating, nowIso,
         normalizeCountry(country),
         peak ? peak.best_rank : null, peak ? peak.best_rank_timed : null,
@@ -833,8 +901,8 @@ export async function readActivePlayers(env, { activeDays = 7 } = {}) {
 // and the page displays no sample count — only the aggregate tally. A hidden row
 // is filtered below. The identity's display fields live OFF the leaderboard row:
 // name/country on the `external_ids` binding (frozen at link time), and per-user
-// external ranks from ONE latest-per-(user, server) pass over rank_surveys,
-// stitched in JS.
+// external ranks from the row's own `declared` cache (latest rank_surveys row per
+// server; see declaredJsonSql), so rendering the board reads no rank_surveys rows.
 //
 // Each shown row carries two per-system maps keyed by RANK_SYSTEMS, so the page's
 // units selector can switch frames with no further server round trip:
@@ -869,32 +937,14 @@ export async function readLeaderboardRows(env, { activeDays = 7 } = {}) {
     // since a claim is a historical fact rather than a current state.
     const stmt = env.DB.prepare(
         `SELECT l.user_id, x.display_name, x.country_code, l.pred_rank, l.time_delta_rating,
-                l.buffer, l.country, a.adjective, a.color, a.animal,
+                l.buffer, l.country, l.declared, a.adjective, a.color, a.animal,
                 (x.user_id IS NOT NULL) AS registered
            FROM (SELECT *, user_id AS u FROM leaderboard
                   WHERE last_active >= ?1) l
            LEFT JOIN external_ids x ON x.user_id = u
            LEFT JOIN user_aliases a ON a.user_id = u`
     ).bind(new Date(Date.now() - activeDays * 86400000).toISOString());
-    // Latest declaration per (user, server) — one pass over the (small)
-    // rank_surveys table; stitched onto rows in JS below. `country`/`rank_label`/
-    // `last_game_at` are bare columns alongside MAX(id), so SQLite returns them
-    // from the latest row (documented SQLite behavior for a bare column beside an
-    // aggregate): the 'EGD' heartbeat carries the EGD federation code, other
-    // servers the geo-IP country.
-    const [res, declRes] = await Promise.all([
-        stmt.all(),
-        env.DB.prepare(
-            `SELECT user_id, server, rank, country, rank_label, last_game_at, MAX(id)
-               FROM rank_surveys
-              GROUP BY user_id, server`
-        ).all(),
-    ]);
-    const declByUser = new Map();
-    for (const d of ((declRes && declRes.results) || [])) {
-        if (!declByUser.has(d.user_id)) declByUser.set(d.user_id, []);
-        declByUser.get(d.user_id).push(d);
-    }
+    const res = await stmt.all();
     const rows = (res && res.results) || [];
     // A row with no stored rank is (re)computed on read: (a) so a player who has just
     // crossed the gate is shown a rank immediately, without waiting for the reconcile
@@ -943,7 +993,9 @@ export async function readLeaderboardRows(env, { activeDays = 7 } = {}) {
         let egdCountry = null;      // 'EGD' heartbeat — EGD federation code (reliable)
         let surveyCountry = null;   // any human survey row — Cloudflare geo-IP
         const declared = new Map(); // system -> the player's own latest declared label
-        if (!isHidden) for (const d of (declByUser.get(r.user_id) || [])) {
+        // The 'EGD' heartbeat carries the EGD federation code, other servers the
+        // geo-IP country.
+        if (!isHidden) for (const d of parseDeclared(r.declared)) {
             if (d.server === 'EGD') {
                 const gor = parseInt(d.rank, 10);
                 if (Number.isFinite(gor) && gor > 0) {
