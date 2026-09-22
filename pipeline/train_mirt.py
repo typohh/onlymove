@@ -241,6 +241,13 @@ ORTHO_AXES_DETACH = True
 # already makes by giving a thin record few terms.
 MIN_BOTH_OUTCOMES = 1
 STOP_ROW_FRAC = 0.03             # rows held aside purely to detect convergence
+# The `spread` holdout (an ablation path; the shipped fit holds out rows). A
+# per-problem departure from the fitted curve is visible only as outcomes that
+# AGREE across different users on one problem, so it is drawn among problems
+# carrying at least this many training rows, whole problems for one set and half
+# of each problem's rows for the other — see the draw in run().
+SPREAD_MIN_ATTEMPTS = 4
+SPREAD_FRAC = 0.10               # of the eligible problems, per set
 OUT_DIR = os.path.join(PROJECT_ROOT, "ratings")
 AXES_DIR = os.path.join(PROJECT_ROOT, "axes")
 MOTIF_PROXIES = os.path.join(AXES_DIR, "motif_proxies.npz")
@@ -660,6 +667,30 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         # below, which ships, is a convergence detector and leaves every problem
         # partly trained.
         is_stop = (rng.random(len(keys)) < stop_row_frac)[prob_idx]
+    elif stop_unit == "spread":
+        # TWO DISJOINT HELD-OUT SETS, both among problems attempted often
+        # enough that several different users' outcomes on one problem can be
+        # compared — a problem held out with one attempt says nothing about its
+        # own departure from the curve, only about the population's.
+        #   set 0: whole problems out, so their parameters come from the
+        #          features alone — the position of every never-attempted one.
+        #   set 1: half of each problem's rows out and half kept, so the fit
+        #          has seen the problem — what its own attempts correct.
+        # The users stay in through their other attempts, so their abilities
+        # are fitted without the scored rows; that is what an after-the-fact
+        # holdout cannot give. Row-level draws stay on `rng`, so the draw is a
+        # function of the split seed alone.
+        cnt = np.bincount(prob_idx, minlength=len(keys))
+        dense = rng.permutation(np.where(cnt >= SPREAD_MIN_ATTEMPTS)[0])
+        n_set = int(round(SPREAD_FRAC * len(dense)))
+        whole, halved = dense[:n_set], dense[n_set:2 * n_set]
+        spread_set = np.full(len(df), -1, np.int8)
+        spread_set[np.isin(prob_idx, whole)] = 0
+        rows_by_p = pd.Series(np.arange(len(df))).groupby(prob_idx)
+        for p in halved:
+            r = rows_by_p.get_group(p).to_numpy()
+            spread_set[rng.choice(r, len(r) // 2, replace=False)] = 1
+        is_stop = spread_set >= 0
     else:
         is_stop = rng.random(len(df)) < stop_row_frac
     tr = torch.tensor(np.where(~is_stop)[0], device=device)
@@ -966,6 +997,28 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
                  "stop_bce": float(torch.nn.functional.binary_cross_entropy(
                      pz, ty[i_stop]))})
 
+    # THE SPREAD HOLDOUT'S ROWS, for the producer that reads them. The full
+    # prediction, axes included, and its derivative in the logit — a problem
+    # offset u moves P by about w*u, which is what converts a covariance of
+    # outcomes into a variance on the logit. Taken before the gauge is pinned,
+    # from the same state the stop score describes.
+    spread_rows = None
+    if stop_unit == "spread":
+        with torch.no_grad():
+            b_h, a_h, c_h, g_h = m.problem_params(tfeat[tp[i_stop]])
+            lam_h = m.lapse()
+            z_h = (a_h * (m.theta(tu[i_stop]).squeeze(-1) - b_h)
+                   + (g_h * m.user_axis(tu[i_stop])).sum(-1)).clamp(-35, 35)
+            sg_h = torch.sigmoid(z_h)
+            p_h = c_h + (1.0 - c_h - lam_h) * sg_h
+            w_h = (1.0 - c_h - lam_h) * sg_h * (1.0 - sg_h)
+        stop_np = i_stop.cpu().numpy()
+        spread_rows = {"set": spread_set[stop_np], "prob": prob_idx[stop_np],
+                       "user": user_idx[stop_np], "y": y[stop_np],
+                       "z": z_h.cpu().numpy(), "floor": c_h.cpu().numpy(),
+                       "lapse": np.float32(float(lam_h)),
+                       "p": p_h.cpu().numpy(), "w": w_h.cpu().numpy()}
+
     # --- outputs
     m.train(False)
     with torch.no_grad():
@@ -1009,6 +1062,10 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         print(f"  size {s}: wrote {len(tids)} ratings | rating "
               f"[{rating[sel].min():.2f},{rating[sel].max():.2f}] | floor mean "
               f"{c_np[sel].mean():.3f}", flush=True)
+
+    if spread_rows is not None:
+        np.savez_compressed(os.path.join(out_dir, "spread_rows.npz"),
+                            **spread_rows)
 
     natt = pd.Series(user_idx).value_counts()
     pd.DataFrame({"profile": list(users.categories), "theta": theta,

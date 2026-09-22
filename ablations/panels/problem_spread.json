@@ -1,0 +1,17 @@
+{
+  "panel": "problem_spread",
+  "description": "methodology 1.5 — how far each problem's true success rate departs from the fitted curve. A single outcome cannot show it (a Bernoulli's variance is fixed by its mean), so it is read from outcomes that AGREE across different users on one problem, held out of the fit. Each arm holds out, among problems with enough training rows, one set WHOLE (priced from features alone, as a never-attempted problem is) and a disjoint set HALVED (half its rows trained on, half scored — what a problem's own attempts correct); the users stay in the fit through their other attempts. This is a MAGNITUDE, so the draw MOVES with the seed rather than being pinned: three seeds, three draws, three fits.",
+  "arms": {
+    "s0": {
+      "stop_unit": "spread"
+    },
+    "s1": {
+      "seed": 1,
+      "stop_unit": "spread"
+    },
+    "s2": {
+      "seed": 2,
+      "stop_unit": "spread"
+    }
+  }
+}

@@ -16,7 +16,8 @@ written — never a general override surface. Present clusters: the seed and the
 budget, the slope barrier (§1.7), the learning-rate split (§1.8), the
 orthogonality penalty and the taught pull (§1.5, §1.14), and the feature layout
 (§1.3: the activation width, which blocks the trunk sees, and whether the
-held-aside fraction is drawn over rows or over whole problems), the axis count
+held-aside fraction is drawn over rows or over whole problems, or is the
+per-problem spread holdout of §1.5), the axis count
 (§1.14), the two dropout sites with the weight decay §1.5 rejects as their
 substitute, and the schedule (§1.8: the decay against the constant rate, and
 the opening ramp the axis-space panel measures).
@@ -268,11 +269,15 @@ def main(argv=None):
                          "seed). Pinning it across arms while --seed varies "
                          "holds the scored rows fixed and leaves the "
                          "initialization as the only thing moving")
-    ap.add_argument("--stop-unit", choices=("row", "problem"), default=None,
+    ap.add_argument("--stop-unit", choices=("row", "problem", "spread"),
+                    default=None,
                     help="what the held-aside fraction is drawn over. 'row' "
                          "ships and is a convergence detector; 'problem' holds "
                          "whole problems out, which is what a claim about the "
-                         "FEATURE side has to be scored on")
+                         "FEATURE side has to be scored on; 'spread' holds out "
+                         "often-attempted problems, some whole and some half, "
+                         "and writes their rows for the per-problem spread "
+                         "(methodology 1.5)")
     args = ap.parse_args(argv)
 
     cfg = {}
