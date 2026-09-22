@@ -19,7 +19,7 @@
 // it first runs (see initOnboarding): existing players never get "Black to move".
 
 import { state, getMergedAnswerHistory } from './state.js';
-import { createBubble, placeBubble } from './bubble.js';
+import { createBubble, placeBubble, absorbDismissTap } from './bubble.js';
 import { getTerm } from './i18n.js';
 import { APP_MODES, HISTORY_BACKFILL_DONE_KEY, usesTapToConfirm } from './constants.js';
 import { waitingRecallCount } from './recall-model.js';
@@ -348,27 +348,23 @@ function removeBubble() {
     window.removeEventListener('resize', onReposition);
 }
 
-// Kill the `click` the browser synthesizes after a pointerdown we consumed.
-// Removing the bubble on pointerdown detaches the down-target, so that click
-// hit-tests to whatever the bubble was covering — the board, which listens for
-// `click`. One-shot, with a timeout in case no click follows (a cancelled tap).
-function swallowNextClick() {
-    let timer = 0;
-    const stop = () => { document.removeEventListener('click', kill, true); clearTimeout(timer); };
-    function kill(ev) { ev.preventDefault(); ev.stopPropagation(); stop(); }
-    document.addEventListener('click', kill, true);
-    timer = setTimeout(stop, 700);
-}
+// The tap that dismisses a tip must never also PLAY. Two targets are absorbed
+// (absorbDismissTap in bubble.js): the bubble itself, and the board — the
+// second because a tip arrives unbidden and covers live intersections, so a tap
+// there is a dismissal aimed at a board the user cannot even see, and the move
+// it would otherwise play is recorded as an attempt and cannot be taken back.
+// Every OTHER target keeps falling through, which is the "tap anywhere to
+// continue" behaviour: a menu item or a button reached through a tip does what
+// it says, and the tip goes away with it.
+const absorbsDismiss = (target) => {
+    if (!(target instanceof Node)) return false;
+    if (_bubbleEl && _bubbleEl.contains(target)) return true;
+    const board = anchors.board();
+    return !!(board && board.contains(target));
+};
 
 function onDismiss(e) {
-    // A tap ON the bubble is absorbed: it dismisses and goes no further, so
-    // reading a board-anchored bubble can't play a move. Taps elsewhere keep
-    // falling through — that's the "tap anywhere to continue" behaviour.
-    if (_bubbleEl && e && e.target instanceof Node && _bubbleEl.contains(e.target)) {
-        e.preventDefault();
-        e.stopPropagation();
-        swallowNextClick();
-    }
+    if (e && absorbsDismiss(e.target)) absorbDismissTap(e);
     if (_shownAtMs && (Date.now() - _shownAtMs) < QUICK_DISMISS_MS) {
         _quickDismissals++;
         if (_quickDismissals >= BACKOFF_QUICK_DISMISSALS) _backedOff = true;
@@ -435,10 +431,10 @@ function render(id, def) {
     }
     _shownAtMs = Date.now();
 
-    // Any tap/keypress dismisses. A tap OUTSIDE the bubble also reaches
-    // whatever's underneath (a board move, a menu item) — the "click anywhere
-    // to continue" behaviour; a tap on the bubble itself is absorbed instead
-    // (see onDismiss), since board-anchored bubbles cover live intersections.
+    // Any tap/keypress dismisses. A tap outside the bubble still reaches
+    // whatever's underneath — the "click anywhere to continue" behaviour —
+    // except on the bubble itself and on the board, which are absorbed (see
+    // absorbsDismiss).
     document.addEventListener('pointerdown', onDismiss, true);
     document.addEventListener('keydown', onDismiss, true);
     window.addEventListener('resize', onReposition);

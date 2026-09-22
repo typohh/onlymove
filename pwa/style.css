@@ -2193,7 +2193,10 @@ body {
    painted box passes straight through to the board / menu item underneath —
    the "click anywhere to continue" behaviour. The painted parts take it back
    (see .ui-bubble-body), because a board-anchored bubble covers live
-   intersections and a tap on it must not play.
+   intersections and a tap on it must not play. Hit-testing is only half of
+   that: the bubble is torn down on pointerdown, so the JS also has to kill the
+   click the browser then synthesizes at the bare board (absorbDismissTap in
+   js/bubble.js).
 
    Colour: ONE light-blue accent in both light and dark themes, on purpose. The
    bubble floats over unpredictable backgrounds — the wooden board, BLACK stones,
@@ -2225,7 +2228,9 @@ body {
 /* The painted parts take pointer events even though the container does not: a tap
    ON the bubble must be absorbed rather than reach the board intersection it is
    covering. Taps elsewhere still fall through to what's under them, which is the
-   "tap anywhere to continue" behaviour. */
+   "tap anywhere to continue" behaviour — with the board itself excepted for an
+   onboarding tip, which arrives unbidden over intersections the user cannot see
+   (js/onboarding.js). */
 .ui-bubble-body {
     position: relative;
     z-index: 1;

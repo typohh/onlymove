@@ -15,6 +15,8 @@
 // At most one hint is open at a time, app-wide. It closes on Escape, on a
 // pointerdown anywhere else, and on a resize or scroll — the last because the
 // bubble is placed once against the anchor's position and does not follow it.
+// The pointerdown that closes it is absorbed only when it landed ON the bubble;
+// see onOutside for why that one case cannot be allowed through.
 //
 // A hint's content is a sentence, or a Node where the reading is a small table
 // (the rank translation). Either way it is resolved AT OPEN, and a resolver
@@ -25,7 +27,7 @@
 // The bubble itself is js/bubble.js, shared with the onboarding tips; styling is
 // the `ui-bubble` + `.hint-btn` blocks in style.css.
 
-import { createBubble, placeBubble } from './bubble.js';
+import { createBubble, placeBubble, absorbDismissTap } from './bubble.js';
 
 // True where the primary input can hover (a mouse or trackpad). Coarse-pointer
 // devices report false, and so do hybrids being driven by touch.
@@ -49,6 +51,20 @@ export function closeHint() {
 function onOutside(e) {
     // A press on the button itself is its own toggle; anything else dismisses.
     if (openFor && openFor.contains(e.target)) return;
+    // A press ON the bubble is absorbed: closing it here detaches the press's
+    // target, so the click the browser synthesizes afterwards would land on
+    // whatever the bubble was covering — for a hint opened from the motif
+    // bubble in portrait, that is the board, and the tap that dismissed the
+    // explanation would play a move. Presses ANYWHERE ELSE keep falling
+    // through: the hint was asked for rather than imposed, and eating them
+    // would cost a click on every button and every other hint anchor while one
+    // is open (including one merely hovered open, which the user never
+    // deliberately raised).
+    if (openEl && e.target instanceof Node && openEl.contains(e.target)) {
+        closeHint();
+        absorbDismissTap(e);
+        return;
+    }
     closeHint();
 }
 

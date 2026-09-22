@@ -7,11 +7,12 @@
 // that needs to say a sentence about a thing on screen should use this rather
 // than growing a third bubble.
 //
-// This module owns the DOM shape and the placement arithmetic and NOTHING else:
-// no timing, no gating, no dismissal policy, no anchor registry. Those differ
-// completely between a tip that appears unbidden and a hint the user asked for,
-// and mixing them is what would make this un-reusable. Styling is the `ui-bubble`
-// block in style.css.
+// This module owns the DOM shape, the placement arithmetic, and the one
+// dismissal MECHANIC both callers cannot avoid sharing (absorbDismissTap) —
+// and NOTHING else: no timing, no gating, no dismissal POLICY, no anchor
+// registry. Those differ completely between a tip that appears unbidden and a
+// hint the user asked for, and mixing them is what would make this un-reusable.
+// Styling is the `ui-bubble` block in style.css.
 
 const MARGIN = 8;    // keep the bubble this far inside the viewport
 const GAP = 10;      // clearance between the anchor edge and the arrow tip
@@ -142,4 +143,26 @@ export function placeBubble(bubble, rect, { placement = 'auto', overAnchor = fal
 function clampAlong(offset, extent) {
     const inset = ARROW_HALF + ARROW_CORNER_SLACK;
     return Math.max(inset, Math.min(offset, extent - inset));
+}
+
+/**
+ * Absorb the pointerdown that dismissed a bubble, so it dismisses and does
+ * NOTHING else. Both callers need this and for the same reason: a bubble is
+ * torn down on `pointerdown`, which detaches the down-target, so the `click`
+ * the browser synthesizes afterwards hit-tests to whatever the bubble was
+ * covering — the board, which plays a move and records an attempt. Stopping the
+ * pointerdown alone does not prevent that click; it has to be killed on its own.
+ *
+ * This is the MECHANIC only. WHICH taps get absorbed is each caller's policy
+ * and stays there (onboarding.js, hint-bubble.js). The kill is one-shot with a
+ * timeout, in case no click follows at all (a cancelled tap, or a browser that
+ * drops the click when its target is gone).
+ */
+export function absorbDismissTap(e) {
+    if (e) { e.preventDefault(); e.stopPropagation(); }
+    let timer = 0;
+    const stop = () => { document.removeEventListener('click', kill, true); clearTimeout(timer); };
+    function kill(ev) { ev.preventDefault(); ev.stopPropagation(); stop(); }
+    document.addEventListener('click', kill, true);
+    timer = setTimeout(stop, 700);
 }
