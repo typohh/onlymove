@@ -13,7 +13,7 @@
 //   - their onlymove rank    (the untimed SHOWN rank, decimal)
 //   - their est. EGF rank    (the time-adjusted EGF-coupled rank, decimal)
 //   - their real EGF rank    (from the verified 'EGD' GoR heartbeat)
-//   - the same pair in AGA units, when any listed player has a verified AGA rating
+//   - with --aga, the same pair in AGA units
 //   - how many rank SURVEYS they have declared — human self-reports only, since the
 //     weekly machine heartbeats are written for them and would else swamp the count
 //
@@ -74,6 +74,7 @@ Usage: node auxiliary/leaderboard_player_stats.mjs [options]
 
   --with-unlinked   also list every leaderboard row WITHOUT a linked external
                     account, appended below the linked players (--all is an alias)
+  --aga             add the est. AGA and real AGA columns (off by default)
   --user <id>       limit to this user id; repeatable
   --json            machine-readable JSON: { players }
   --help, -h        show this message
@@ -84,12 +85,14 @@ Reads db/d1.sqlite and the local pwa/tsumegos/ data files; run
 const args = process.argv.slice(2);
 let asJson = false;
 let withUnlinked = false;
+let withAga = false;
 const onlyUsers = new Set();
 for (let i = 0; i < args.length; i++) {
     const a = args[i];
     if (a === '--help' || a === '-h') { console.log(USAGE); process.exit(0); }
     else if (a === '--json') asJson = true;
     else if (a === '--with-unlinked' || a === '--all') withUnlinked = true;
+    else if (a === '--aga') withAga = true;
     else if (a === '--user') {
         const uid = args[++i];
         if (uid === undefined) { console.error('--user needs a user id\n\n' + USAGE); process.exit(1); }
@@ -375,8 +378,6 @@ async function main() {
     if (asJson) { console.log(JSON.stringify({ players: out }, null, 2)); return; }
 
     const RANKED_MIN = mod.RANK_START_MIN;   // production's list-entry / rank gate
-    // AGA columns only earn their width once someone has a verified AGA rating.
-    const anyAga = out.some((p) => Number.isFinite(p.realAgaRank));
     const nameCell = (p) => p.name + (p.rebuilt ? ' †' : '');
     // Widen to the longest name rather than truncating: the country column sits right
     // after it, so a fixed width would run the two together on a long name.
@@ -388,12 +389,12 @@ async function main() {
     const dayCells = (p) => weekDays.map((d) => padl((p.perDay[d.date] || 0).toLocaleString('en-US'), DAYW)).join('');
     const realStr = (v, stale) => (Number.isFinite(v) ? rankStr(mod, v) + (stale ? ' *' : '') : '—');
     const ruleW = W.name + W.cc + W.s9 + W.s13 + W.med + W.sd + W.n + 2 + weekDays.length * DAYW + W.wk + 2
-        + W.om + W.est + W.real + (anyAga ? W.est + W.real : 0) + W.srv;
+        + W.om + W.est + W.real + (withAga ? W.est + W.real : 0) + W.srv;
     console.log(
         pad('Player', W.name) + pad('ctry', W.cc) + padl('9×9', W.s9) + padl('13×13', W.s13)
         + padl('median', W.med) + padl('sd', W.sd) + padl('buf', W.n) + '  ' + dayHeader + padl('wk', W.wk) + '  '
         + pad('onlymove', W.om) + pad('est. EGF', W.est) + pad('real EGF', W.real)
-        + (anyAga ? pad('est. AGA', W.est) + pad('real AGA', W.real) : '')
+        + (withAga ? pad('est. AGA', W.est) + pad('real AGA', W.real) : '')
         + padl('surveys', W.srv));
     console.log('─'.repeat(ruleW));
     let inUnlinked = false;
@@ -415,7 +416,7 @@ async function main() {
             + pad(rankStr(mod, p.onlymoveRank), W.om)
             + pad(rankStr(mod, p.estEgfRank), W.est)
             + pad(realStr(p.realEgfRank, p.egfStale), W.real)
-            + (anyAga ? pad(rankStr(mod, p.estAgaRank), W.est)
+            + (withAga ? pad(rankStr(mod, p.estAgaRank), W.est)
                 + pad(realStr(p.realAgaRank, p.agaStale), W.real) : '')
             + padl(p.surveys || '—', W.srv));
     }
@@ -430,8 +431,8 @@ async function main() {
         + `ctry = the flag the /leaderboard page would show: EGD federation code → the binding → the row's edge geo-IP → survey geo-IP.\n`
         + `${weekDays.map((d) => d.label).join(' / ')} = attempts (all reports, incl. repeats) that LOCAL day (the 7 days ${weekStart}→today); wk = that window's total.\n`
         + `onlymove  = the untimed rank the player is SHOWN (the front-page badge and the stored pred_rank).\n`
-        + `est. EGF/AGA = that same shown rank, time-adjusted and mapped through the server's coupling (the frame a real rating speaks).\n`
-        + `real EGF/AGA = the verified machine heartbeat — the EGD GoR ((GoR−2000)/100) / the AGA rating.\n`
+        + `est. EGF${withAga ? '/AGA' : ''} = that same shown rank, time-adjusted and mapped through the server's coupling (the frame a real rating speaks).\n`
+        + `real EGF${withAga ? '/AGA' : ''} = the verified machine heartbeat — the EGD GoR ((GoR−2000)/100)${withAga ? ' / the AGA rating' : ''}.\n`
         + `surveys = rank declarations the player has SELF-REPORTED (rows, so a re-declaration counts again); the weekly 'EGD'/'AGAR' machine heartbeats are excluded.\n`
         + `The shown rank is deliberately conservative while a posterior is wide, so est-vs-real here is NOT the mapping's bias — `
         + `ablations/check_mapped_vs_declared_rank.py measures that.\n`
