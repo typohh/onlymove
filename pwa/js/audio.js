@@ -1,35 +1,87 @@
 // js/audio.js
+//
+// The stone click plays through Web Audio, not an <audio> element. A media
+// element makes the OS treat the page as a media player: Android grants it
+// audio focus (pausing Spotify and the like) and iOS switches the page's
+// audio session to playback (interrupting other apps). A Web Audio buffer
+// source requests no audio focus on Android, and the 'ambient' audio session
+// on iOS mixes with other apps' audio and respects the silent switch.
 import { state } from './state.js';
 
-let stoneSound = null;
-let isAudioInitialized = false;
+const STONE_SOUND_URL = '/sound/stone.wav';
+// An idle running context keeps the audio output open; suspend it after this
+// long without a sound.
+const IDLE_SUSPEND_MS = 5000;
 
-const _playSound = (audioObject) => {
-    if (audioObject) {
-        try {
-            audioObject.currentTime = 0;
-            audioObject.play().catch(e => console.log('Audio play failed:', e));
-        } catch (e) {
-            console.log('Audio play failed:', e);
-        }
+let audioContext = null;
+let stoneBuffer = null;
+let stoneBufferPromise = null;
+let idleTimer = null;
+
+function getAudioContext() {
+    if (audioContext) return audioContext;
+    try {
+        if (navigator.audioSession) navigator.audioSession.type = 'ambient';
+    } catch (e) {
+        console.log('Audio session setup failed:', e);
     }
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return null;
+    audioContext = new Ctx();
+    return audioContext;
 }
 
-function initAudio() {
-    try {
-        stoneSound = new Audio('sound/stone.wav');
-        stoneSound.preload = 'auto';
-        isAudioInitialized = true;
-    } catch (e) {
-        console.log('Audio initialization failed:', e);
+function loadStoneBuffer(ctx) {
+    if (!stoneBufferPromise) {
+        stoneBufferPromise = fetch(STONE_SOUND_URL)
+            .then(r => {
+                if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                return r.arrayBuffer();
+            })
+            // Callback form: older Safari's decodeAudioData returns no promise.
+            .then(data => new Promise((resolve, reject) => ctx.decodeAudioData(data, resolve, reject)))
+            .then(buffer => { stoneBuffer = buffer; return buffer; })
+            .catch(e => {
+                stoneBufferPromise = null; // let a later play retry
+                throw e;
+            });
     }
+    return stoneBufferPromise;
+}
+
+function scheduleIdleSuspend(ctx) {
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => {
+        if (ctx.state === 'running') ctx.suspend().catch(() => {});
+    }, IDLE_SUSPEND_MS);
+}
+
+function playBuffer(ctx, buffer) {
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(ctx.destination);
+    source.start();
+    scheduleIdleSuspend(ctx);
 }
 
 export function playStoneSound() {
     if (!state.audioEnabled) return;
-    // If audio hasn't been initialized yet, initialize it now
-    if (!isAudioInitialized) {
-        initAudio();
+    try {
+        const ctx = getAudioContext();
+        if (!ctx) return;
+        clearTimeout(idleTimer); // don't let a pending suspend race this play
+        // resume() must be called from the user gesture that triggered the
+        // move, so it goes before any await.
+        const resumed = ctx.state === 'running' ? Promise.resolve() : ctx.resume();
+        if (stoneBuffer) {
+            resumed.then(() => playBuffer(ctx, stoneBuffer))
+                .catch(e => console.log('Audio play failed:', e));
+        } else {
+            Promise.all([resumed, loadStoneBuffer(ctx)])
+                .then(([, buffer]) => playBuffer(ctx, buffer))
+                .catch(e => console.log('Audio play failed:', e));
+        }
+    } catch (e) {
+        console.log('Audio play failed:', e);
     }
-    _playSound(stoneSound);
 }
