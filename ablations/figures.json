@@ -8442,6 +8442,286 @@
         "data_version": "f6fba7b749bc0ecb"
       }
     },
+    "spread.halving_gain": {
+      "value": -0.08840921060704691,
+      "fmt": "+.2f",
+      "text": "-0.09",
+      "producer": "ablations.refit_spread_figures",
+      "tier": "refit",
+      "note": "whole minus halved spread, paired within each fit and averaged: what training on half a problem's attempts removes",
+      "measured": {
+        "at": "2026-09-23T08:10:32Z",
+        "git": "891522bda6f+dirty",
+        "db_max_id": 540303,
+        "data_version": "fd7ca9186c1f4131"
+      }
+    },
+    "spread.halving_gain_every_seed": {
+      "value": 0,
+      "fmt": "d",
+      "text": "0",
+      "producer": "ablations.refit_spread_figures",
+      "tier": "refit",
+      "note": "1 when that gain is positive in every fit. Backs a fig-guard",
+      "measured": {
+        "at": "2026-09-23T08:10:32Z",
+        "git": "891522bda6f+dirty",
+        "db_max_id": 540303,
+        "data_version": "fd7ca9186c1f4131"
+      }
+    },
+    "spread.info_loss_pct": {
+      "value": 0.05649288115809903,
+      "fmt": "%.0f",
+      "text": "6",
+      "producer": "ablations.refit_spread_figures",
+      "tier": "refit",
+      "note": "Fisher information per attempt lost to the spread against every attempt sitting at its prediction, percent",
+      "measured": {
+        "at": "2026-09-23T08:10:32Z",
+        "git": "891522bda6f+dirty",
+        "db_max_id": 540303,
+        "data_version": "fd7ca9186c1f4131"
+      }
+    },
+    "spread.min_attempts": {
+      "value": 4,
+      "fmt": "d",
+      "text": "4",
+      "producer": "ablations.refit_spread_figures",
+      "tier": "refit",
+      "note": "training rows a problem needs to be eligible for the holdout",
+      "measured": {
+        "at": "2026-09-23T08:10:32Z",
+        "git": "891522bda6f+dirty",
+        "db_max_id": 540303,
+        "data_version": "fd7ca9186c1f4131"
+      }
+    },
+    "spread.null_bias_sd": {
+      "value": 0.003361694517861206,
+      "fmt": "+.2f",
+      "text": "+0.00",
+      "producer": "ablations.refit_spread_figures",
+      "tier": "refit",
+      "note": "the estimator's mean on outcomes simulated with no departure, in units of its own spread; near zero when it is unbiased",
+      "measured": {
+        "at": "2026-09-23T08:10:32Z",
+        "git": "891522bda6f+dirty",
+        "db_max_id": 540303,
+        "data_version": "fd7ca9186c1f4131"
+      }
+    },
+    "spread.predicted_p05": {
+      "value": 0.6415485342343649,
+      "fmt": "%.0f",
+      "text": "64",
+      "producer": "ablations.refit_spread_figures",
+      "tier": "refit",
+      "note": "5th percentile of the model's predicted success on the whole set's rows, percent",
+      "measured": {
+        "at": "2026-09-23T08:10:32Z",
+        "git": "891522bda6f+dirty",
+        "db_max_id": 540303,
+        "data_version": "fd7ca9186c1f4131"
+      }
+    },
+    "spread.predicted_p95": {
+      "value": 0.9220883448918661,
+      "fmt": "%.0f",
+      "text": "92",
+      "producer": "ablations.refit_spread_figures",
+      "tier": "refit",
+      "note": "95th percentile of that prediction, percent",
+      "measured": {
+        "at": "2026-09-23T08:10:32Z",
+        "git": "891522bda6f+dirty",
+        "db_max_id": 540303,
+        "data_version": "fd7ca9186c1f4131"
+      }
+    },
+    "spread.problems_halved": {
+      "value": 3625.0,
+      "fmt": "~100",
+      "text": "3,600",
+      "producer": "ablations.refit_spread_figures",
+      "tier": "refit",
+      "note": "problems held out by half per fit, with at least one cross-user pair",
+      "measured": {
+        "at": "2026-09-23T08:10:32Z",
+        "git": "891522bda6f+dirty",
+        "db_max_id": 540303,
+        "data_version": "fd7ca9186c1f4131"
+      }
+    },
+    "spread.problems_whole": {
+      "value": 3625.0,
+      "fmt": "~100",
+      "text": "3,600",
+      "producer": "ablations.refit_spread_figures",
+      "tier": "refit",
+      "note": "problems held out whole per fit, with at least one cross-user pair",
+      "measured": {
+        "at": "2026-09-23T08:10:32Z",
+        "git": "891522bda6f+dirty",
+        "db_max_id": 540303,
+        "data_version": "fd7ca9186c1f4131"
+      }
+    },
+    "spread.recoverable_pct": {
+      "value": 0.16935420264783926,
+      "fmt": "%.0f",
+      "text": "17",
+      "producer": "ablations.refit_spread_figures",
+      "tier": "refit",
+      "note": "attempt-weighted share of a problem's departure variance that a shrunken per-problem estimate from the other attempts on it would recover, percent",
+      "measured": {
+        "at": "2026-09-23T08:10:32Z",
+        "git": "891522bda6f+dirty",
+        "db_max_id": 540303,
+        "data_version": "fd7ca9186c1f4131"
+      }
+    },
+    "spread.seeds": {
+      "value": 3,
+      "fmt": "d",
+      "text": "3",
+      "producer": "ablations.refit_spread_figures",
+      "tier": "refit",
+      "note": "fits behind the spread figures, each with its own held-out draw",
+      "measured": {
+        "at": "2026-09-23T08:10:32Z",
+        "git": "891522bda6f+dirty",
+        "db_max_id": 540303,
+        "data_version": "fd7ca9186c1f4131"
+      }
+    },
+    "spread.tau_halved": {
+      "value": 0.82733162758809,
+      "fmt": ".2f",
+      "text": "0.83",
+      "producer": "ablations.refit_spread_figures",
+      "tier": "refit",
+      "note": "the same spread on problems whose other half of attempts was trained on, mean over fits",
+      "measured": {
+        "at": "2026-09-23T08:10:32Z",
+        "git": "891522bda6f+dirty",
+        "db_max_id": 540303,
+        "data_version": "fd7ca9186c1f4131"
+      }
+    },
+    "spread.tau_halved_hi": {
+      "value": 1.1826572965949205,
+      "fmt": ".2f",
+      "text": "1.18",
+      "producer": "ablations.refit_spread_figures",
+      "tier": "refit",
+      "note": "highest per-fit 95% bootstrap upper bound, halved set",
+      "measured": {
+        "at": "2026-09-23T08:10:32Z",
+        "git": "891522bda6f+dirty",
+        "db_max_id": 540303,
+        "data_version": "fd7ca9186c1f4131"
+      }
+    },
+    "spread.tau_halved_lo": {
+      "value": 0.5784726312985743,
+      "fmt": ".2f",
+      "text": "0.58",
+      "producer": "ablations.refit_spread_figures",
+      "tier": "refit",
+      "note": "lowest per-fit 95% bootstrap lower bound, halved set",
+      "measured": {
+        "at": "2026-09-23T08:10:32Z",
+        "git": "891522bda6f+dirty",
+        "db_max_id": 540303,
+        "data_version": "fd7ca9186c1f4131"
+      }
+    },
+    "spread.tau_whole": {
+      "value": 0.7389224169810431,
+      "fmt": ".2f",
+      "text": "0.74",
+      "producer": "ablations.refit_spread_figures",
+      "tier": "refit",
+      "note": "spread of the problem's true logit about the fitted one, problems held out whole (features only), mean over fits",
+      "measured": {
+        "at": "2026-09-23T08:10:32Z",
+        "git": "891522bda6f+dirty",
+        "db_max_id": 540303,
+        "data_version": "fd7ca9186c1f4131"
+      }
+    },
+    "spread.tau_whole_hi": {
+      "value": 0.901003272740303,
+      "fmt": ".2f",
+      "text": "0.90",
+      "producer": "ablations.refit_spread_figures",
+      "tier": "refit",
+      "note": "highest per-fit 95% bootstrap upper bound of that spread",
+      "measured": {
+        "at": "2026-09-23T08:10:32Z",
+        "git": "891522bda6f+dirty",
+        "db_max_id": 540303,
+        "data_version": "fd7ca9186c1f4131"
+      }
+    },
+    "spread.tau_whole_lo": {
+      "value": 0.6256273581077199,
+      "fmt": ".2f",
+      "text": "0.63",
+      "producer": "ablations.refit_spread_figures",
+      "tier": "refit",
+      "note": "lowest per-fit 95% bootstrap lower bound of that spread",
+      "measured": {
+        "at": "2026-09-23T08:10:32Z",
+        "git": "891522bda6f+dirty",
+        "db_max_id": 540303,
+        "data_version": "fd7ca9186c1f4131"
+      }
+    },
+    "spread.true_below60_pct": {
+      "value": 0.1112651394291349,
+      "fmt": "%.0f",
+      "text": "11",
+      "producer": "ablations.refit_spread_figures",
+      "tier": "refit",
+      "note": "share of those rows whose implied true success is below 60%, percent",
+      "measured": {
+        "at": "2026-09-23T08:10:32Z",
+        "git": "891522bda6f+dirty",
+        "db_max_id": 540303,
+        "data_version": "fd7ca9186c1f4131"
+      }
+    },
+    "spread.true_p05": {
+      "value": 0.5223084463179779,
+      "fmt": "%.0f",
+      "text": "52",
+      "producer": "ablations.refit_spread_figures",
+      "tier": "refit",
+      "note": "5th percentile of the implied true success on those rows, percent",
+      "measured": {
+        "at": "2026-09-23T08:10:32Z",
+        "git": "891522bda6f+dirty",
+        "db_max_id": 540303,
+        "data_version": "fd7ca9186c1f4131"
+      }
+    },
+    "spread.true_p95": {
+      "value": 0.9432039842204079,
+      "fmt": "%.0f",
+      "text": "94",
+      "producer": "ablations.refit_spread_figures",
+      "tier": "refit",
+      "note": "95th percentile of the implied true success, percent",
+      "measured": {
+        "at": "2026-09-23T08:10:32Z",
+        "git": "891522bda6f+dirty",
+        "db_max_id": 540303,
+        "data_version": "fd7ca9186c1f4131"
+      }
+    },
     "stopping.patience_advantage_best_mnat": {
       "value": 0.08180737495422363,
       "fmt": ".1f",

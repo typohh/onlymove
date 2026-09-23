@@ -89,6 +89,8 @@ Every one of these ran on rented GPU time through `vast_orchestration.py ablate`
 - §1.14 — the axis count. Four, six and seven separate by less than the run-to-run spread on the combined likelihood; the axis increment alone rises with the count mechanically. `panels/axis_count.json`.
 - §1.5 — the penalty panel's replicates behind its leak figures.
 - §1.5, §1.14 — which terms on the loadings need the trunk. The teaching pull and the rating-orthogonality penalty both need it, at eight seeds each; a mutual-orthogonality penalty on the DETACHED readout is better on every count the panel reads and is the baseline; the anisotropic ridge is measured-rejected. `panels/detach.json`.
+- §1.5, §1.10 — the per-problem spread: how far a problem's true logit sits off the fitted curve, read from outcomes that agree across different players on one problem. Sizeable on problems held out whole, at every fit; training on half a problem's attempts does not narrow it; a shrunken per-problem estimate would recover only a minority of it at the log's density, which is the support for §1.10's "no per-problem correction". The holdout is the trainer's `spread` stop unit, drawn BEFORE the fit among problems with enough training rows to carry a cross-player pair; attempts arriving after a shipped fit are the obvious holdout and the wrong one, since their players' abilities are stale or have to be re-fitted on the rows being scored. Three seeds, each drawing its own holdout, because it is a magnitude; the one panel here run on a local GPU rather than rented time. `panels/problem_spread.json`, `refit_spread_figures.py`.
+- §1.10 — the slope multiplier. `refit_slope_scale_figures` reads the sweep the trainer records per arm: interior optimum, unity inside the seed spread.
 
 ### Re-measurement under the current baseline
 
@@ -96,6 +98,5 @@ The baseline is cosine@7000 with the detached mutual term. Every panel above was
 
 ### Still open — the genuine gaps
 
-- §1.10 — the empirical-Bayes per-problem variance component, quoted as a direction only ("real but tiny"): post-hoc over a fitted checkpoint, needs no panel. (The slope-multiplier sweep half is DONE — `refit_slope_scale_figures` reads the sweep the trainer records per arm: interior optimum, unity inside the seed spread, quoted in §1.10.)
 - §1.11 — the pivot walk-forward, quoted as a direction only and flagged in the text as measured on an earlier configuration.
 - §1.14 — the half-reliability history lengths, the axis-payoff bins and the teach-back agreements, all quoted in words. All post-hoc over a fitted arm plus the attempt log.
