@@ -103,7 +103,7 @@ SETS = {0: "whole", 1: "halved"}
 BOOTSTRAP = 2000
 NULL_REPS = 40
 IMPLIED_DRAWS = 20
-ROWS_KEYS = ("set", "prob", "user", "y", "z", "floor", "lapse", "p", "w")
+ROWS_KEYS = ("set", "tid", "user_id", "y", "z", "floor", "lapse", "p", "w")
 
 
 def load_panel():
@@ -167,12 +167,12 @@ def load_rows(arm, rec):
     require(set(np.unique(rows["set"]).tolist()) == set(SETS),
             f"{path} carries sets {np.unique(rows['set']).tolist()}")
     # A problem in both sets would be one held out whole and halved at once.
-    whole = set(rows["prob"][rows["set"] == 0].tolist())
-    halved = set(rows["prob"][rows["set"] == 1].tolist())
+    whole = set(rows["tid"][rows["set"] == 0].tolist())
+    halved = set(rows["tid"][rows["set"] == 1].tolist())
     require(not whole & halved, f"{path}: a problem sits in both sets")
     # Each row is one user's first attempt at one problem; a repeated pair would
     # put one person's two outcomes into a cross-user product.
-    pair = rows["prob"].astype(np.int64) * (int(rows["user"].max()) + 1) + rows["user"]
+    pair = np.char.add(np.char.add(rows["tid"], "|"), rows["user_id"])
     require(len(np.unique(pair)) == n, f"{path}: a (user, problem) pair repeats")
     return rows
 
@@ -195,7 +195,7 @@ def tau2(num, den):
 
 def measure_set(rows, s, rng):
     sel = rows["set"] == s
-    prob, y, p, w = rows["prob"][sel], rows["y"][sel], rows["p"][sel], rows["w"][sel]
+    prob, y, p, w = rows["tid"][sel], rows["y"][sel], rows["p"][sel], rows["w"][sel]
     num, den = pair_sums(prob, y - p, w)
     require(len(num) > 500, f"set {SETS[s]}: only {len(num)} problems carry a pair")
     t2 = tau2(num, den)
@@ -218,7 +218,7 @@ def implied(rows, s, tau, rng):
     """True success rates on the set's rows if each problem's logit sits a
     normal draw of spread `tau` off the fitted one, one draw per problem."""
     sel = rows["set"] == s
-    prob, z, c = rows["prob"][sel], rows["z"][sel], rows["floor"][sel]
+    prob, z, c = rows["tid"][sel], rows["z"][sel], rows["floor"][sel]
     lam = float(rows["lapse"])
     top = 1.0 - c - lam
     u, inv = np.unique(prob, return_inverse=True)

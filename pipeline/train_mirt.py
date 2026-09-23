@@ -1013,8 +1013,10 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
             p_h = c_h + (1.0 - c_h - lam_h) * sg_h
             w_h = (1.0 - c_h - lam_h) * sg_h * (1.0 - sg_h)
         stop_np = i_stop.cpu().numpy()
-        spread_rows = {"set": spread_set[stop_np], "prob": prob_idx[stop_np],
-                       "user": user_idx[stop_np], "y": y[stop_np],
+        spread_rows = {"set": spread_set[stop_np],
+                       "tid": np.array([keys[i][1] for i in prob_idx[stop_np]]),
+                       "user_id": np.asarray(users.categories)[user_idx[stop_np]].astype(str),
+                       "y": y[stop_np],
                        "z": z_h.cpu().numpy(), "floor": c_h.cpu().numpy(),
                        "lapse": np.float32(float(lam_h)),
                        "p": p_h.cpu().numpy(), "w": w_h.cpu().numpy()}
