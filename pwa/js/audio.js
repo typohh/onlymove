@@ -10,8 +10,10 @@ import { state } from './state.js';
 
 const STONE_SOUND_URL = '/sound/stone.wav';
 // An idle running context keeps the audio output open; suspend it after this
-// long without a sound.
-const IDLE_SUSPEND_MS = 5000;
+// long without a sound. Must exceed the delay before the opponent's reply to a
+// wrong move (game-logic.js): that play is not a user gesture, and iOS may
+// refuse to resume a suspended context outside one.
+const IDLE_SUSPEND_MS = 1500;
 
 let audioContext = null;
 let stoneBuffer = null;
