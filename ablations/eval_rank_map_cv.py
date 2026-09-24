@@ -78,7 +78,7 @@ from utils.rating.fit_rank_curves import (  # noqa: E402
     CALIBRATION_P, FLOOR_MAX, LOGIT_PER_RATING, fit_user_rating,
     interp_extrap_vec, _unpack_thresholds,
 )
-from utils.rating.rank_surveys import SQL_PATH_DEFAULT, load_rank_surveys  # noqa: E402
+from utils.rating.rank_surveys import SQL_PATH_DEFAULT, load_rank_surveys, rank_band  # noqa: E402
 from utils.rating.ratings_io import load_lapse  # noqa: E402
 
 BLOCK_DAYS = 60
@@ -196,7 +196,7 @@ def block_masses(blks, n_attempts):
 def _bucket_w(decls):
     rows_by = defaultdict(list)
     for server, R, g, T, se, w in decls:
-        rows_by[server].append((R, int(round(g)), T, se, w))
+        rows_by[server].append((R, rank_band(g), T, se, w))
     blocks = {}
     for server, rows in rows_by.items():
         # production gate counts declarations; blocks variants multiply rows, so gate
@@ -214,7 +214,7 @@ def _bucket_w(decls):
         blocks[server] = {
             "g_min": g_min, "g_max": g_max,
             "baseline": np.ones(K - 1) if K > 1 else np.array([]),
-            "identity": np.array([g - 0.5 for g in gs], float),
+            "identity": np.array([float(g) for g in gs], float),
             "rating": np.array([r for r, _, _, _, _ in rows], float),
             "T": np.array([t for _, _, t, _, _ in rows], float),
             "se": np.array([s for _, _, _, s, _ in rows], float),
@@ -235,7 +235,7 @@ def fit_consensus_cv(decls, eps=0.0):
         return None
 
     all_R = np.array([R for _, R, _, _, _, _ in decls], float)
-    all_g = np.array([g for _, _, g, _, _, _ in decls], float)
+    all_g = np.array([rank_band(g) for _, _, g, _, _, _ in decls], float)
     beta, alpha_c = np.polyfit(all_R, all_g, 1)
     if beta <= 0:
         beta = 1e-3
@@ -321,14 +321,14 @@ def evaluate(fitres, eval_rows):
         tau = np.array([thr[gg] for gg in gs], float)
         g_min = gs[0] - 1
         N = len(gs) + 1
-        k = max(0, min(N - 1, int(round(g)) - g_min))
+        k = max(0, min(N - 1, rank_band(g) - g_min))
         x = float(interp_extrap_vec(np.array([R + alpha * T]), a, ys)[0])
         K = tau.shape[0]
         upper = expit(tau[min(k, K - 1)] - x) if k < K else 1.0
         lower = expit(tau[max(k - 1, 0)] - x) if k > 0 else 0.0
         nlls.append(-np.log(max(upper - lower, 1e-12)))
         order = np.argsort(tau)
-        srv_scalar = np.array([gg - 0.5 for gg in gs], float)
+        srv_scalar = np.array([float(gg) for gg in gs], float)
         pred = float(interp_extrap_vec(np.array([x]), tau[order], srv_scalar[order])[0])
         errs.append(pred - g)
         gdecl.append(g)
@@ -482,7 +482,7 @@ def main():
     LENSES = [("career-lens", career), ("win120-lens", win)]
 
     # --- sanity: se=0/w=1/eps=EPS_CONTAMINATION reproduces production fit_consensus
-    prod_decls = [(s, R, g, T) for (s, R, g, T, _, _) in point_decls(users, career, False)]
+    prod_decls = [(s, R, rank_band(g), T) for (s, R, g, T, _, _) in point_decls(users, career, False)]
     a_p, al_p, ys_p, _, _ = fit_consensus(prod_decls)
     a_c, al_c, _, _ = fit_consensus_cv(point_decls(users, career, False),
                                        eps=EPS_CONTAMINATION)
@@ -578,7 +578,7 @@ def main():
     for vname, _, _ in VARIANTS:
         errs, gdecl = pooled[(vname, "career-lens")]
         errs, gdecl = np.array(errs), np.array(gdecl)
-        dan, kyu, deep = gdecl >= 1, gdecl < 1, gdecl <= -9
+        dan, kyu, deep = gdecl >= 0, gdecl < 0, gdecl <= -9
         def mae_bias(m):
             if m.sum() == 0:
                 return "     -", "      -"

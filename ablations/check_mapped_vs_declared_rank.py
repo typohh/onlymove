@@ -129,7 +129,7 @@ def junk_posterior(server, declared_scalar, x, server_curves):
     """P(this declaration is junk | data) under the fit's contamination mixture.
 
     The rank_map knots ARE the fitted ordinal thresholds (`our` = τ at each
-    server category boundary, `server` = the g−0.5 boundary scalars), so the
+    server category boundary, `server` = the band-EDGE scalars), so the
     declared category's likelihood is reconstructed exactly:
     P_ordinal = expit(τ_up − x) − expit(τ_lo − x), and the posterior is
     (ε/N) / ((1−ε)·P_ordinal + ε/N) with N = len(τ)+1 categories and x the
@@ -138,9 +138,9 @@ def junk_posterior(server, declared_scalar, x, server_curves):
     if server not in server_curves:
         return None
     tau, srv = server_curves[server]
-    g = int(round(declared_scalar))
+    g = rank_band(declared_scalar)       # declared scalars are band CENTRES; floor, never round
     K = len(tau)
-    k = int(np.searchsorted(srv, g))     # boundaries below the declared category
+    k = int(np.searchsorted(srv, g, side="right"))   # edges at or below the declared band
     upper = expit(tau[k] - x) if k < K else 1.0
     lower = expit(tau[k - 1] - x) if k > 0 else 0.0
     p = max(float(upper - lower), 1e-12)
