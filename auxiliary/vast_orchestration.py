@@ -27,11 +27,18 @@ import sys
 import tempfile
 import time
 
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.append(PROJECT_ROOT)
+
 from utils.constants import ALL_BOARD_SIZES
 
 VASTAI_BIN = ".venv/bin/vastai"
 REMOTE_DIR = "/workspace/onlymove"
-STATE_FILE = "orchestration_state.json"
+# Local bookkeeping only: step labels per instance and the per-GPU concurrency
+# cache. Losing it loses nothing billed — prune_state reconciles against vast.ai's
+# own instance list — so it lives in the gitignored scratch dir.
+STATE_FILE = os.path.join("tmp", "vast_orchestration_state.json")
 
 # Pipeline steps allowed on the remote. Maps short name → python -m module path.
 # `losing_lines` is an auxiliary step, not a main-pipeline one, but it fits the
@@ -471,6 +478,7 @@ def load_state():
 
 
 def save_state(state):
+    os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
     with open(STATE_FILE, "w") as f:
         json.dump(state, f, indent=2)
 
@@ -1636,7 +1644,7 @@ def _ablate_git_stamp(base_ssh, dry):
     local abbreviation length so the pin reads identically whichever machine ran
     the arm.
     """
-    root = os.path.dirname(os.path.abspath(__file__))
+    root = PROJECT_ROOT
 
     def git(*args):
         return subprocess.run(["git"] + list(args), cwd=root, capture_output=True,
@@ -1902,8 +1910,7 @@ def cmd_queue(args):
         concurrency = str(int(concurrency))
     target = _take_opt(args, "--instance", args[0] if args else None)
 
-    local_queue = os.path.join(
-        os.path.dirname(os.path.abspath(__file__)), ABLATE_QUEUE)
+    local_queue = os.path.join(PROJECT_ROOT, ABLATE_QUEUE)
     if not os.path.exists(local_queue):
         print(f"no {ABLATE_QUEUE} — write one first. Lines are "
               f"`<panel> [<arm> ...]`; a bare panel name means all of its arms.")
@@ -1934,7 +1941,7 @@ def cmd_queue(args):
     # only the manifest defines, so pushing the queue alone makes the pool warn
     # that the arms do not exist — which is what it did the first time a budget
     # was appended this way.
-    root = os.path.dirname(os.path.abspath(__file__))
+    root = PROJECT_ROOT
     _run_or_show(base_rsync + [local_queue,
                                f"root@{host}:{REMOTE_DIR}/{ABLATE_QUEUE}"],
                  dry, capture_output=True)
@@ -2168,7 +2175,7 @@ def cmd_ablate(args):
         print(f"On a verdict: clear running_step, report the arm records under "
               f"{os.path.join(ABLATE_RESULTS, panel)}/, and "
               + ("keep the instance (--keep)." if keep else
-                 f"print `python vast_orchestration.py shutdown {inst_id}`."))
+                 f"print `./.venv/bin/python3 -m auxiliary.vast_orchestration shutdown {inst_id}`."))
         return
 
     local_dir = os.path.join(ABLATE_RESULTS, panel)
@@ -2189,7 +2196,7 @@ def cmd_ablate(args):
     else:
         print(f"  instance {inst_id} is STILL RUNNING and still billing. "
               f"Destroy it with:")
-        print(f"    python vast_orchestration.py shutdown {inst_id}")
+        print(f"    ./.venv/bin/python3 -m auxiliary.vast_orchestration shutdown {inst_id}")
     # A PANEL WITH A HOLE IN IT EXITS NON-ZERO. Everything above is printed
     # either way, but a caller chaining panels — or reading $? at all — cannot
     # otherwise tell a finished panel from one that lost arms, and an arm that

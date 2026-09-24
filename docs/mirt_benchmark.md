@@ -145,7 +145,7 @@ Held-out PROBLEMS (whole problems held aside; the unit a claim about generalizat
 
 **Held-out ROWS** (the trainer's own convergence split) are not the level's unit and were measured only for the within-run band: the cosine tail is flat by construction and the constant tail wanders by several millinats peak to peak, which settles nothing on its own and is why the between-run spread above is the figure that was decided on.
 
-Reproduction: `vast_orchestration.py ablate schedule` (or the queue); `./.venv/bin/python3 -m ablations.refit_schedule_figures` prints the table above from the records.
+Reproduction: `auxiliary/vast_orchestration.py ablate schedule` (or the queue); `./.venv/bin/python3 -m ablations.refit_schedule_figures` prints the table above from the records.
 
 ## THE AXIS SPACE — FREE FITS, THE OPENING RAMP AND THE MUTUAL PENALTY — MEASURED 2026-09-03
 
@@ -182,7 +182,7 @@ The arms held out problems, not users, so the drawn accounts' attempts reached e
 
 Human inspection: `auxiliary.rating_dev.align_arm_axes` writes each arm as an `inspect_axes` dump with its axes matched one-to-one to a reference arm's (the same slot is the same direction on every page) and `inspect_axes --dump … --match-source taught` captions each free tail with the rule-taught axes it agrees with.
 
-Reproduction: `vast_orchestration.py ablate axis_space`; `./.venv/bin/python3 -m ablations.refit_axis_space_figures` prints the table; `./.venv/bin/python3 -m auxiliary.rating_dev.panel_axis_by_history --arms axis_space/<arm> … shipped --seeds 0 1` the walk.
+Reproduction: `auxiliary/vast_orchestration.py ablate axis_space`; `./.venv/bin/python3 -m ablations.refit_axis_space_figures` prints the table; `./.venv/bin/python3 -m auxiliary.rating_dev.panel_axis_by_history --arms axis_space/<arm> … shipped --seeds 0 1` the walk.
 
 ## THE OPENING RAMP — MEASURED-REJECTED, DON'T RE-ATTEMPT — MEASURED 2026-09-03
 
@@ -197,7 +197,7 @@ Panel `ablations/panels/ramp.json`: the shipped fit with both rates scaled linea
 
 Per-seed gains (mnat): 250: +3.29 +1.79 +3.02 +0.13 +0.26 +1.56 −0.62 −5.58; 500: +0.71 +2.73 +1.34 +0.26 −0.35 −2.32 +0.53 +0.44; 1000: +2.64 +0.24 +2.33 −1.74 +1.25 +1.99 −5.30 +1.38.
 
-**Nothing at any length.** Every gain sits inside its interval at p 0.44–0.72; the best length (250) is interior, so the sweep brackets and no longer ramp is owed. The first four seeds of R=500 reproduce the axis_space reading to the hundredth (determinism across two boxes of one GPU model), and the next four land on the other side. Identity does not move either way. The no-ramp schedule stays; the knob stays for the panel. Reproduction: `vast_orchestration.py ablate ramp`; `./.venv/bin/python3 -m ablations.refit_ramp_figures`.
+**Nothing at any length.** Every gain sits inside its interval at p 0.44–0.72; the best length (250) is interior, so the sweep brackets and no longer ramp is owed. The first four seeds of R=500 reproduce the axis_space reading to the hundredth (determinism across two boxes of one GPU model), and the next four land on the other side. Identity does not move either way. The no-ramp schedule stays; the knob stays for the panel. Reproduction: `auxiliary/vast_orchestration.py ablate ramp`; `./.venv/bin/python3 -m ablations.refit_ramp_figures`.
 
 ## WHICH TERMS ON THE LOADINGS NEED THE TRUNK — MEASURED 2026-09-03
 
@@ -222,7 +222,7 @@ Per-seed gains: pull detached +10.40 +2.75 +9.28 +4.17 +7.86 +1.15 +7.88 +4.48; 
 
 **The anisotropic ridge does nothing.** The free fit under a 1.3 ladder reproduces no better (0.20) and still duplicates its axes (effective dimension 2.5, worst pair 0.96): a distinct ridge per axis prefers one basis among distinct directions, but two axes sharing a direction still pay less than one carrying it, so the duplicate solution stands and there is no ordering to stabilize. Measured-rejected.
 
-Reproduction: `vast_orchestration.py ablate detach`; `./.venv/bin/python3 -m ablations.refit_detach_figures`.
+Reproduction: `auxiliary/vast_orchestration.py ablate detach`; `./.venv/bin/python3 -m ablations.refit_detach_figures`.
 
 ## THE K PANEL AND THE RULE WIDTHS — MEASURED 2026-08-21
 

@@ -5,7 +5,7 @@ too-wide one carries.
 
 A refit-tier producer never trains: it reads the arm records a panel run wrote
 under `dev_runs/<panel>/` (`ablations.run_panel`, locally or via
-`vast_orchestration.py ablate`) and hard-fails when the panel is missing, short
+`auxiliary/vast_orchestration.py ablate`) and hard-fails when the panel is missing, short
 of budget, running a config other than the manifest's, internally inconsistent,
 or STALE against the current attempt log — the pins rule `docs/mirt_benchmark.md`
 states, mechanized. Guards and spans keep evaluating against the last-measured
@@ -149,7 +149,7 @@ def load_panel():
                 f"no {path} — the features panel has not run at every width and "
                 f"seed (missing {arm}: width {key[0]}, seed {key[1]}). Run it "
                 f"with `python -m ablations.run_panel features` (or "
-                f"`vast_orchestration.py ablate features`) first; the resume "
+                f"`auxiliary/vast_orchestration.py ablate features`) first; the resume "
                 f"unit is the arm, so arms already recorded are skipped.")
         with open(path) as f:
             arms[key] = json.load(f)

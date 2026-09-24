@@ -8,14 +8,13 @@ Each problem has exactly one correct first move. From the attempt log the pipeli
 
 - **`pipeline/`** — executable scripts that form the core workflow (generation, benchmarking, rating, feature extraction, packaging).
 - **`utils/`** — the shared logic, split by domain: **`utils/katago/`** is the Go and KataGo side (engine controller and queries, the vendored PyTorch copy, coordinates, SGF construction, problem finding, board rendering) and **`utils/rating/`** is the statistical side (feature assembly, the model's layer stack, the rating artifacts reader, rank-curve fitting, surveys, the motif rules, the SE-floor geometry). The boundary is one-way and holds at import time: `utils/katago/` imports nothing from `utils/rating/`, and importing the rating side loads nothing from the KataGo side — the few engine helpers it needs are imported inside the functions that use them. `utils/constants.py` holds the handful of values both need and imports from neither.
-- **`auxiliary/`** — analysis tools, rating-model research, and diagnostic scripts (not part of the main flow).
+- **`auxiliary/`** — analysis tools, rating-model research, and diagnostic scripts (not part of the main flow), plus `vast_orchestration.py`, the wrapper for running the heavy pipeline steps on a rented Vast.ai GPU.
 - **`pwa/`** — the front-end (vanilla JS + esbuild) and the Cloudflare Worker that hosts it.
 - **`analysis_server/`** — a small KataGo-backed HTTP service used as the PWA's analysis fallback. `worker.py` lets a faster machine dial in and take that service's work over while it is running.
 - **`android/`** — the Bubblewrap TWA shell that wraps the PWA for the Play Store.
 - **`docs/`** — methodology and operational runbooks (authored); `docs/vendor/` holds third-party reference material, currently WGo.js's API docs.
 - **`data/`** — external rank reference inputs (`reference/`), corpus audit findings (`tsumego_audit/`), and gitignored real-user localStorage dumps (`user_dumps/`, which carry account credentials — see `data/README.md`).
 - **`db/`** — the local snapshot of the production Cloudflare D1 (`d1.sqlite`, plus the `d1.sql` text dump beside it), pulled by `pipeline.fetch_database`. Gitignored and regenerable; query `d1.sqlite` for any local analysis. Distinct from `attempts/<size>/`, which holds the *tracked* bot benchmark results that feed the rating model.
-- **`vast_orchestration.py`** — wrapper for running the heavy pipeline steps on a rented Vast.ai GPU.
 
 Where to go deeper: **`docs/overview.md`** describes what each subsystem is for and who owns what state, with no algorithms — start there. **`docs/methodology.md`** is the self-contained methodology: how ratings, ranks and motifs are constructed and how the client consumes them, including which alternatives were tried and lost. **`CLAUDE.md`** is the operating layer — the commands and the cross-file invariants — and its "Where the detail lives" table indexes the rest of `docs/`. **`pwa/README.md`** covers the front-end and the Worker, and **`docs/contract.md`** is the editing contract for all of the above.
 
@@ -30,13 +29,13 @@ The repository is complete as source and deliberately incomplete as a deployment
 
 ### KataGo
 
-- **The binary is not in the repository** — `bots/` is gitignored apart from `analysis.cfg`, which is tuned state rather than an artifact. Build or download a KataGo yourself and put it at `bots/katago`, or point the `KATAGO_PATH` environment variable at it. The default assumption is an OpenCL build; `vast_orchestration.py` uploads a CUDA build as `bots/katago_cuda12` when running remotely — the CUDA major version is part of the filename because the binary links `libcublas.so.<major>` and is not portable across majors.
+- **The binary is not in the repository** — `bots/` is gitignored apart from `analysis.cfg`, which is tuned state rather than an artifact. Build or download a KataGo yourself and put it at `bots/katago`, or point the `KATAGO_PATH` environment variable at it. The default assumption is an OpenCL build; `auxiliary/vast_orchestration.py` uploads a CUDA build as `bots/katago_cuda12` when running remotely — the CUDA major version is part of the filename because the binary links `libcublas.so.<major>` and is not portable across majors.
 - **Network weights fetch themselves.** `utils.katago.models.get_model` downloads the `.bin.gz` that the analysis engine reads on first use, so the generation steps need no manual model setup.
 - **Activation extraction is the exception.** Step 5 runs the vendored PyTorch copy of KataGo, which loads a `model.ckpt` — a different artifact from the `.bin.gz`, and not derivable from it, since KataGo's own tooling converts PyTorch → binary and not back. Extract it from the matching checkpoint `.zip` to `models/kata1-b18c384nbt-s9996604416-d4316597426/model.ckpt`, or pass `--ckpt`.
 
 ### Hardware
 
-A GPU is a practical requirement for generation, bot benchmarking and the two extraction passes (steps 3–6). Activation extraction runs about 1.4 GPU-minutes per 1000 problems on a Quadro M2200 — measured end to end over a full corpus rebuild, so it includes SGF parsing and npz compression — which puts a full-corpus pass at a few hours rather than a day. **Budget disk rather than compute for it**: roughly 0.6 MB per 9×9 problem and 1.15 MB per 13×13 one, on the order of 100 GB for a full corpus, and the pass is bound by writing that rather than by the forward pass. `vast_orchestration.py` rents a Vast.ai instance for the three remotable steps. Everything downstream of extraction, and everything in `auxiliary/`, is CPU-only.
+A GPU is a practical requirement for generation, bot benchmarking and the two extraction passes (steps 3–6). Activation extraction runs about 1.4 GPU-minutes per 1000 problems on a Quadro M2200 — measured end to end over a full corpus rebuild, so it includes SGF parsing and npz compression — which puts a full-corpus pass at a few hours rather than a day. **Budget disk rather than compute for it**: roughly 0.6 MB per 9×9 problem and 1.15 MB per 13×13 one, on the order of 100 GB for a full corpus, and the pass is bound by writing that rather than by the forward pass. `auxiliary/vast_orchestration.py` rents a Vast.ai instance for the three remotable steps. Everything downstream of extraction, and everything in `auxiliary/`, is CPU-only.
 
 ### Cloudflare (deployment only)
 
@@ -145,8 +144,8 @@ Steps 9–13 are ordered by hard data dependencies rather than convention; `docs
 The heavy generation steps can run on a rented Vast.ai GPU:
 
 ```bash
-python vast_orchestration.py                    # no args prints subcommands
-python vast_orchestration.py run <step> <size>  # tune / generate / benchmark are remoted (size forwarded); the rest stay local
+./.venv/bin/python3 -m auxiliary.vast_orchestration                    # no args prints subcommands
+./.venv/bin/python3 -m auxiliary.vast_orchestration run <step> <size>  # tune / generate / benchmark are remoted (size forwarded); the rest stay local
 ```
 
 ## PWA

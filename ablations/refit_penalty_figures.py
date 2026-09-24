@@ -4,7 +4,7 @@
 
 A refit-tier producer never trains: it reads the arm records a panel run wrote
 under `dev_runs/<panel>/` (`ablations.run_panel`, locally or via
-`vast_orchestration.py ablate`) and hard-fails when the panel is missing, short
+`auxiliary/vast_orchestration.py ablate`) and hard-fails when the panel is missing, short
 of budget, running a config other than the manifest's, internally inconsistent,
 or STALE against the current attempt log — the pins rule `docs/mirt_benchmark.md`
 states, mechanized. Guards and spans keep evaluating against the last-measured
@@ -233,7 +233,7 @@ def load_panel():
         require(os.path.exists(path),
                 f"no {path} — the penalty panel has not run at every seed. Run "
                 f"it with `python -m ablations.run_panel penalty` (or "
-                f"`vast_orchestration.py ablate penalty`) first; the resume "
+                f"`auxiliary/vast_orchestration.py ablate penalty`) first; the resume "
                 f"unit is the arm, so the arms already recorded are skipped.")
         with open(path) as f:
             arms[arm] = json.load(f)

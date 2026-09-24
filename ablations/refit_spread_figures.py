@@ -115,7 +115,7 @@ def load_panel():
         require(os.path.exists(path),
                 f"no {path} — the problem_spread panel has not finished. Run it "
                 f"with `python -m ablations.run_panel {PANEL}` (or "
-                f"`vast_orchestration.py ablate {PANEL}`).")
+                f"`auxiliary/vast_orchestration.py ablate {PANEL}`).")
         rec = json.load(open(path))
         require(rec["config"] == cfg,
                 f"{arm} ran {rec['config']!r}, the manifest declares {cfg!r} — "

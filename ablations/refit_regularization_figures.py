@@ -5,7 +5,7 @@ removals compound, and whether weight decay stands in for either.
 
 A refit-tier producer never trains: it reads the arm records a panel run wrote
 under `dev_runs/<panel>/` (`ablations.run_panel`, locally or via
-`vast_orchestration.py ablate`) and hard-fails when the panel is missing, short
+`auxiliary/vast_orchestration.py ablate`) and hard-fails when the panel is missing, short
 of budget, running a config other than the manifest's, internally inconsistent,
 or STALE against the current attempt log — the pins rule `docs/mirt_benchmark.md`
 states, mechanized. Guards and spans keep evaluating against the last-measured
@@ -267,7 +267,7 @@ def load_panel():
                 f"no {path} — the regularization panel has not run at every "
                 f"configuration and seed (missing {arm}: {CONFIG_NOTE[key[0]]}, "
                 f"seed {key[1]}). Run it with `python -m ablations.run_panel "
-                f"regularization` (or `vast_orchestration.py ablate "
+                f"regularization` (or `auxiliary/vast_orchestration.py ablate "
                 f"regularization`) first; the resume unit is the arm, so arms "
                 f"already recorded are skipped.")
         with open(path) as f:

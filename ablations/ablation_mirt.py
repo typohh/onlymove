@@ -40,7 +40,7 @@ one machine, and the producer checks the pins agree across the arms it reads.
 
 Run a whole panel (skip-existing, optional concurrency) with
 `ablations.run_panel`; run it on a rented box with
-`vast_orchestration.py ablate`.
+`auxiliary/vast_orchestration.py ablate`.
 """
 
 import argparse

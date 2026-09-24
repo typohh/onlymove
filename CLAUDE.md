@@ -11,7 +11,7 @@ YoseTsumego / onlymove.net — a Go (Baduk/Weiqi) tsumego pipeline. KataGo gener
 3. **`pwa/`** — vanilla-JS ESM PWA built with esbuild, deployed as a Cloudflare Worker (`pwa/src/index.js`), with a D1 binding `DB` → database `tsumego-reports`. Schema is `pwa/schema.sql` (idempotent `CREATE … IF NOT EXISTS`); apply new tables/indexes to the remote D1 with `npx wrangler d1 execute tsumego-reports --remote --file=schema.sql`. Routes, tables and the client architecture are in `docs/` — see below.
 4. **`analysis_server/`** — a tiny HTTP server wrapping KataGo for the PWA's analysis fallback when SGFs lack embedded win-rate data. `server.py` runs on the cloud box (stdlib + sgfmill only — deployed with no repo beside it); `worker.py` runs on a fast machine and takes that box's work over while it is up.
 
-Plus `auxiliary/` (diagnostics, surgery scripts, the rating-model research surface; not part of the main flow), `ablations/` (repeatable seeded measurements against what SHIPS — the rating fit, the rank map, the client's estimators, the activation encoder; the figures the docs and `pwa/about.html` quote; see its README for the contract and for the split against `auxiliary/`), and `vast_orchestration.py` (rents Vast.ai GPU instances for the heavy generation steps).
+Plus `auxiliary/` (diagnostics, surgery scripts, the rating-model research surface, and `vast_orchestration.py`, which rents Vast.ai GPU instances for the heavy generation steps; not part of the main flow) and `ablations/` (repeatable seeded measurements against what SHIPS — the rating fit, the rank map, the client's estimators, the activation encoder; the figures the docs and `pwa/about.html` quote; see its README for the contract and for the split against `auxiliary/`).
 
 ### Where the detail lives
 
@@ -54,7 +54,7 @@ Always invoke pipeline modules through the venv's Python so PYTHONPATH resolves 
 ./.venv/bin/python3 -m pipeline.package_for_pwa           # SINGLE writer of pwa/tsumegos/. Change-detects per size; --force to override
 ```
 
-Remote: `python vast_orchestration.py` (no args prints subcommands; only `tune`, `generate`, `benchmark` are remoted — the rest stay local).
+Remote: `./.venv/bin/python3 -m auxiliary.vast_orchestration` (no args prints subcommands; only `tune`, `generate`, `benchmark` are remoted — the rest stay local).
 
 **Run order is a hard data dependency, not a convention** — `methodology.md` §3.1 spells out each edge. Two steps mislead: `map_rating_to_rank` and `fit_population_constants` are board-independent and need no GPU, but **board-independent is not detachable** and both sit INSIDE the sequence. `fit_population_constants` reads nothing from `axes/` — it fits no per-axis quantity, so an axis refit does not require re-running it.
 

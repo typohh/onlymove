@@ -7,7 +7,7 @@ it on, and each of those with and without an opening learning-rate ramp.
 
 A refit-tier producer never trains: it reads the arm records a panel run wrote
 under `dev_runs/<panel>/` (`ablations.run_panel`, locally or via
-`vast_orchestration.py ablate`) and hard-fails when the panel is missing, short
+`auxiliary/vast_orchestration.py ablate`) and hard-fails when the panel is missing, short
 of budget, internally inconsistent, or STALE against the current attempt log.
 
 WHY THE PANEL EXISTS. The likelihood reads the loadings and the user positions
@@ -171,7 +171,7 @@ def load_panel():
         require(os.path.exists(path),
                 f"no {path} — the axis_space panel has not run. Run it with "
                 f"`python -m ablations.run_panel axis_space` (or "
-                f"`vast_orchestration.py ablate axis_space`) first.")
+                f"`auxiliary/vast_orchestration.py ablate axis_space`) first.")
         arms[arm] = json.load(open(path))
 
     # ONE PANEL IS ONE REGIME, read off the arms and not off the trainer's

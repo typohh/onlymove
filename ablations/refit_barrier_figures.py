@@ -4,7 +4,7 @@ refit panel — the first refit-tier producer.
 
 A refit-tier producer never trains: it reads the arm records a panel run wrote
 under `dev_runs/<panel>/` (`ablations.run_panel`, locally or via
-`vast_orchestration.py ablate`) and hard-fails when the panel is missing, short
+`auxiliary/vast_orchestration.py ablate`) and hard-fails when the panel is missing, short
 of budget, running a config other than the manifest's, internally inconsistent,
 or STALE against the current attempt log — the pins rule `docs/mirt_benchmark.md`
 states, mechanized. Guards and spans keep evaluating against the last-measured
@@ -157,7 +157,7 @@ def load_panel():
         require(os.path.exists(path),
                 f"no {path} — the barrier panel has not run at every seed. Run "
                 f"it with `python -m ablations.run_panel barrier` (or "
-                f"`vast_orchestration.py ablate barrier`) first; the resume "
+                f"`auxiliary/vast_orchestration.py ablate barrier`) first; the resume "
                 f"unit is the arm, so the arms already recorded are skipped.")
         arms[arm] = json.load(open(path))
 

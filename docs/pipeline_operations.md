@@ -20,7 +20,7 @@ Incremental by default and read-cost sensitive; full detail in `worker_operation
 
 ### `tune_engine <size>`
 
-Rewrites `numAnalysisThreads` and `nnMaxBatchSize` in `bots/analysis.cfg` **in place** for the current GPU. If you hand-edit that file, expect the tuner to overwrite your changes. `vast_orchestration.py`'s `setup` ships the local cfg once but `update` deliberately skips it, so remote tuning is not clobbered by a local one.
+Rewrites `numAnalysisThreads` and `nnMaxBatchSize` in `bots/analysis.cfg` **in place** for the current GPU. If you hand-edit that file, expect the tuner to overwrite your changes. `auxiliary/vast_orchestration.py`'s `setup` ships the local cfg once but `update` deliberately skips it, so remote tuning is not clobbered by a local one.
 
 ### `generate_tsumegos <size>` / `benchmark_bots <size>`
 
@@ -143,7 +143,7 @@ Three things that look like they should be tracked and are not:
 
 ## Remote execution
 
-`python vast_orchestration.py` with no arguments prints its subcommands. Only `tune`, `generate` and `benchmark` are remoted; everything else stays local. `run <step> <size>` forwards the size verbatim, validated locally against `ALL_BOARD_SIZES`. The remote gets a CUDA KataGo build uploaded as `bots/katago_cuda12` with `KATAGO_PATH` pointed at it — see `corpus_and_engine.md` for why the binary path is never hardcoded.
+`./.venv/bin/python3 -m auxiliary.vast_orchestration` with no arguments prints its subcommands. Only `tune`, `generate` and `benchmark` are remoted; everything else stays local. `run <step> <size>` forwards the size verbatim, validated locally against `ALL_BOARD_SIZES`. The remote gets a CUDA KataGo build uploaded as `bots/katago_cuda12` with `KATAGO_PATH` pointed at it — see `corpus_and_engine.md` for why the binary path is never hardcoded.
 
 ## Working with large artifact directories
 

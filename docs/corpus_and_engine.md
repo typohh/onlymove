@@ -102,7 +102,7 @@ The client-side view of board size — the URL hints, and how the two boards mer
 
 ## KataGo integration
 
-**Binary selection is by environment variable.** `utils/katago/controller.py` reads `KATAGO_PATH`, defaulting to `bots/katago` (an OpenCL build). `vast_orchestration.py` uploads a CUDA build as `bots/katago_cuda12` and sets `KATAGO_PATH=bots/katago_cuda12` on the remote. **The CUDA major version is in the filename on purpose** — the binary links `libcublas.so.<major>`, so one build does not serve hosts of different majors. **Don't hardcode the binary path**; rely on the variable.
+**Binary selection is by environment variable.** `utils/katago/controller.py` reads `KATAGO_PATH`, defaulting to `bots/katago` (an OpenCL build). `auxiliary/vast_orchestration.py` uploads a CUDA build as `bots/katago_cuda12` and sets `KATAGO_PATH=bots/katago_cuda12` on the remote. **The CUDA major version is in the filename on purpose** — the binary links `libcublas.so.<major>`, so one build does not serve hosts of different majors. **Don't hardcode the binary path**; rely on the variable.
 
 **`KatagoController` is thread-safe by design.** A single master reader thread fans responses out via per-query `threading.Event`s keyed on query ids, so `send_query` is blocking from the caller's point of view. The worker threads in `generate_tsumegos` and `benchmark_bots` rely on this.
 

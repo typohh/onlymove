@@ -101,7 +101,7 @@ def load_panel():
         require(os.path.exists(path),
                 f"no {path} — the schedule panel has not finished. Run it with "
                 f"`python -m ablations.run_panel schedule` (or "
-                f"`vast_orchestration.py ablate schedule`).")
+                f"`auxiliary/vast_orchestration.py ablate schedule`).")
         rec = json.load(open(path))
         require(rec["config"] == manifest["arms"][arm],
                 f"{arm} ran {rec['config']!r}, the manifest declares "

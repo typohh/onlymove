@@ -91,7 +91,7 @@ def load_panel():
         require(os.path.exists(path),
                 f"no {path} — the ramp panel has not finished. Run it with "
                 f"`python -m ablations.run_panel ramp` (or "
-                f"`vast_orchestration.py ablate ramp`).")
+                f"`auxiliary/vast_orchestration.py ablate ramp`).")
         rec = json.load(open(path))
         require(rec["config"] == cfg,
                 f"{arm} ran {rec['config']!r}, the manifest declares {cfg!r} — "

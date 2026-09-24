@@ -4,7 +4,7 @@ from the `axis_count` refit panel.
 
 A refit-tier producer never trains: it reads the arm records a panel run wrote
 under `dev_runs/<panel>/` (`ablations.run_panel`, locally or via
-`vast_orchestration.py ablate`) and hard-fails when the panel is missing, short
+`auxiliary/vast_orchestration.py ablate`) and hard-fails when the panel is missing, short
 of budget, running a config other than the manifest's, internally inconsistent,
 or STALE against the current attempt log — the pins rule `docs/mirt_benchmark.md`
 states, mechanized. Guards and spans keep evaluating against the last-measured
@@ -180,7 +180,7 @@ def load_panel():
         require(os.path.exists(path),
                 f"no {path} — the axis_count panel has not run, or has not "
                 f"finished. Run it with `python -m ablations.run_panel "
-                f"axis_count` (or `vast_orchestration.py ablate axis_count`) "
+                f"axis_count` (or `auxiliary/vast_orchestration.py ablate axis_count`) "
                 f"first; the resume unit is the arm, so arms already recorded "
                 f"are skipped.")
         with open(path) as f:

@@ -4,7 +4,7 @@ constants table), read from the `lr` refit panel.
 
 A refit-tier producer never trains: it reads the arm records a panel run wrote
 under `dev_runs/<panel>/` (`ablations.run_panel`, locally or via
-`vast_orchestration.py ablate`) and hard-fails when the panel is missing, short
+`auxiliary/vast_orchestration.py ablate`) and hard-fails when the panel is missing, short
 of budget, internally inconsistent, or STALE against the current attempt log —
 the pins rule `docs/mirt_benchmark.md` states, mechanized. Guards and spans keep
 evaluating against the last-measured ledger values, so the panel's cost is paid
@@ -194,7 +194,7 @@ def load_panel():
         require(os.path.exists(path),
                 f"no {path} — the lr panel has not run at every seed. Run it "
                 f"with `python -m ablations.run_panel lr` (or "
-                f"`vast_orchestration.py ablate lr`) first; the resume unit is "
+                f"`auxiliary/vast_orchestration.py ablate lr`) first; the resume unit is "
                 f"the arm, so the arms already recorded are skipped.")
         arms[arm] = json.load(open(path))
 

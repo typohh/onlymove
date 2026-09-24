@@ -179,8 +179,6 @@ axes/rule_quantities.csv
 /android/store-assets/*
 !/android/store-assets/listing-texts.md
 
-# Vast.ai orchestration
-orchestration_state.json
 .env
 
 # Generated inspection/analysis artifacts (regenerable from the auxiliary/*.py

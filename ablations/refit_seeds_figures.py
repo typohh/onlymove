@@ -5,7 +5,7 @@ seed, agree on their DIRECTIONS — with the teaching pull off, and with it on.
 
 A refit-tier producer never trains: it reads the arm records a panel run wrote
 under `dev_runs/<panel>/` (`ablations.run_panel`, locally or via
-`vast_orchestration.py ablate`) and hard-fails when the panel is missing, short
+`auxiliary/vast_orchestration.py ablate`) and hard-fails when the panel is missing, short
 of budget, internally inconsistent, or STALE against the current attempt log —
 the pins rule `docs/mirt_benchmark.md` states, mechanized. Guards and spans keep
 evaluating against the last-measured ledger values, so the panel's cost is paid
@@ -146,7 +146,7 @@ def load_panel():
         require(os.path.exists(path),
                 f"no {path} — the seeds panel has not run. Run it with "
                 f"`python -m ablations.run_panel seeds` (or "
-                f"`vast_orchestration.py ablate seeds`) first.")
+                f"`auxiliary/vast_orchestration.py ablate seeds`) first.")
         arms[arm] = json.load(open(path))
 
     # ONE PANEL IS ONE REGIME, read off the arms rather than off the trainer's

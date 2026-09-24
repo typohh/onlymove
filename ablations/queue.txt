@@ -1,4 +1,4 @@
-# Work queue for `vast_orchestration.py queue`. `<panel> [<arm> ...]`; a bare
+# Work queue for `auxiliary/vast_orchestration.py queue`. `<panel> [<arm> ...]`; a bare
 # panel name means all of its arms. Re-read whenever a slot opens, so editing
 # this file and pushing it reprioritises a live pool. Arms with records are
 # skipped, so re-running a drained queue costs nothing.
