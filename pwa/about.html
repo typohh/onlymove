@@ -56,6 +56,23 @@
             <li><strong>Review at a constant recall probability.</strong> The most effective spaced-repetition schedules bring an item back not on a fixed calendar but whenever your chance of still remembering it has decayed to a constant target — reviewing each item in proportion to how quickly you personally forget it (<a href="https://doi.org/10.1073/pnas.1815156116">Tabibian, Upadhyay, De, Zarezade, Schölkopf &amp; Gomez-Rodriguez, 2019</a>). onlymove applies the same principle at the same ~80% level: a failed problem returns when it estimates roughly an 80% chance you still remember the solution, so each review lands at the moment it does the most good.</li>
         </ul>
 
+        <h2>Do players improve?</h2>
+        <p>Improvement is measured two independent ways and split by strength. <strong>Rating</strong> compares each player's rank on their first <span data-fig="improvement.window_problems">150</span> new problems with their latest <span data-fig="improvement.window_problems">150</span>, for everyone who has solved at least twice that many. <strong>Declared rank</strong> compares the rank players declare on the Go servers they play on, their first declaration against their latest, for everyone who has updated one; declarations the rank mapping rejects as implausible are left out. Changes are in ranks per 30 days, as the mean ± the spread between players.</p>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr><th rowspan="2">Strength</th><th colspan="3">Rating</th><th colspan="3">Declared rank</th></tr>
+                    <tr><th>Players</th><th>Change / 30 days</th><th>Improved</th><th>Players</th><th>Change / 30 days</th><th>Improved</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>DDK (10k and weaker)</td><td><span data-fig="improvement.rating_ddk_n">69</span></td><td><span data-fig="improvement.rating_ddk_per30">+9.1</span> ± <span data-fig="improvement.rating_ddk_per30_sd">13.1</span></td><td><span data-fig="improvement.rating_ddk_improved">72</span>%</td><td><span data-fig="improvement.survey_ddk_n">15</span></td><td><span data-fig="improvement.survey_ddk_per30">+0.40</span> ± <span data-fig="improvement.survey_ddk_per30_sd">0.55</span></td><td><span data-fig="improvement.survey_ddk_improved">60</span>%</td></tr>
+                    <tr><td>SDK (1k–9k)</td><td><span data-fig="improvement.rating_sdk_n">145</span></td><td><span data-fig="improvement.rating_sdk_per30">+1.7</span> ± <span data-fig="improvement.rating_sdk_per30_sd">4.5</span></td><td><span data-fig="improvement.rating_sdk_improved">51</span>%</td><td><span data-fig="improvement.survey_sdk_n">29</span></td><td><span data-fig="improvement.survey_sdk_per30">+0.13</span> ± <span data-fig="improvement.survey_sdk_per30_sd">0.45</span></td><td><span data-fig="improvement.survey_sdk_improved">38</span>%</td></tr>
+                    <tr><td>Dan</td><td><span data-fig="improvement.rating_dan_n">16</span></td><td><span data-fig="improvement.rating_dan_per30">+0.1</span> ± <span data-fig="improvement.rating_dan_per30_sd">1.1</span></td><td><span data-fig="improvement.rating_dan_improved">44</span>%</td><td><span data-fig="improvement.survey_dan_n">25</span></td><td><span data-fig="improvement.survey_dan_per30">-0.04</span> ± <span data-fig="improvement.survey_dan_per30_sd">0.15</span></td><td><span data-fig="improvement.survey_dan_improved">8</span>%</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <p>The two measurements cover different stretches: the rating's two windows are a median of <span data-fig="improvement.rating_days">15</span> days apart, early in a player's time here, while the declarations are a median of <span data-fig="improvement.survey_days">53</span> days apart. "Improved" counts a rating gain of at least half a rank, or any rise in a declared rank. Only players who kept solving, or came back to update their rank, are counted at all.</p>
+
         <h2>Ranking System</h2>
         <ul>
             <li>Your rank is a maximum-likelihood estimate of your strength, fitted over your recent solving history — roughly your last few hundred first-time problems, with the most recent weighted most heavily — and recomputed after every problem. Problems that sharply separate strengths move it more than ambiguous ones do.</li>
@@ -122,6 +139,23 @@
             <li><strong>在新题目上以约 80% 的成功率为目标。</strong>当训练既不太易也不太难时，学习最快：对一大类学习系统而言，最佳点落在约 85% 的成功率附近——失败得多则材料多为噪声，成功得多则所剩无几可学（<a href="https://doi.org/10.1038/s41467-019-12552-4">Wilson, Shenhav, Straccia &amp; Cohen, 2019</a>）。那个最佳点具体落在何处，会随任务所带噪声的多少而变化，而对整个练习计划进行优化的分析也得出一个依赖于这些参数的相似目标（<a href="https://doi.org/10.1145/3534678.3539081">Ye, Su &amp; Cao, 2022</a>）。对于一道局面所要求的充满噪声、一次性的计算而言，这一目标略低于 85%，因此 onlymove 以约 80% 为目标：题目的评分被<em>定义</em>为能以 80% 的概率攻克它的棋力，而题目的选取会让你保持在该水平附近。</li>
             <li><strong>以恒定的记忆概率进行复习。</strong>最有效的间隔重复计划并非按固定的日程、而是在你仍然记得某项内容的概率衰减到一个恒定目标时才把它重新提出——按你个人遗忘它的快慢成比例地复习每一项（<a href="https://doi.org/10.1073/pnas.1815156116">Tabibian, Upadhyay, De, Zarezade, Schölkopf &amp; Gomez-Rodriguez, 2019</a>）。onlymove 在同样约 80% 的水平上应用相同的原理：一道做错的题目会在系统估计你仍有约 80% 的概率记得解法时重新出现，因此每次复习都恰好落在它最有裨益的时刻。</li>
         </ul>
+
+        <h2>棋手是否在进步？</h2>
+        <p>进步以两种相互独立的方式衡量，并按棋力分组。<strong>评分</strong>：比较每位棋手最初 <span data-fig="improvement.window_problems">150</span> 道新题与最近 <span data-fig="improvement.window_problems">150</span> 道新题上的段级位，仅统计至少解过两倍于此题数的棋手。<strong>自报段级位</strong>：比较棋手在其对弈的围棋服务器上自报的段级位，首次与最近一次相比，仅统计更新过自报的棋手；被段级位映射判定为不可信的自报不计入。变化以每 30 天的段级位数表示，为平均值 ± 棋手之间的离散程度。</p>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr><th rowspan="2">棋力</th><th colspan="3">评分</th><th colspan="3">自报段级位</th></tr>
+                    <tr><th>棋手数</th><th>每 30 天变化</th><th>有进步</th><th>棋手数</th><th>每 30 天变化</th><th>有进步</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>两位数级位（10 级及以下）</td><td><span data-fig="improvement.rating_ddk_n">69</span></td><td><span data-fig="improvement.rating_ddk_per30">+9.1</span> ± <span data-fig="improvement.rating_ddk_per30_sd">13.1</span></td><td><span data-fig="improvement.rating_ddk_improved">72</span>%</td><td><span data-fig="improvement.survey_ddk_n">15</span></td><td><span data-fig="improvement.survey_ddk_per30">+0.40</span> ± <span data-fig="improvement.survey_ddk_per30_sd">0.55</span></td><td><span data-fig="improvement.survey_ddk_improved">60</span>%</td></tr>
+                    <tr><td>一位数级位（1–9 级）</td><td><span data-fig="improvement.rating_sdk_n">145</span></td><td><span data-fig="improvement.rating_sdk_per30">+1.7</span> ± <span data-fig="improvement.rating_sdk_per30_sd">4.5</span></td><td><span data-fig="improvement.rating_sdk_improved">51</span>%</td><td><span data-fig="improvement.survey_sdk_n">29</span></td><td><span data-fig="improvement.survey_sdk_per30">+0.13</span> ± <span data-fig="improvement.survey_sdk_per30_sd">0.45</span></td><td><span data-fig="improvement.survey_sdk_improved">38</span>%</td></tr>
+                    <tr><td>段位</td><td><span data-fig="improvement.rating_dan_n">16</span></td><td><span data-fig="improvement.rating_dan_per30">+0.1</span> ± <span data-fig="improvement.rating_dan_per30_sd">1.1</span></td><td><span data-fig="improvement.rating_dan_improved">44</span>%</td><td><span data-fig="improvement.survey_dan_n">25</span></td><td><span data-fig="improvement.survey_dan_per30">-0.04</span> ± <span data-fig="improvement.survey_dan_per30_sd">0.15</span></td><td><span data-fig="improvement.survey_dan_improved">8</span>%</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <p>两种衡量覆盖的时间段不同：评分的两个窗口相隔的中位数为 <span data-fig="improvement.rating_days">15</span> 天，处于棋手使用本站的早期；而自报之间相隔的中位数为 <span data-fig="improvement.survey_days">53</span> 天。“有进步”指评分提高至少半个段级位，或自报段级位有任何提升。只有持续解题、或回来更新自报段级位的棋手才会被统计。</p>
 
         <h2>段级位系统</h2>
         <ul>
@@ -190,6 +224,23 @@
     <li><strong>一定の記憶保持確率で復習します。</strong> 最も効果的な間隔反復のスケジュールは、決まったカレンダーに従ってではなく、その項目をまだ覚えている確率が一定の目標値まで低下したときに項目を再び提示します。つまり各項目を、あなた自身がどれだけ早く忘れるかに比例して復習します（<a href="https://doi.org/10.1073/pnas.1815156116">Tabibian, Upadhyay, De, Zarezade, Schölkopf &amp; Gomez-Rodriguez, 2019</a>）。onlymove は同じ原理を同じく約80%の水準で適用します。間違えた問題は、あなたがまだ解法を覚えている確率が約80%と推定されたときに再び出題されるため、各復習が最も効果を発揮する瞬間に行われます。</li>
 </ul>
 
+<h2>プレイヤーは上達しているか？</h2>
+<p>上達は互いに独立した二つの方法で測定し、棋力別に分けています。<strong>レーティング</strong>は、各プレイヤーの最初の <span data-fig="improvement.window_problems">150</span> 問の新しい問題と最新の <span data-fig="improvement.window_problems">150</span> 問での段級位を比較します。対象はその2倍以上の問題を解いたプレイヤー全員です。<strong>申告段級位</strong>は、プレイヤーが対局している囲碁サーバーで申告した段級位を、最初の申告と最新の申告で比較します。対象は申告を更新したプレイヤー全員で、段級位の対応付けが不自然として除外した申告は含みません。変化は30日あたりの段級位で、平均 ± プレイヤー間のばらつきとして示します。</p>
+<div class="table-wrap">
+    <table>
+        <thead>
+            <tr><th rowspan="2">棋力</th><th colspan="3">レーティング</th><th colspan="3">申告段級位</th></tr>
+            <tr><th>人数</th><th>30日あたりの変化</th><th>上達した割合</th><th>人数</th><th>30日あたりの変化</th><th>上達した割合</th></tr>
+        </thead>
+        <tbody>
+            <tr><td>二桁級（10級以下）</td><td><span data-fig="improvement.rating_ddk_n">69</span></td><td><span data-fig="improvement.rating_ddk_per30">+9.1</span> ± <span data-fig="improvement.rating_ddk_per30_sd">13.1</span></td><td><span data-fig="improvement.rating_ddk_improved">72</span>%</td><td><span data-fig="improvement.survey_ddk_n">15</span></td><td><span data-fig="improvement.survey_ddk_per30">+0.40</span> ± <span data-fig="improvement.survey_ddk_per30_sd">0.55</span></td><td><span data-fig="improvement.survey_ddk_improved">60</span>%</td></tr>
+            <tr><td>一桁級（1〜9級）</td><td><span data-fig="improvement.rating_sdk_n">145</span></td><td><span data-fig="improvement.rating_sdk_per30">+1.7</span> ± <span data-fig="improvement.rating_sdk_per30_sd">4.5</span></td><td><span data-fig="improvement.rating_sdk_improved">51</span>%</td><td><span data-fig="improvement.survey_sdk_n">29</span></td><td><span data-fig="improvement.survey_sdk_per30">+0.13</span> ± <span data-fig="improvement.survey_sdk_per30_sd">0.45</span></td><td><span data-fig="improvement.survey_sdk_improved">38</span>%</td></tr>
+            <tr><td>有段者</td><td><span data-fig="improvement.rating_dan_n">16</span></td><td><span data-fig="improvement.rating_dan_per30">+0.1</span> ± <span data-fig="improvement.rating_dan_per30_sd">1.1</span></td><td><span data-fig="improvement.rating_dan_improved">44</span>%</td><td><span data-fig="improvement.survey_dan_n">25</span></td><td><span data-fig="improvement.survey_dan_per30">-0.04</span> ± <span data-fig="improvement.survey_dan_per30_sd">0.15</span></td><td><span data-fig="improvement.survey_dan_improved">8</span>%</td></tr>
+        </tbody>
+    </table>
+</div>
+<p>二つの測定は異なる期間を対象としています。レーティングの二つの区間は中央値で <span data-fig="improvement.rating_days">15</span> 日離れており、プレイヤーが利用を始めて間もない時期にあたります。一方、申告どうしの間隔は中央値で <span data-fig="improvement.survey_days">53</span> 日です。「上達した」は、レーティングが半段級以上上がったこと、または申告段級位が少しでも上がったことを指します。解き続けたプレイヤー、または段級位を更新しに戻ってきたプレイヤーだけが集計に含まれます。</p>
+
 <h2>段級位システム</h2>
 <ul>
     <li>あなたの段級位は、あなたの最近の解答履歴（おおよそ直近の数百問の初挑戦の問題で、最近のものほど重く重み付けされます）に基づいて当てはめられた、あなたの棋力の最尤推定値であり、問題を解くたびに再計算されます。棋力を鋭く区別する問題は、曖昧な問題よりも段級位を大きく動かします。</li>
@@ -256,6 +307,23 @@
             <li><strong>새로운 문제에서 약 80% 성공을 목표로 하라.</strong> 학습은 훈련이 너무 쉽지도 너무 어렵지도 않을 때 가장 빠릅니다: 광범위한 학습 시스템 부류에서 최적점은 약 85%의 성공률 근처에 있습니다 — 그보다 훨씬 많이 실패하면 자료가 대부분 잡음이 되고, 훨씬 많이 성공하면 배울 것이 거의 남지 않습니다(<a href="https://doi.org/10.1038/s41467-019-12552-4">Wilson, Shenhav, Straccia &amp; Cohen, 2019</a>). 정확히 그 최적점이 어디에 놓이는지는 과제가 얼마나 많은 잡음을 지니는지에 따라 달라지며, 전체 연습 일정을 최적화하는 분석들은 그 매개변수에 따라 달라지는 비슷한 목표치에 도달합니다(<a href="https://doi.org/10.1145/3534678.3539081">Ye, Su &amp; Cao, 2022</a>). 국면이 요구하는 잡음이 많은 일회성 수읽기의 경우 그 값은 85%보다 조금 아래를 가리키므로, onlymove는 약 80%를 목표로 합니다: 문제의 레이팅은 그 문제를 80% 확률로 통과하는 기력으로 <em>정의</em>되며, 문제 선택은 여러분을 그 수준 근처에 유지합니다.</li>
             <li><strong>일정한 회상 확률에서 복습하라.</strong> 가장 효과적인 분산 반복 일정은 고정된 달력이 아니라 그 항목을 여전히 기억할 확률이 일정한 목표치까지 감소했을 때 항목을 다시 가져옵니다 — 각 항목을 여러분 개인이 얼마나 빨리 잊는지에 비례해 복습시키는 것입니다(<a href="https://doi.org/10.1073/pnas.1815156116">Tabibian, Upadhyay, De, Zarezade, Schölkopf &amp; Gomez-Rodriguez, 2019</a>). onlymove는 같은 원리를 같은 약 80% 수준에서 적용합니다: 틀린 문제는 여러분이 여전히 해법을 기억할 확률이 대략 80%라고 추정될 때 돌아오므로, 각 복습이 가장 큰 효과를 내는 순간에 이루어집니다.</li>
         </ul>
+
+        <h2>플레이어들은 실력이 늘고 있나요?</h2>
+        <p>실력 향상은 서로 독립적인 두 가지 방법으로 측정하며, 기력별로 나눕니다. <strong>레이팅</strong>은 각 플레이어가 처음 푼 새 문제 <span data-fig="improvement.window_problems">150</span>개와 최근 <span data-fig="improvement.window_problems">150</span>개에서의 급·단을 비교하며, 그 두 배 이상을 푼 모든 플레이어가 대상입니다. <strong>신고 급·단</strong>은 플레이어가 대국하는 바둑 서버에서 신고한 급·단을 첫 신고와 최근 신고로 비교하며, 신고를 갱신한 모든 플레이어가 대상입니다. 급·단 매핑이 믿기 어렵다고 판정해 제외한 신고는 포함하지 않습니다. 변화는 30일당 급·단 수이며, 평균 ± 플레이어 간 편차로 나타냅니다.</p>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr><th rowspan="2">기력</th><th colspan="3">레이팅</th><th colspan="3">신고 급·단</th></tr>
+                    <tr><th>인원</th><th>30일당 변화</th><th>향상된 비율</th><th>인원</th><th>30일당 변화</th><th>향상된 비율</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>두 자리 급 (10급 이하)</td><td><span data-fig="improvement.rating_ddk_n">69</span></td><td><span data-fig="improvement.rating_ddk_per30">+9.1</span> ± <span data-fig="improvement.rating_ddk_per30_sd">13.1</span></td><td><span data-fig="improvement.rating_ddk_improved">72</span>%</td><td><span data-fig="improvement.survey_ddk_n">15</span></td><td><span data-fig="improvement.survey_ddk_per30">+0.40</span> ± <span data-fig="improvement.survey_ddk_per30_sd">0.55</span></td><td><span data-fig="improvement.survey_ddk_improved">60</span>%</td></tr>
+                    <tr><td>한 자리 급 (1–9급)</td><td><span data-fig="improvement.rating_sdk_n">145</span></td><td><span data-fig="improvement.rating_sdk_per30">+1.7</span> ± <span data-fig="improvement.rating_sdk_per30_sd">4.5</span></td><td><span data-fig="improvement.rating_sdk_improved">51</span>%</td><td><span data-fig="improvement.survey_sdk_n">29</span></td><td><span data-fig="improvement.survey_sdk_per30">+0.13</span> ± <span data-fig="improvement.survey_sdk_per30_sd">0.45</span></td><td><span data-fig="improvement.survey_sdk_improved">38</span>%</td></tr>
+                    <tr><td>유단자</td><td><span data-fig="improvement.rating_dan_n">16</span></td><td><span data-fig="improvement.rating_dan_per30">+0.1</span> ± <span data-fig="improvement.rating_dan_per30_sd">1.1</span></td><td><span data-fig="improvement.rating_dan_improved">44</span>%</td><td><span data-fig="improvement.survey_dan_n">25</span></td><td><span data-fig="improvement.survey_dan_per30">-0.04</span> ± <span data-fig="improvement.survey_dan_per30_sd">0.15</span></td><td><span data-fig="improvement.survey_dan_improved">8</span>%</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <p>두 측정은 서로 다른 기간을 다룹니다. 레이팅의 두 구간은 중앙값으로 <span data-fig="improvement.rating_days">15</span>일 떨어져 있으며 플레이어가 이곳을 쓰기 시작한 초기에 해당하고, 신고 사이의 간격은 중앙값으로 <span data-fig="improvement.survey_days">53</span>일입니다. "향상됨"은 레이팅이 최소 반 급 이상 오르거나, 신고 급·단이 조금이라도 오른 경우를 뜻합니다. 계속 문제를 푼 플레이어, 또는 급·단을 갱신하러 돌아온 플레이어만 집계됩니다.</p>
 
         <h2>랭킹 시스템</h2>
         <ul>

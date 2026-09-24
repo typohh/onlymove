@@ -4172,6 +4172,384 @@
         "data_version": "e3464d6d58abeb7c"
       }
     },
+    "improvement.rating_dan_improved": {
+      "value": 0.4375,
+      "fmt": "%.0f",
+      "text": "44",
+      "producer": "ablations.improvement_figures",
+      "tier": "about",
+      "note": "Dan: share of players who improved, the shipped window estimator's rank, first against latest 150 first-time attempts",
+      "measured": {
+        "at": "2026-09-24T12:13:17Z",
+        "git": "d62cae71624+dirty",
+        "db_max_id": 546133,
+        "data_version": "e3464d6d58abeb7c"
+      }
+    },
+    "improvement.rating_dan_n": {
+      "value": 16,
+      "fmt": "d",
+      "text": "16",
+      "producer": "ablations.improvement_figures",
+      "tier": "about",
+      "note": "Dan players measured by the shipped window estimator's rank, first against latest 150 first-time attempts",
+      "measured": {
+        "at": "2026-09-24T12:13:17Z",
+        "git": "d62cae71624+dirty",
+        "db_max_id": 546133,
+        "data_version": "e3464d6d58abeb7c"
+      }
+    },
+    "improvement.rating_dan_per30": {
+      "value": 0.10621884110570154,
+      "fmt": "+.1f",
+      "text": "+0.1",
+      "producer": "ablations.improvement_figures",
+      "tier": "about",
+      "note": "Dan: mean change per 30 days in ranks, the shipped window estimator's rank, first against latest 150 first-time attempts",
+      "measured": {
+        "at": "2026-09-24T12:13:17Z",
+        "git": "d62cae71624+dirty",
+        "db_max_id": 546133,
+        "data_version": "e3464d6d58abeb7c"
+      }
+    },
+    "improvement.rating_dan_per30_sd": {
+      "value": 1.1412838655911703,
+      "fmt": ".1f",
+      "text": "1.1",
+      "producer": "ablations.improvement_figures",
+      "tier": "about",
+      "note": "Dan: across-player SD of that change, same scaling",
+      "measured": {
+        "at": "2026-09-24T12:13:17Z",
+        "git": "d62cae71624+dirty",
+        "db_max_id": 546133,
+        "data_version": "e3464d6d58abeb7c"
+      }
+    },
+    "improvement.rating_days": {
+      "value": 14.576335092592593,
+      "fmt": ".0f",
+      "text": "15",
+      "producer": "ablations.improvement_figures",
+      "tier": "about",
+      "note": "median days between the two readings, the shipped window estimator's rank, first against latest 150 first-time attempts",
+      "measured": {
+        "at": "2026-09-24T12:13:17Z",
+        "git": "d62cae71624+dirty",
+        "db_max_id": 546133,
+        "data_version": "e3464d6d58abeb7c"
+      }
+    },
+    "improvement.rating_ddk_improved": {
+      "value": 0.7246376811594203,
+      "fmt": "%.0f",
+      "text": "72",
+      "producer": "ablations.improvement_figures",
+      "tier": "about",
+      "note": "DDK: share of players who improved, the shipped window estimator's rank, first against latest 150 first-time attempts",
+      "measured": {
+        "at": "2026-09-24T12:13:17Z",
+        "git": "d62cae71624+dirty",
+        "db_max_id": 546133,
+        "data_version": "e3464d6d58abeb7c"
+      }
+    },
+    "improvement.rating_ddk_n": {
+      "value": 69,
+      "fmt": "d",
+      "text": "69",
+      "producer": "ablations.improvement_figures",
+      "tier": "about",
+      "note": "DDK players measured by the shipped window estimator's rank, first against latest 150 first-time attempts",
+      "measured": {
+        "at": "2026-09-24T12:13:17Z",
+        "git": "d62cae71624+dirty",
+        "db_max_id": 546133,
+        "data_version": "e3464d6d58abeb7c"
+      }
+    },
+    "improvement.rating_ddk_per30": {
+      "value": 9.137147472039599,
+      "fmt": "+.1f",
+      "text": "+9.1",
+      "producer": "ablations.improvement_figures",
+      "tier": "about",
+      "note": "DDK: mean change per 30 days in ranks, the shipped window estimator's rank, first against latest 150 first-time attempts",
+      "measured": {
+        "at": "2026-09-24T12:13:17Z",
+        "git": "d62cae71624+dirty",
+        "db_max_id": 546133,
+        "data_version": "e3464d6d58abeb7c"
+      }
+    },
+    "improvement.rating_ddk_per30_sd": {
+      "value": 13.145487993771411,
+      "fmt": ".1f",
+      "text": "13.1",
+      "producer": "ablations.improvement_figures",
+      "tier": "about",
+      "note": "DDK: across-player SD of that change, same scaling",
+      "measured": {
+        "at": "2026-09-24T12:13:17Z",
+        "git": "d62cae71624+dirty",
+        "db_max_id": 546133,
+        "data_version": "e3464d6d58abeb7c"
+      }
+    },
+    "improvement.rating_sdk_improved": {
+      "value": 0.5103448275862069,
+      "fmt": "%.0f",
+      "text": "51",
+      "producer": "ablations.improvement_figures",
+      "tier": "about",
+      "note": "SDK: share of players who improved, the shipped window estimator's rank, first against latest 150 first-time attempts",
+      "measured": {
+        "at": "2026-09-24T12:13:17Z",
+        "git": "d62cae71624+dirty",
+        "db_max_id": 546133,
+        "data_version": "e3464d6d58abeb7c"
+      }
+    },
+    "improvement.rating_sdk_n": {
+      "value": 145,
+      "fmt": "d",
+      "text": "145",
+      "producer": "ablations.improvement_figures",
+      "tier": "about",
+      "note": "SDK players measured by the shipped window estimator's rank, first against latest 150 first-time attempts",
+      "measured": {
+        "at": "2026-09-24T12:13:17Z",
+        "git": "d62cae71624+dirty",
+        "db_max_id": 546133,
+        "data_version": "e3464d6d58abeb7c"
+      }
+    },
+    "improvement.rating_sdk_per30": {
+      "value": 1.6526222409912774,
+      "fmt": "+.1f",
+      "text": "+1.7",
+      "producer": "ablations.improvement_figures",
+      "tier": "about",
+      "note": "SDK: mean change per 30 days in ranks, the shipped window estimator's rank, first against latest 150 first-time attempts",
+      "measured": {
+        "at": "2026-09-24T12:13:17Z",
+        "git": "d62cae71624+dirty",
+        "db_max_id": 546133,
+        "data_version": "e3464d6d58abeb7c"
+      }
+    },
+    "improvement.rating_sdk_per30_sd": {
+      "value": 4.533042682395796,
+      "fmt": ".1f",
+      "text": "4.5",
+      "producer": "ablations.improvement_figures",
+      "tier": "about",
+      "note": "SDK: across-player SD of that change, same scaling",
+      "measured": {
+        "at": "2026-09-24T12:13:17Z",
+        "git": "d62cae71624+dirty",
+        "db_max_id": 546133,
+        "data_version": "e3464d6d58abeb7c"
+      }
+    },
+    "improvement.survey_dan_improved": {
+      "value": 0.08,
+      "fmt": "%.0f",
+      "text": "8",
+      "producer": "ablations.improvement_figures",
+      "tier": "about",
+      "note": "Dan: share of players who improved, declared server rank, first against last declaration, screened declarations excluded",
+      "measured": {
+        "at": "2026-09-24T12:13:17Z",
+        "git": "d62cae71624+dirty",
+        "db_max_id": 546133,
+        "data_version": "e3464d6d58abeb7c"
+      }
+    },
+    "improvement.survey_dan_n": {
+      "value": 25,
+      "fmt": "d",
+      "text": "25",
+      "producer": "ablations.improvement_figures",
+      "tier": "about",
+      "note": "Dan players measured by declared server rank, first against last declaration, screened declarations excluded",
+      "measured": {
+        "at": "2026-09-24T12:13:17Z",
+        "git": "d62cae71624+dirty",
+        "db_max_id": 546133,
+        "data_version": "e3464d6d58abeb7c"
+      }
+    },
+    "improvement.survey_dan_per30": {
+      "value": -0.04136932563618086,
+      "fmt": "+.2f",
+      "text": "-0.04",
+      "producer": "ablations.improvement_figures",
+      "tier": "about",
+      "note": "Dan: mean change per 30 days in ranks, declared server rank, first against last declaration, screened declarations excluded",
+      "measured": {
+        "at": "2026-09-24T12:13:17Z",
+        "git": "d62cae71624+dirty",
+        "db_max_id": 546133,
+        "data_version": "e3464d6d58abeb7c"
+      }
+    },
+    "improvement.survey_dan_per30_sd": {
+      "value": 0.14885864379214517,
+      "fmt": ".2f",
+      "text": "0.15",
+      "producer": "ablations.improvement_figures",
+      "tier": "about",
+      "note": "Dan: across-player SD of that change, same scaling",
+      "measured": {
+        "at": "2026-09-24T12:13:17Z",
+        "git": "d62cae71624+dirty",
+        "db_max_id": 546133,
+        "data_version": "e3464d6d58abeb7c"
+      }
+    },
+    "improvement.survey_days": {
+      "value": 53.179498726851854,
+      "fmt": ".0f",
+      "text": "53",
+      "producer": "ablations.improvement_figures",
+      "tier": "about",
+      "note": "median days between the two readings, declared server rank, first against last declaration, screened declarations excluded",
+      "measured": {
+        "at": "2026-09-24T12:13:17Z",
+        "git": "d62cae71624+dirty",
+        "db_max_id": 546133,
+        "data_version": "e3464d6d58abeb7c"
+      }
+    },
+    "improvement.survey_ddk_improved": {
+      "value": 0.6,
+      "fmt": "%.0f",
+      "text": "60",
+      "producer": "ablations.improvement_figures",
+      "tier": "about",
+      "note": "DDK: share of players who improved, declared server rank, first against last declaration, screened declarations excluded",
+      "measured": {
+        "at": "2026-09-24T12:13:17Z",
+        "git": "d62cae71624+dirty",
+        "db_max_id": 546133,
+        "data_version": "e3464d6d58abeb7c"
+      }
+    },
+    "improvement.survey_ddk_n": {
+      "value": 15,
+      "fmt": "d",
+      "text": "15",
+      "producer": "ablations.improvement_figures",
+      "tier": "about",
+      "note": "DDK players measured by declared server rank, first against last declaration, screened declarations excluded",
+      "measured": {
+        "at": "2026-09-24T12:13:17Z",
+        "git": "d62cae71624+dirty",
+        "db_max_id": 546133,
+        "data_version": "e3464d6d58abeb7c"
+      }
+    },
+    "improvement.survey_ddk_per30": {
+      "value": 0.3970949556212867,
+      "fmt": "+.2f",
+      "text": "+0.40",
+      "producer": "ablations.improvement_figures",
+      "tier": "about",
+      "note": "DDK: mean change per 30 days in ranks, declared server rank, first against last declaration, screened declarations excluded",
+      "measured": {
+        "at": "2026-09-24T12:13:17Z",
+        "git": "d62cae71624+dirty",
+        "db_max_id": 546133,
+        "data_version": "e3464d6d58abeb7c"
+      }
+    },
+    "improvement.survey_ddk_per30_sd": {
+      "value": 0.5514941646506306,
+      "fmt": ".2f",
+      "text": "0.55",
+      "producer": "ablations.improvement_figures",
+      "tier": "about",
+      "note": "DDK: across-player SD of that change, same scaling",
+      "measured": {
+        "at": "2026-09-24T12:13:17Z",
+        "git": "d62cae71624+dirty",
+        "db_max_id": 546133,
+        "data_version": "e3464d6d58abeb7c"
+      }
+    },
+    "improvement.survey_sdk_improved": {
+      "value": 0.3793103448275862,
+      "fmt": "%.0f",
+      "text": "38",
+      "producer": "ablations.improvement_figures",
+      "tier": "about",
+      "note": "SDK: share of players who improved, declared server rank, first against last declaration, screened declarations excluded",
+      "measured": {
+        "at": "2026-09-24T12:13:17Z",
+        "git": "d62cae71624+dirty",
+        "db_max_id": 546133,
+        "data_version": "e3464d6d58abeb7c"
+      }
+    },
+    "improvement.survey_sdk_n": {
+      "value": 29,
+      "fmt": "d",
+      "text": "29",
+      "producer": "ablations.improvement_figures",
+      "tier": "about",
+      "note": "SDK players measured by declared server rank, first against last declaration, screened declarations excluded",
+      "measured": {
+        "at": "2026-09-24T12:13:17Z",
+        "git": "d62cae71624+dirty",
+        "db_max_id": 546133,
+        "data_version": "e3464d6d58abeb7c"
+      }
+    },
+    "improvement.survey_sdk_per30": {
+      "value": 0.13461026945025262,
+      "fmt": "+.2f",
+      "text": "+0.13",
+      "producer": "ablations.improvement_figures",
+      "tier": "about",
+      "note": "SDK: mean change per 30 days in ranks, declared server rank, first against last declaration, screened declarations excluded",
+      "measured": {
+        "at": "2026-09-24T12:13:17Z",
+        "git": "d62cae71624+dirty",
+        "db_max_id": 546133,
+        "data_version": "e3464d6d58abeb7c"
+      }
+    },
+    "improvement.survey_sdk_per30_sd": {
+      "value": 0.44755756045659806,
+      "fmt": ".2f",
+      "text": "0.45",
+      "producer": "ablations.improvement_figures",
+      "tier": "about",
+      "note": "SDK: across-player SD of that change, same scaling",
+      "measured": {
+        "at": "2026-09-24T12:13:17Z",
+        "git": "d62cae71624+dirty",
+        "db_max_id": 546133,
+        "data_version": "e3464d6d58abeb7c"
+      }
+    },
+    "improvement.window_problems": {
+      "value": 150,
+      "fmt": "d",
+      "text": "150",
+      "producer": "ablations.improvement_figures",
+      "tier": "about",
+      "note": "first-time attempts in each of the two windows the rating change compares (a player's first and latest)",
+      "measured": {
+        "at": "2026-09-24T12:13:17Z",
+        "git": "d62cae71624+dirty",
+        "db_max_id": 546133,
+        "data_version": "e3464d6d58abeb7c"
+      }
+    },
     "loop.corrected_gap_zero_ranks": {
       "value": 0.996242154117361,
       "fmt": ".1f",
