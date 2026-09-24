@@ -154,42 +154,10 @@ def _anchor_rows(ratings_dir, sql_path, sqlite_path):
 
     attempts = mapping.load_timed_attempts(sqlite_path, set(surveys["user_id"].unique()))
     med_min = mapping.load_user_median_solve_minutes(sqlite_path)
-
-    blocks, logT, pooled = {}, {}, {}
-    for uid in surveys["user_id"].unique():
-        times, rows = attempts.get(uid, (np.zeros(0), []))
-        R, n = fit_user_rating(rows, ratings, min_n=mapping.MIN_ATTEMPTS,
-                               slopes=slopes, floors=floors, lapse=lapse)
-        if R is None or n < mapping.MIN_ATTEMPTS:
-            continue
-        blks = mapping.block_ratings(times, rows, ratings, slopes, floors, lapse)
-        if not blks:
-            blks = [(float(np.mean(times)), R, 1.0)]
-        blocks[uid], pooled[uid] = blks, R
-        pref = uid[:8]
-        if pref in med_min and med_min[pref] > 0:
-            logT[uid] = float(np.log10(med_min[pref]))
-    require(blocks, "no surveyed user has enough attempts for a rating")
-    timed = [logT[u] for u in blocks if u in logT]
-    center = float(np.mean(timed)) if timed else 0.0
-
-    decls, keys = [], []
-    for (uid, server), srows in (surveys[surveys["user_id"].isin(blocks)]
-                                 .groupby(["user_id", "server"])):
-        T = (logT[uid] - center) if uid in logT else 0.0
-        dt = srows["t_days"].to_numpy(float)
-        dg = np.array([rank_band(v) for v in srows["rank_value"].to_numpy(float)])
-        assign = defaultdict(list)
-        for tc, R, m in blocks[uid]:
-            assign[int(np.argmin(np.abs(dt - tc)))].append((R, m))
-        for j, brs in assign.items():
-            mass = sum(m for _, m in brs)
-            for R, m in brs:
-                decls.append((server, R, int(dg[j]), T, m / mass if mass > 0 else 1.0 / len(brs)))
-                keys.append((uid, server, int(dg[j])))
+    decls, keys, users, _, _ = mapping.build_anchor_rows(
+        surveys, attempts, med_min, ratings, slopes, floors, lapse)
+    require(users, "no surveyed user has enough attempts for a rating")
     require(decls, "no anchor rows formed")
-    users = {uid: (pooled[uid], (logT[uid] - center) if uid in logT else 0.0)
-             for uid in blocks}
     return decls, keys, users
 
 

@@ -126,12 +126,11 @@ PRIOR_GRID_SD = 4.0
 # A floor under how far the derivation may narrow — not a clamp on the rank scale,
 # which is unbounded by design.
 #
-# THIS IS M'S OWN FITTED RANGE, which is what makes it the right bound rather than
-# a chosen one. rating_to_rank.json carries knots over exactly this span; past
-# either end applyM/interpExtrap is extrapolating off the end interval's slope. So
-# requiring the corpus to price a floor beyond it would demand a MEASUREMENT in a
-# region where the curve itself has none, and the two failures compound — an
-# extrapolated rank fed to a kernel read of an empty corpus.
+# THIS IS WHERE THE CORPUS CAN STILL PRICE A FLOOR, which is what makes it the right
+# bound rather than a chosen one. Below 20k the corpus holds almost nothing (a
+# rating IS the 80%-clear point — see below), so requiring a floor there would
+# demand a MEASUREMENT of an empty region. M's knots reach further down (to cover
+# the survey's floor declarations), which does not change what the corpus can price.
 #
 # The retired value asked for the labelled ladder (clampRankBand's 30k..9d) on the
 # reasoning that a legitimately ranked user must be representable. Two things are
@@ -143,7 +142,7 @@ PRIOR_GRID_SD = 4.0
 # which the corpus does not contain and plausibly cannot. The old bound was
 # satisfiable only while the fit emitted a pathological rating tail; a better-
 # behaved fit narrows that tail and fails it, which is the wrong way round.
-PRIOR_GRID_MUST_CONTAIN = (-20.0, 9.0)       # 20k .. 10d, M's own knot range
+PRIOR_GRID_MUST_CONTAIN = (-20.0, 9.0)       # 20k .. 10d, the corpus's pricing range
 
 def sigmoid(x):
     return 0.5 * (1.0 + np.tanh(0.5 * x))

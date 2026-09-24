@@ -22,23 +22,20 @@ THE MODEL — a latent CONSENSUS rank, every server (EGF included) a coupling of
   * The user's rating is their 80%-CLEAR rating (CALIBRATION_P), pooled across boards
     (`fit_user_rating`, full 4PL with each problem's own slope/floor + the global
     ceiling λ) — the SAME quantity the client computes, so the loop stays closed.
-  * ANCHORS ARE CAREER-SEGMENT RATINGS, NOT ONE POOLED RATING PER USER. Each user's
-    first-time attempts are cut into overlapping 2-month blocks (BLOCK_DAYS stepped
-    BLOCK_STEP); every block with ≥ MIN_ATTEMPTS joined attempts gets its own
-    80%-clear rating and becomes an anchor row, attached to the user's
-    nearest-in-time declaration per server ("no rank drift unless a survey says
-    otherwise" — surveys only began 2026-05, so old attempt eras carry the same
-    declared rank). Rows are weighted by ATTEMPT MASS — each attempt's unit mass is
-    split over the blocks covering it, so the overlap can't double-count an era and
-    the career's edge eras aren't underweighted — and normalized so each declaration
-    contributes total weight 1 regardless of career length. A user with no fittable
-    block (never MIN_ATTEMPTS inside one window) falls back to the pooled career
-    rating as a single anchor. Validated by paired 50-folding CV
-    (ablations.eval_rank_map_cv): held-out NLL −0.04±0.01 and deep-kyu MAE 5.2→4.2
-    ranks vs the pooled-career anchor, dan band unchanged. The same harness tested
-    integrating each rating's Fisher CI into the likelihood (errors-in-variables)
-    and REJECTED it — declaration noise dominates, so it over-steepens the curve and
-    is consistently worse held-out.
+  * ONE ANCHOR PER STABLE DECLARATION. A user's declarations on a server collapse into
+    runs of the same rank, and their first-time attempts are cut HALFWAY between the
+    last declaration of one run and the first of the next; each span's attempts give
+    one 80%-clear rating, anchored to that run's rank with weight 1
+    (declaration_spans, build_anchor_rows). This is the mapping's assumption — no
+    rank drift unless a survey says otherwise — stated directly: several ratings from
+    one span tied to one declared rank would read to the fit as noise at a fixed
+    rank, flattening the curve where declarations are fewest. It replaced 2-month
+    career blocks each tied to their nearest declaration, which held out no better
+    and sat lower at the top. Each DECLARATION counts once, not each user or pair:
+    frequent surveyors and one-time declarers do disagree, but reweighting toward
+    either moved the bias without improving the held-out fit (ablations.
+    eval_rank_map_cv). A pair with no span of MIN_ATTEMPTS falls back to the pooled
+    career rating against its latest declaration.
   * RATINGS ARE TIME-ADJUSTED THROUGHOUT THE MAPPING. Each declaration's effective
     rating is `rating + α·(log10(median solve min) − center)`, with the slope α fit
     JOINTLY in the same objective (it is identified — the time feature is per-user
@@ -51,16 +48,23 @@ THE MODEL — a latent CONSENSUS rank, every server (EGF included) a coupling of
     survey data supports — no rating-interaction, no power-law (see
     docs/methodology.md), and no rank-residualization line (the joint
     couplings absorb the rank-correlated part of solve time on their own).
-  * M: a MONOTONE per-segment fit with the EGD even_game_winrates.txt cubic SHAPE as a PRIOR.
-    The gap between consecutive rating-thresholds is `β·ΔS(g)·exp(δ_g)` (>0 ⇒ monotone);
-    δ_g=0 reproduces the rigid affine `α_c + β·S`, and `LAMBDA_SHAPE·Σδ_g²` penalises
-    deviation. The shape is the ΔAIC-best fit to the even-game win-rate table
-    (utils.rating.rank_curve_shape) — the right convex backbone for the sparse tails. That
-    table is EGD tournament outcomes between declared grades, which is a DIFFERENT thing
-    from the EGF coupling below: the shape is a prior on the curve, EGF is one server
-    coupling off it, and neither privileges the other. The
-    prior is GENTLE (LAMBDA_SHAPE small): once the curve is anchored by ALL servers it
-    is no longer kyu-starved, so a strong prior over-constrains.
+  * M: a SMOOTH MONOTONE curve with the EGD even_game_winrates.txt cubic SHAPE as a PRIOR.
+    It is parameterised by its log-slope on a fixed rating grid (see fit_consensus for
+    why not by the rating at each rank edge), and two ridges pull it toward the shape:
+    LAMBDA_SHAPE on the log-slope's deviation from the shape's (up to a free scale),
+    LAMBDA_SMOOTH on that deviation changing along the rating axis. The shape is the
+    ΔAIC-best fit to the even-game win-rate table (utils.rating.rank_curve_shape) —
+    EGD tournament outcomes between declared grades on 19×19 over the board, which is
+    a DIFFERENT thing from the EGF coupling below: the shape is a prior on the curve,
+    EGF is one server coupling off it, and neither privileges the other.
+    The priors are STRONG but FINITE. Held out (ablations.eval_rank_map_cv), the survey
+    does not yet support any departure from the shape: accuracy improves as the ridges
+    tighten and then plateaus, and a weak ridge lets the curve fit noise at the sparse
+    top. They are deliberately NOT made rigid (the shape with only a scale and an
+    offset): the shape is 19×19 over-the-board evidence, unvalidated for online ranks
+    or for onlymove's positions, so the curve must stay free to bend where enough
+    survey data says otherwise — the ridges are fixed while the likelihood grows with
+    every declaration.
   * EGF IS JUST ANOTHER SERVER. Every server, EGF included, gets free ordinal thresholds
     (a cumulative-link coupling, uniform-spacing prior SERVER_LAMBDA). The consensus
     rank is the hub; each server couples off it.
@@ -75,10 +79,10 @@ THE MODEL — a latent CONSENSUS rank, every server (EGF included) a coupling of
     only via --drop-eval) shows held-out NLL degrades MONOTONICALLY in eps — the
     plain logistic's linear tails already bound junk influence, so a large junk
     floor lets the fit over-sharpen its couplings (worse calibration, point
-    metrics ~neutral): +0.014±0.010 nats/declaration at 0.5%, +0.021±0.009 at 1%,
-    +0.041±0.011 at 2.5%. 0.5% is the accepted compromise — near-neutral NLL
-    while still capping any single junk row's pull at −log(eps/N) ≈ 8.7 nats
-    (vs ~19 unbounded). Don't raise it without re-running that CV.
+    metrics flat across the whole range tried, including 1% and 1.5%). It is not
+    zero because the junk SCREEN (detect_junk_declarations) reads this mixture's
+    posterior, and because it caps any single junk row's pull at −log(eps/N) nats.
+    Don't raise it without re-running that CV (`--rob-eps … --drop-eval …`).
   * THE GAUGE — TWO PRIORS, NOT ONE. With no server privileged the LIKELIHOOD leaves the
     consensus scale free up to a MONOTONE reparameterisation (remap the latent, absorb it
     into every coupling's free thresholds and the curve's free per-segment gaps). That is
@@ -118,7 +122,6 @@ from collections import defaultdict, deque
 
 import numpy as np
 import pandas as pd
-from scipy.optimize import minimize
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
@@ -142,7 +145,10 @@ SIZES = list(ALL_BOARD_SIZES)
 
 # --- Model config (baked; this module is production-only, no experimentation) ---
 RATING_SHAPE = "cubic"      # even_game_winrates.txt shape used as the curve's prior MEAN
-LAMBDA_SHAPE = 0.3          # GENTLE shape prior (the all-server latent isn't kyu-starved)
+LAMBDA_SHAPE = 300.0        # ridge on the curve's log-slope deviating from the shape's (per rating)
+LAMBDA_SMOOTH = 30.0        # ridge on that deviation CHANGING along the rating axis
+RATING_KNOT_STEP = 0.05     # the curve's fixed rating-knot spacing (see fit_consensus)
+RATING_KNOT_PAD = 0.4       # knots extend this far past the anchors' rating range
 SERVER_LAMBDA = 5.0         # uniform-spacing prior on each server coupling
 GAUGE_WEIGHT = 1.0          # VERY WEAK pin on the n-weighted mean coupling offset → 0
 EPS_CONTAMINATION = 0.005   # P(a declaration is junk) — robust mixture; small ON PURPOSE
@@ -151,14 +157,28 @@ LAMBDA_TIME = 0.1           # light ridge keeping the learned time slope bounded
 # Rank BANDS (rank_surveys.rank_band): band b spans [b, b+1), so band 0 is 1d and
 # band -1 is 1k, and a band's lower EDGE is the integer b itself. Every threshold
 # below is such an edge.
-EGF_LO, EGF_HI = -21, 9     # consensus-rank band range the curve spans
+EGF_LO, EGF_HI = -31, 9     # consensus-rank band range the curve spans (30k..9d): every anchor inside it
 RANK_PADDING = 2            # extend a server's thresholds past its declared min/max
 EXTEND_TO = 8               # force each server range to cover at least up to 9d
 MIN_SERVER_SAMPLES = 3      # skip a server with less pooled declaration-weight
 JUNK_FLOOR = 0.5            # exclude above this junk posterior — see the screening note
-MIN_ATTEMPTS = 20           # drop survey users (and career blocks) with fewer attempts
-BLOCK_DAYS = 60             # career-segment anchor blocks: window length ...
-BLOCK_STEP = 30             # ... and step (overlapping; see the docstring)
+MIN_ATTEMPTS = 20           # drop survey users (and declaration spans) with fewer attempts
+# The consensus fit runs to CONVERGENCE, not to a budget. The shown onlymove rank rides
+# the direction the likelihood is flattest along (the couplings absorb the curve's
+# moves, so server ranks barely change while the headline rank does), which is exactly
+# where a budget-limited stop lands arbitrarily — at a point that moves with the data
+# and the start. The fit therefore takes an exact gradient and Hessian from torch
+# autograd and stops on the NEWTON DECREMENT rather than on the objective's relative
+# change, aborting if it does not get there (see _minimize).
+FIT_NEWTON_TOL = 1e-9       # converged: the Newton decrement (nats still to gain) is below this
+FIT_NEWTON_STEPS = 50        # Newton converges in a handful; running out is a failure
+FIT_GTOL = 1e-6              # L-BFGS's own inner stop (Newton finishes the job)
+FIT_MAX_ITER = 200000        # a cap that never binds
+FIT_HISTORY = 50             # L-BFGS curvature pairs kept
+# The CPU, deliberately: an evaluation is a few dozen SMALL operations, where a GPU
+# spends its time on kernel launches and the line search's per-iteration reads, not
+# on arithmetic — measured slower than one CPU thread even fully device-resident.
+FIT_DEVICE = "cpu"
 
 # Solve-time feature (server side): non-repeat, timed, AFK-capped median over the
 # most-recent WORKING_SET attempts, in minutes. This approximates but no longer
@@ -245,34 +265,68 @@ def load_timed_attempts(sqlite_path, user_ids):
             for uid, grp in df.groupby("user_id")}
 
 
-def block_ratings(times, rows, ratings, slopes, floors, lapse):
-    """[(t_center_days, rating, attempt_mass)] — one 80%-clear rating per
-    overlapping BLOCK_DAYS window stepped BLOCK_STEP through the user's career
-    (windows below MIN_ATTEMPTS joined attempts are skipped). mass = each attempt's
-    unit mass split equally over the blocks covering it, so every attempt counts
-    exactly once however the grid overlaps. Empty list = no fittable block; the
-    caller falls back to the pooled career rating."""
-    if len(times) == 0:
-        return []
-    spans, seen = [], set()
-    for s in np.arange(times[0], times[-1] + 1e-9, BLOCK_STEP):
-        lo = int(np.searchsorted(times, s, side="left"))
-        hi = int(np.searchsorted(times, s + BLOCK_DAYS, side="right"))
-        if hi - lo < MIN_ATTEMPTS or (lo, hi) in seen:
-            continue
-        seen.add((lo, hi))
-        R, n = fit_user_rating(rows[lo:hi], ratings, min_n=MIN_ATTEMPTS,
+def declaration_spans(times, rows, decl_times, decl_bands, rate):
+    """[(band, rating, n_attempts)] — one anchor per STABLE declaration of one user on
+    one server. The declarations (ascending decl_times, their bands) collapse into runs
+    of the same band; the user's history (`times` ascending, `rows` aligned) is cut
+    HALFWAY between the last declaration of one run and the first of the next, and each
+    span's attempts give one 80%-clear rating via `rate(rows) -> rating or None`. The
+    first span reaches back to the start of the history and the last forward to its
+    end: a declaration describes the player until another one says otherwise. A span
+    too thin to rate contributes nothing; an empty list means no span could be rated."""
+    starts = [0] + [i for i in range(1, len(decl_bands)) if decl_bands[i] != decl_bands[i - 1]]
+    cuts = [(decl_times[i - 1] + decl_times[i]) / 2 for i in starts[1:]]
+    edges = [-np.inf] + cuts + [np.inf]
+    out = []
+    for k, i in enumerate(starts):
+        lo = int(np.searchsorted(times, edges[k], side="left"))
+        hi = int(np.searchsorted(times, edges[k + 1], side="left"))
+        R = rate(rows[lo:hi]) if hi - lo >= MIN_ATTEMPTS else None
+        if R is not None:
+            out.append((int(decl_bands[i]), R, hi - lo))
+    return out
+
+
+def build_anchor_rows(surveys, attempts, med_min, ratings, slopes, floors, lapse):
+    """The mapping's anchor rows, one per stable declaration (declaration_spans).
+
+    surveys: rank_surveys with `rank_value` and `t_days`; attempts: {user_id: (times,
+    rows)} first-time attempts; med_min: {user_prefix8: median solve minutes}. Returns
+    (decls, keys, users, n_fallback, center): rows (server, span rating, declared band, T,
+    weight 1) as fit_consensus takes them; their (user, server, band) keys, so an
+    exclusion drops a declaration whole; {user_id: (pooled career rating, T)}; and how
+    many (user, server) pairs had no ratable span and fell back to the pooled career
+    rating against their latest declaration; and the time dock's zero point. T is the
+    log10 median solve time less that center, 0 for a user without one (no time term)."""
+    def rate(rows):
+        R, n = fit_user_rating(rows, ratings, min_n=MIN_ATTEMPTS,
                                slopes=slopes, floors=floors, lapse=lapse)
-        if R is not None and n >= MIN_ATTEMPTS:
-            spans.append((lo, hi, R))
-    if not spans:
-        return []
-    cov = np.zeros(len(rows))
-    for lo, hi, _ in spans:
-        cov[lo:hi] += 1
-    inv = np.where(cov > 0, 1.0 / np.maximum(cov, 1), 0.0)
-    return [(float((times[lo] + times[hi - 1]) / 2), R, float(np.sum(inv[lo:hi])))
-            for lo, hi, R in spans]
+        return R if R is not None and n >= MIN_ATTEMPTS else None
+    pooled, logT = {}, {}
+    for uid in surveys["user_id"].unique():
+        R = rate(attempts.get(uid, (np.zeros(0), []))[1])
+        if R is None:
+            continue
+        pooled[uid] = R
+        if uid[:8] in med_min and med_min[uid[:8]] > 0:
+            logT[uid] = float(np.log10(med_min[uid[:8]]))
+    timed = [logT[u] for u in pooled if u in logT]
+    center = float(np.mean(timed)) if timed else 0.0   # the time dock's zero point
+    T_of = {u: (logT[u] - center) if u in logT else 0.0 for u in pooled}
+    decls, keys, n_fallback = [], [], 0
+    for (uid, server), srows in (surveys[surveys["user_id"].isin(pooled)]
+                                 .sort_values("t_days").groupby(["user_id", "server"])):
+        times, rows = attempts[uid]
+        bands = [rank_band(v) for v in srows["rank_value"].to_numpy(float)]
+        spans = declaration_spans(times, rows, srows["t_days"].to_numpy(float), bands, rate)
+        if not spans:
+            spans = [(bands[-1], pooled[uid], len(rows))]
+            n_fallback += 1
+        for g, R, _ in spans:
+            decls.append((server, R, g, T_of[uid], 1.0))
+            keys.append((uid, server, g))
+    users = {u: (pooled[u], T_of[u]) for u in pooled}
+    return decls, keys, users, n_fallback, center
 
 
 # ---------------------------------------------------------------------------
@@ -331,12 +385,36 @@ def _threshold_mass(rows, g_min, K):
     return tw
 
 
+def fit_device():
+    """FIT_DEVICE, or the GPU when it is None and torch sees one."""
+    import torch
+    return FIT_DEVICE or ("cuda" if torch.cuda.is_available() else "cpu")
+
+
 def fit_consensus(decls, identity_servers=()):
     """Jointly fit the rating→consensus curve M, the global time slope α, and the
     per-server couplings (EGF included). decls rows are (server, rating, declared
-    scalar, T[, weight]) — weight defaults to 1 for a plain one-row-per-declaration
+    band, T[, weight]) — weight defaults to 1 for a plain one-row-per-declaration
     anchor. Returns (a, alpha, ys, egf_thr_ranks, server_fits) where `a` are the
-    rating values at each consensus boundary `ys`.
+    rating values at each consensus band edge `ys` (the integer ranks the published
+    curve carries).
+
+    THE CURVE is parameterised by its SLOPE over a FIXED grid of rating knots
+    (RATING_KNOT_STEP apart, spanning the anchors ± RATING_KNOT_PAD): at each knot a
+    free log-slope θ_j (ranks per rating, positive ⇒ monotone), the slope linear
+    between knots, the rank its integral from a free level, and constant end slopes
+    beyond. The rank is then smooth in the rating AND in every parameter (the time
+    slope α included, which slides each anchor along the rating axis), so the
+    objective has no kinks and its gradient can genuinely vanish. Parameterising the
+    rating at each rank edge instead — the obvious form — makes those edges free
+    KNOTS the anchors cross, and the fit then snaps edges onto anchor clusters:
+    bands collapse and swell, and no optimizer converges on the resulting kinks.
+    The published knots are this smooth curve read off at the integer band edges.
+
+    PRIORS on the curve: the log-slope's deviation δ_j from the even-game SHAPE's
+    (RATING_SHAPE, up to a free scale) is ridge-penalised (LAMBDA_SHAPE) and so is
+    its change between neighbouring knots (LAMBDA_SMOOTH); both are integrals over
+    rating (×/÷ the knot step), so they do not depend on the grid's density.
 
     `identity_servers` holds a server's coupling AT IDENTITY instead of fitting it,
     which makes that server the privileged hub the latent is defined by rather than
@@ -345,26 +423,37 @@ def fit_consensus(decls, identity_servers=()):
     gauge on its own, so GAUGE_WEIGHT's translation pin (which exists only to pin it
     when nothing else does) is not applied. PRODUCTION PASSES NOTHING HERE and the
     default is the consensus fit, unchanged."""
+    import torch
     decls = [d if len(d) == 5 else (*d, 1.0) for d in decls]
     identity_servers = set(identity_servers)
-    egf_thr_ranks, ys, S, dS = _curve_arrays()
-    nseg = len(dS)
+    egf_thr_ranks, ys, _, _ = _curve_arrays()
     blocks = _bucket(decls)
     if not blocks:
         sys.exit("No servers with enough declarations — cannot fit.")
+    dev = fit_device()
+    f64 = dict(dtype=torch.float64, device=dev)
+    tt = lambda v: torch.as_tensor(np.asarray(v, dtype=float), **f64)
+    ti = lambda v: torch.as_tensor(np.asarray(v, dtype=np.int64), device=dev)
 
-    # Init the curve affine from a POOLED linear pre-fit over all declarations (no server
-    # privileged), then express it in the shape's (α_c, log β) parameterisation.
+    # Fixed rating knots over the anchors, and the shape prior's log-slope as a
+    # function of rank: rating ∝ S(rank) ⇒ d rank/d rating ∝ 1 / S'(rank).
+    h = RATING_KNOT_STEP
     all_R = np.array([R for _, R, _, _, _ in decls], float)
     all_g = np.array([g for _, _, g, _, _ in decls], float)
-    beta, alpha_c = np.polyfit(all_R, all_g, 1)
-    if beta <= 0:
-        beta = 1e-3
-    prior_rating = (ys - alpha_c) / beta
-    b0 = (prior_rating[-1] - prior_rating[0]) / (S[-1] - S[0])
-    a0 = float(prior_rating[0] - b0 * S[0])
+    r = np.arange(np.floor((all_R.min() - RATING_KNOT_PAD) / h) * h,
+                  all_R.max() + RATING_KNOT_PAD + h / 2, h)
+    m = len(r) - 1
+    shape_params, theta = fit_shape(RATING_SHAPE)
+    def shape_log_slope(g):
+        u = g + float(rank_to_axis(0.0))      # rank_to_axis(g): the shape's axis is rank + a constant
+        return -torch.log((theta(u + 1e-3, shape_params) - theta(u - 1e-3, shape_params)) / 2e-3)
 
-    srv_layout, x0, idx = [], [a0, float(np.log(max(b0, 1e-3)))] + [0.0] * nseg + [0.0], 3 + nseg
+    # Parameters: [rank at r_0, b (the shape's free log-scale), θ_0..θ_m, α, servers...]
+    beta0, c0 = np.polyfit(all_R, all_g, 1)
+    beta0 = max(beta0, 1e-3)
+    x0 = [c0 + beta0 * r[0], 0.0] + [float(np.log(beta0))] * (m + 1) + [0.0]
+    i_alpha = 2 + m + 1
+    srv_layout, idx = [], len(x0)
     for server, blk in blocks.items():
         if server in identity_servers:
             srv_layout.append((server, None, 0))   # held at identity: no free thresholds
@@ -376,49 +465,161 @@ def fit_consensus(decls, identity_servers=()):
         idx += n
     x0 = np.asarray(x0, float)
 
-    def unpack_curve(params):
-        beta_ = np.exp(params[1])
-        a = np.empty(len(S))
-        a[0] = params[0] + beta_ * S[0]
-        if nseg:
-            a[1:] = a[0] + np.cumsum(beta_ * dS * np.exp(params[2:2 + nseg]))
-        return a, params[2 + nseg]   # a, alpha (time slope)
+    # Every server in ONE vectorized pass: rows concatenated with a server index,
+    # thresholds as a padded matrix (padding repeats the last threshold, never indexed).
+    servers = [srv for srv, _, _ in srv_layout]
+    nS, Kmax = len(servers), max(len(blocks[srv]["identity"]) for srv in servers)
+    start = np.zeros(nS, np.int64); free = np.zeros(nS, bool); Kvec = np.zeros(nS, np.int64)
+    sp_idx = np.zeros((nS, Kmax - 1), np.int64); sp_mask = np.zeros((nS, Kmax - 1))
+    base = np.zeros((nS, Kmax - 1)); ident = np.zeros((nS, Kmax)); thr_w = np.zeros((nS, Kmax))
+    rating, T, k, w, sid = [], [], [], [], []
+    for i, (srv, st, n) in enumerate(srv_layout):
+        blk = blocks[srv]; K = len(blk["identity"]); Kvec[i] = K
+        ident[i, :K] = blk["identity"]; ident[i, K:] = blk["identity"][-1]
+        thr_w[i, :K] = blk["thr_w"]
+        if st is not None:
+            free[i] = True; start[i] = st
+            sp_idx[i, :n - 1] = np.arange(st + 1, st + n); sp_mask[i, :n - 1] = 1.0
+            base[i, :n - 1] = blk["baseline"]
+        rating.append(blk["rating"]); T.append(blk["T"]); k.append(blk["k"])
+        w.append(blk["w"]); sid.append(np.full(len(blk["k"]), i))
+    rating, T, w = tt(np.concatenate(rating)), tt(np.concatenate(T)), tt(np.concatenate(w))
+    k, sid = ti(np.concatenate(k)), ti(np.concatenate(sid))
+    start_t, free_t, sp_idx_t = ti(start), torch.as_tensor(free, device=dev), ti(sp_idx)
+    sp_mask_t, base_t, ident_t, thr_w_t = tt(sp_mask), tt(base), tt(ident), tt(thr_w)
+    K_row = ti(Kvec)[sid]
+    junk_row = EPS_CONTAMINATION / tt(Kvec + 1)[sid]     # float64: int/float in torch is float32
+    r_t, zcol, w_tot = tt(r), torch.zeros((nS, 1), **f64), thr_w_t.sum()
+
+    def curve(params):
+        th = params[2:2 + m + 1]
+        s = torch.exp(th)
+        rk = torch.cat([params[0].reshape(1),
+                        params[0] + torch.cumsum(h * (s[:-1] + s[1:]) / 2, 0)])
+        return th, s, rk
+
+    def rank_of(x, s, rk):
+        j = torch.clamp(torch.floor((x.detach() - r[0]) / h).long(), 0, m - 1)
+        u = x - r_t[j]
+        inside = rk[j] + s[j] * u + (s[j + 1] - s[j]) * u * u / (2 * h)
+        return torch.where(x < r_t[0], rk[0] + s[0] * (x - r_t[0]),
+                           torch.where(x > r_t[-1], rk[-1] + s[-1] * (x - r_t[-1]), inside))
 
     def objective(params):
-        a, alpha = unpack_curve(params)
-        nll, pen, w_off, w_tot = 0.0, 0.0, 0.0, 0.0
-        for server, st, n in srv_layout:
-            blk = blocks[server]
-            thr = (blk["identity"] if st is None
-                   else _unpack_thresholds(params[st:st + n], blk["baseline"]))
-            x_int = interp_extrap_vec(blk["rating"] + alpha * blk["T"], a, ys)
-            nll += ordinal_nll_vec(thr, x_int, blk["k"], blk["w"],
-                                   eps=EPS_CONTAMINATION)
-            if st is not None:
-                pen += SERVER_LAMBDA * float(np.sum(params[st + 1:st + n] ** 2))
-            # gauge: every declaration weighs the offset at its own two boundaries
-            w_off += float(np.sum(blk["thr_w"] * (thr - blk["identity"])))
-            w_tot += float(np.sum(blk["thr_w"]))
-        if nseg:
-            pen += LAMBDA_SHAPE * float(np.sum(params[2:2 + nseg] ** 2))
-        pen += LAMBDA_TIME * float(alpha ** 2)
+        th, s, rk = curve(params)
+        alpha = params[i_alpha]
+        x = rank_of(rating + alpha * T, s, rk)
+        thr_free = params[start_t][:, None] + torch.cumsum(
+            torch.cat([zcol, base_t * torch.exp(params[sp_idx_t]) * sp_mask_t], 1), 1)
+        thr = torch.where(free_t[:, None], thr_free, ident_t)
+        # ordinal_nll_vec with the contamination mixture
+        up = torch.where(k < K_row, torch.sigmoid(thr[sid, torch.minimum(k, K_row - 1)] - x), 1.0)
+        lw = torch.where(k > 0, torch.sigmoid(thr[sid, torch.clamp(k - 1, min=0)] - x), 0.0)
+        p = (1.0 - EPS_CONTAMINATION) * torch.clamp(up - lw, 1e-12, 1.0) + junk_row
+        f = -torch.sum(w * torch.log(p))
+        f = f + SERVER_LAMBDA * torch.sum((params[sp_idx_t] * sp_mask_t) ** 2)
+        delta = th - (params[1] + shape_log_slope(rk))
+        f = f + LAMBDA_SHAPE * h * torch.sum(delta ** 2)
+        f = f + LAMBDA_SMOOTH / h * torch.sum((delta[1:] - delta[:-1]) ** 2)
+        f = f + LAMBDA_TIME * alpha ** 2
         if not identity_servers:
-            pen += GAUGE_WEIGHT * (w_off / w_tot) ** 2     # gauge: n-weighted mean offset → 0
-        return nll + pen
+            # gauge: every declaration weighs the offset at its own two boundaries
+            f = f + GAUGE_WEIGHT * (torch.sum(thr_w_t * (thr - ident_t)) / w_tot) ** 2
+        return f
 
-    # Intermediate optimizer steps can momentarily collapse the curve (β→0), which
-    # divide-by-zeros in interp_extrap_vec's end-slope; the final fit is well-conditioned.
-    with np.errstate(divide="ignore", invalid="ignore"):
-        res = minimize(objective, x0, method="L-BFGS-B", options={"maxiter": 10000})
-    a, alpha = unpack_curve(res.x)
+    p = tt(x0)
+    with torch.no_grad():   # the free scale b starts where the initial deviation is centred
+        th, _, rk = curve(p)
+        p[1] = torch.mean(th - shape_log_slope(rk))
+    x_opt = _minimize(objective, p, dev)
+
+    # Read the smooth curve off at the integer band edges (the published knots): dense
+    # samples inside the grid, the constant end slopes beyond it.
+    with torch.no_grad():
+        _, s, rk = curve(tt(x_opt))
+        xd = tt(np.linspace(r[0], r[-1], 20 * m + 1))
+        rd = rank_of(xd, s, rk).cpu().numpy()
+    xd, s, rk = xd.cpu().numpy(), s.cpu().numpy(), rk.cpu().numpy()
+    a = np.interp(ys, rd, xd)
+    a = np.where(ys < rd[0], xd[0] + (ys - rd[0]) / s[0], a)
+    a = np.where(ys > rd[-1], xd[-1] + (ys - rd[-1]) / s[-1], a)
+    # Past the outermost knots readers extrapolate the end BAND's slope, not the fitted
+    # curve's, so an anchor out there is scored on one curve and published on another.
+    x_anchor = (rating + float(x_opt[i_alpha]) * T).cpu().numpy()
+    lowest = float(np.interp(x_anchor.min(), xd, rd, left=np.nan))
+    if not lowest >= ys[0]:
+        sys.exit(f"an anchor fits at rank {lowest:.2f}, below the lowest published knot "
+                 f"{ys[0]:g} — lower EGF_LO so the published curve covers it")
+    alpha = float(x_opt[i_alpha])
     server_fits = {}
     for server, st, n in srv_layout:
         blk = blocks[server]
         thr = (blk["identity"] if st is None
-               else _unpack_thresholds(res.x[st:st + n], blk["baseline"]))
+               else _unpack_thresholds(x_opt[st:st + n], blk["baseline"]))
         gs = list(range(blk["g_min"] + 1, blk["g_max"] + 1))
         server_fits[server] = {gs[i]: float(thr[i]) for i in range(len(gs))}
-    return a, float(alpha), ys, egf_thr_ranks, server_fits
+    return a, alpha, ys, egf_thr_ranks, server_fits
+
+
+def _minimize(objective, p0, dev):
+    """L-BFGS, then Newton on the exact Hessian, both on `dev` with the solution read
+    back once. CONVERGENCE is the Newton decrement — ½·gᵀH⁻¹g, the objective's
+    predicted remaining improvement — reaching FIT_NEWTON_TOL. It is scale-free where
+    a gradient threshold is not (the stronger the priors, the steeper the objective
+    and the higher its rounding floor), and it cannot be met by a stop that merely
+    ran out of progress: a parameter only a few declarations inform, far from its
+    optimum, shows up in the decrement however little it moves the total. A fit
+    whose Hessian is not positive definite, or whose decrement will not fall, aborts."""
+    import torch
+    p = p0.clone().requires_grad_(True)
+
+    def closure():
+        opt.zero_grad()
+        f = objective(p)
+        f.backward()
+        return f
+    # L-BFGS gets close cheaply; torch's gives up whenever its direction stops being a
+    # descent direction, so it restarts with fresh curvature history until a round
+    # stops lowering the objective.
+    n_iter, prev = 0, float("inf")
+    while True:
+        opt = torch.optim.LBFGS([p], lr=1, max_iter=FIT_MAX_ITER, max_eval=FIT_MAX_ITER * 5,
+                                tolerance_grad=FIT_GTOL, tolerance_change=0.0,
+                                history_size=FIT_HISTORY, line_search_fn="strong_wolfe")
+        opt.step(closure)
+        n_iter += opt.state[opt._params[0]]["n_iter"]
+        fv = float(closure())
+        if not fv < prev or n_iter >= FIT_MAX_ITER:
+            break
+        prev = fv
+    # Newton to convergence.
+    x = p.detach().clone()
+    for n_newton in range(FIT_NEWTON_STEPS + 1):
+        xg = x.clone().requires_grad_(True)
+        f = objective(xg)
+        g, = torch.autograd.grad(f, xg)
+        H = torch.autograd.functional.hessian(objective, x)
+        L, info = torch.linalg.cholesky_ex(H)
+        if int(info) != 0:
+            sys.exit(f"consensus fit: Hessian not positive definite at the L-BFGS solution "
+                     f"({n_iter} iterations, {n_newton} Newton steps) — the fit is not at a minimum")
+        step = torch.cholesky_solve(-g.unsqueeze(1), L).squeeze(1)
+        decrement = float(-(g @ step)) / 2
+        if decrement <= FIT_NEWTON_TOL:
+            break
+        if n_newton == FIT_NEWTON_STEPS:
+            sys.exit(f"consensus fit did not converge: Newton decrement {decrement:.2e} > "
+                     f"{FIT_NEWTON_TOL:g} after {FIT_NEWTON_STEPS} Newton steps")
+        t, fx = 1.0, float(f)
+        while float(objective(x + t * step)) > fx + 1e-4 * t * float(g @ step):
+            t /= 2
+            if t < 1e-10:
+                sys.exit(f"consensus fit: Newton line search failed (decrement {decrement:.2e})")
+        x = x + t * step
+    print(f"  converged on {dev}: objective {float(f):.4f}, Newton decrement {decrement:.1e}, "
+          f"max |gradient| {float(g.abs().max()):.1e} ({n_iter} L-BFGS iterations + "
+          f"{n_newton} Newton steps)")
+    return x.cpu().numpy()
 
 
 EXCLUSIONS_CSV = "declaration_exclusions.csv"
@@ -580,57 +781,16 @@ def main():
     attempts = load_timed_attempts(args.sqlite, set(surveys["user_id"].unique()))
     med_min = load_user_median_solve_minutes(args.sqlite)
 
-    # Per-user career-block ratings (see docstring) + the log10 median solve time.
-    print(f"\nEstimating {int(CALIBRATION_P * 100)}%-clear ratings per {BLOCK_DAYS}d "
-          f"career block (pooled boards, 4PL, λ={lapse:.4f}) ...")
-    user_blocks, user_logT, fallbacks = {}, {}, 0
-    for uid in surveys["user_id"].unique():
-        times, rows = attempts.get(uid, (np.zeros(0), []))
-        R, n = fit_user_rating(rows, merged_ratings, min_n=MIN_ATTEMPTS,
-                               slopes=merged_slopes, floors=merged_floors, lapse=lapse)
-        if R is None or n < MIN_ATTEMPTS:
-            continue
-        blks = block_ratings(times, rows, merged_ratings, merged_slopes,
-                             merged_floors, lapse)
-        if not blks:   # sparse career: never MIN_ATTEMPTS inside one block window
-            blks = [(float(np.mean(times)), R, 1.0)]
-            fallbacks += 1
-        user_blocks[uid] = blks
-        pref = uid[:8]
-        if pref in med_min and med_min[pref] > 0:
-            user_logT[uid] = float(np.log10(med_min[pref]))
-    timed = [user_logT[u] for u in user_blocks if u in user_logT]
-    center = float(np.mean(timed)) if timed else 0.0   # the time dock's zero point
-    nblk = [len(b) for b in user_blocks.values()]
-    print(f"  {len(user_blocks)} users with a usable rating ({fallbacks} career "
-          f"fallbacks; blocks/user median {int(np.median(nblk))}, max {max(nblk)}); "
-          f"{len(timed)} with a time feature (center = log10 median min "
-          f"{center:+.3f}, {10 ** center * 60:.0f}s)")
-
-    # Anchor rows: (server, block rating, declared scalar, de-meaned time feature,
-    # weight). Each block attaches to the user's nearest-in-time declaration on that
-    # server, and a declaration's rows are attempt-mass-normalized to total weight 1.
-    # Users without a usable time feature get T=0 (no time term).
-    decls, keys = [], []
-    for (uid, server), srows in (surveys[surveys["user_id"].isin(user_blocks)]
-                                 .groupby(["user_id", "server"])):
-        T = (user_logT[uid] - center) if uid in user_logT else 0.0
-        dt = srows["t_days"].to_numpy(float)
-        dg = np.array([rank_band(v) for v in srows["rank_value"].to_numpy(float)])
-        assign = defaultdict(list)
-        for tc, R, m in user_blocks[uid]:
-            assign[int(np.argmin(np.abs(dt - tc)))].append((R, m))
-        for j, brs in assign.items():
-            mass = sum(m for _, m in brs)
-            for R, m in brs:
-                decls.append((server, R, int(dg[j]), T,
-                              m / mass if mass > 0 else 1.0 / len(brs)))
-                # A declaration is (user, server, declared band); its block rows
-                # share one key, so an exclusion drops the declaration whole.
-                keys.append((uid, server, int(dg[j])))
+    # One anchor per stable declaration (see the docstring and declaration_spans).
+    print(f"\nEstimating {int(CALIBRATION_P * 100)}%-clear ratings per stable-declaration "
+          f"span (pooled boards, 4PL, λ={lapse:.4f}) ...")
+    decls, keys, users, n_fallback, center = build_anchor_rows(
+        surveys, attempts, med_min, merged_ratings, merged_slopes, merged_floors, lapse)
+    n_pairs = len({(u, srv) for u, srv, _ in keys})
+    print(f"  {len(users)} users with a usable rating; {len(decls)} spans over {n_pairs} "
+          f"(user, server) pairs ({n_fallback} fell back to the pooled career rating)")
     w_egf = sum(d[4] for d in decls if d[0] == "EGF")
-    print(f"\nConsensus fit over {len(decls)} anchor rows, "
-          f"{sum(d[4] for d in decls):.0f} declaration-weight [{w_egf:.0f} EGF, a "
+    print(f"\nConsensus fit over {len(decls)} anchor rows [{w_egf:.0f} EGF, a "
           f"coupling like any server; cubic shape prior λ_shape={LAMBDA_SHAPE}, "
           f"server λ={SERVER_LAMBDA}, gauge weight={GAUGE_WEIGHT}]")
 

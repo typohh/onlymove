@@ -1,21 +1,20 @@
 """Paired held-out CV for the consensus rating→rank fit (pipeline.map_rating_to_rank):
-does the mapping gain from (a) errors-in-variables over each user's rating CI, or
-(b) time-segmented user ratings?
+which user-rating covariate should the mapping anchor on — one pooled career rating,
+a trailing window, time-segmented career blocks, or one rating per stable declaration
+(production) — how should the anchors be weighted, how much contamination, and how
+strong should the curve's priors be?
 
-Variants (all share the exact production objective/penalties; they differ only in the
-user-rating covariate and in whether the fit integrates over its standard error):
+Every variant is fitted by production `fit_consensus` itself (same objective, priors,
+convergence rule); they differ only in the anchor rows and the contamination eps:
 
-  career        production baseline — one pooled all-career 80%-clear rating per user,
-                treated as exact (se = 0).
-  career+eiv    same rating, but each declaration's ordinal likelihood is averaged over
-                Normal(rating, se^2) via Gauss-Hermite quadrature; se = the Fisher
-                standard error of fit_user_rating's MLE.
-  win120[+eiv]  trailing-120-day rating at declaration time (fallback to career when the
+  career        one pooled all-career 80%-clear rating per user (latest declaration per
+                server), treated as exact.
+  win120        trailing-120-day rating at declaration time (fallback to career when the
                 window has < MIN_ATTEMPTS rated attempts). This is the DRIFT PROBE: per
                 user guidance we assume rank does NOT drift (surveys only began
                 2026-05-18, so declarations carry no early history) — if this variant
                 beats career, that assumption is wrong.
-  blocks[+eiv]  overlapping 2-month blocks (60d window, 30d step) over the user's whole
+  blocks        overlapping 2-month blocks (60d window, 30d step) over the user's whole
                 career; every block with >= MIN_ATTEMPTS rated attempts becomes its own
                 training row anchored to the user's declared rank (nearest-in-time
                 declaration per server when they filed several — "no drift unless a
@@ -31,6 +30,12 @@ user-rating covariate and in whether the fit integrates over its standard error)
                 the overlap coverage (fixes the edge-era underweighting above).
   blocks-raw    blocks with NO per-declaration weight normalization (each block weight 1)
                 — probes whether heavy users' extra pseudo-rows help or bias.
+  spans         PRODUCTION: one rating per stable declaration (mapping.declaration_spans:
+                history cut halfway between changed declarations), weight 1 each.
+  spans-pair    spans, each (user, server) pair totalling weight 1.
+  spans-user    spans, each user totalling weight 1 across all servers.
+  @eps / @shape:smooth   spans+rob refitted at another contamination eps (--rob-eps) or
+                other curve priors LAMBDA_SHAPE:LAMBDA_SMOOTH (--priors).
   *+rob         same declarations, but FIT with the production contamination mixture
                 (ordinal_nll_vec eps=EPS_CONTAMINATION: with probability eps a
                 declaration is junk, uniform over categories). Scoring stays the plain
@@ -46,8 +51,9 @@ continuous predicted server rank vs declared. The time feature T and its center 
 computed once from the full data (production behavior; identical across variants, so
 the small leak cancels in paired diffs).
 
-Sanity: with se=0 and unit weights this module's fit reproduces pipeline
-fit_consensus exactly (checked at startup on the full data).
+Errors-in-variables (averaging each declaration's likelihood over the rating's Fisher
+CI) was measured and rejected on this harness's earlier private copy of the fit, and
+production's fit has no such term, so it is no longer a variant here.
 
 Usage: ./.venv/bin/python3 -m ablations.eval_rank_map_cv [--reps 6] [--folds 5]
 """
@@ -60,17 +66,15 @@ from collections import defaultdict
 
 import numpy as np
 import pandas as pd
-from scipy.optimize import minimize
 from scipy.special import expit
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
+import pipeline.map_rating_to_rank as mapping  # noqa: E402
 from pipeline.map_rating_to_rank import (  # noqa: E402
-    EPS_CONTAMINATION, GAUGE_WEIGHT, LAMBDA_SHAPE, LAMBDA_TIME, MIN_ATTEMPTS,
-    MIN_SERVER_SAMPLES, RANK_PADDING, EXTEND_TO, SERVER_LAMBDA, SIZES,
-    _curve_arrays, _threshold_mass, fit_consensus,
+    EPS_CONTAMINATION, MIN_ATTEMPTS, SIZES, fit_consensus,
     load_floors, load_ratings, load_slopes, load_user_median_solve_minutes,
 )
 from utils.paths import DB_SQLITE  # noqa: E402
@@ -84,10 +88,6 @@ from utils.rating.ratings_io import load_lapse  # noqa: E402
 BLOCK_DAYS = 60
 BLOCK_STEP = 30
 WIN_DAYS = 120
-GH_NODES = 7
-
-_ghz, _ghw = np.polynomial.hermite_e.hermegauss(GH_NODES)
-_ghw = _ghw / _ghw.sum()
 
 
 # ---------------------------------------------------------------------------
@@ -189,120 +189,25 @@ def block_masses(blks, n_attempts):
 
 
 # ---------------------------------------------------------------------------
-# Consensus fit with optional per-row se (EIV via Gauss-Hermite) and weights.
-# Copy of pipeline fit_consensus extended with `se`/`w` arrays; se=0, w=1
-# reproduces production exactly (verified at startup).
+# Consensus fit: production's own, at a variant's contamination eps
 # ---------------------------------------------------------------------------
-def _bucket_w(decls):
-    rows_by = defaultdict(list)
-    for server, R, g, T, se, w in decls:
-        rows_by[server].append((R, rank_band(g), T, se, w))
-    blocks = {}
-    for server, rows in rows_by.items():
-        # production gate counts declarations; blocks variants multiply rows, so gate
-        # on total weight (== declaration count when w=1)
-        if sum(w for *_, w in rows) < MIN_SERVER_SAMPLES:
-            continue
-        declared = [g for _, g, _, _, _ in rows]
-        g_min = min(declared) - RANK_PADDING
-        g_max = max(max(declared) + RANK_PADDING, EXTEND_TO)
-        K = g_max - g_min
-        if K < 1:
-            continue
-        N = g_max - g_min + 1
-        gs = list(range(g_min + 1, g_max + 1))
-        blocks[server] = {
-            "g_min": g_min, "g_max": g_max,
-            "baseline": np.ones(K - 1) if K > 1 else np.array([]),
-            "identity": np.array([float(g) for g in gs], float),
-            "rating": np.array([r for r, _, _, _, _ in rows], float),
-            "T": np.array([t for _, _, t, _, _ in rows], float),
-            "se": np.array([s for _, _, _, s, _ in rows], float),
-            "w": np.array([w for _, _, _, _, w in rows], float),
-            "k": np.array([max(0, min(N - 1, g - g_min)) for _, g, _, _, _ in rows], int),
-            "thr_w": _threshold_mass([(r, g, t, w) for r, g, t, _, w in rows], g_min, K)}
-    return blocks
-
-
-def fit_consensus_cv(decls, eps=0.0):
-    """decls: [(server, R, g, T, se, w)]. Returns (a, alpha, ys, server_fits).
-    eps: contamination-mixture weight on a uniform-over-categories junk component
-    (matches ordinal_nll_vec's eps; production fits with EPS_CONTAMINATION)."""
-    egf_thr_ranks, ys, S, dS = _curve_arrays()
-    nseg = len(dS)
-    blocks = _bucket_w(decls)
-    if not blocks:
-        return None
-
-    all_R = np.array([R for _, R, _, _, _, _ in decls], float)
-    all_g = np.array([rank_band(g) for _, _, g, _, _, _ in decls], float)
-    beta, alpha_c = np.polyfit(all_R, all_g, 1)
-    if beta <= 0:
-        beta = 1e-3
-    prior_rating = (ys - alpha_c) / beta
-    b0 = (prior_rating[-1] - prior_rating[0]) / (S[-1] - S[0])
-    a0 = float(prior_rating[0] - b0 * S[0])
-
-    srv_layout, x0, idx = [], [a0, float(np.log(max(b0, 1e-3)))] + [0.0] * nseg + [0.0], 3 + nseg
-    for server, blk in blocks.items():
-        n = len(blk["baseline"]) + 1
-        srv_layout.append((server, idx, n))
-        x0.append(float(blk["g_min"]))
-        x0.extend([0.0] * len(blk["baseline"]))
-        idx += n
-    x0 = np.asarray(x0, float)
-
-    def unpack_curve(params):
-        beta_ = np.exp(params[1])
-        a = np.empty(len(S))
-        a[0] = params[0] + beta_ * S[0]
-        if nseg:
-            a[1:] = a[0] + np.cumsum(beta_ * dS * np.exp(params[2:2 + nseg]))
-        return a, params[2 + nseg]
-
-    def objective(params):
-        a, alpha = unpack_curve(params)
-        nll, pen, w_off, w_tot = 0.0, 0.0, 0.0, 0.0
-        for server, st, n in srv_layout:
-            blk = blocks[server]
-            thr = _unpack_thresholds(params[st:st + n], blk["baseline"])
-            x_mid = blk["rating"] + alpha * blk["T"]
-            if np.any(blk["se"] > 0):
-                x_eff = x_mid[:, None] + blk["se"][:, None] * _ghz[None, :]
-                x_int = interp_extrap_vec(x_eff.ravel(), a, ys).reshape(len(x_mid), -1)
-                gh_w = _ghw
-            else:
-                x_int = interp_extrap_vec(x_mid, a, ys)[:, None]
-                gh_w = np.array([1.0])
-            K = thr.shape[0]
-            kk = blk["k"]
-            upper = np.where((kk < K)[:, None],
-                             expit(thr[np.minimum(kk, K - 1)][:, None] - x_int), 1.0)
-            lower = np.where((kk > 0)[:, None],
-                             expit(thr[np.maximum(kk - 1, 0)][:, None] - x_int), 0.0)
-            p = np.clip(upper - lower, 1e-12, 1.0) @ gh_w
-            if eps > 0.0:
-                p = (1.0 - eps) * p + eps / (K + 1)
-            nll += -float(np.sum(blk["w"] * np.log(np.clip(p, 1e-12, 1.0))))
-            pen += SERVER_LAMBDA * float(np.sum(params[st + 1:st + n] ** 2))
-            w_off += float(np.sum(blk["thr_w"] * (thr - blk["identity"])))
-            w_tot += float(np.sum(blk["thr_w"]))
-        if nseg:
-            pen += LAMBDA_SHAPE * float(np.sum(params[2:2 + nseg] ** 2))
-        pen += LAMBDA_TIME * float(alpha ** 2)
-        pen += GAUGE_WEIGHT * (w_off / w_tot) ** 2
-        return nll + pen
-
-    with np.errstate(divide="ignore", invalid="ignore"):
-        res = minimize(objective, x0, method="L-BFGS-B", options={"maxiter": 10000})
-    a, alpha = unpack_curve(res.x)
-    server_fits = {}
-    for server, st, n in srv_layout:
-        blk = blocks[server]
-        thr = _unpack_thresholds(res.x[st:st + n], blk["baseline"])
-        gs = list(range(blk["g_min"] + 1, blk["g_max"] + 1))
-        server_fits[server] = {gs[i]: float(thr[i]) for i in range(len(gs))}
-    return a, float(alpha), ys, server_fits
+def fit_consensus_cv(decls, eps=EPS_CONTAMINATION, priors=None):
+    """decls: [(server, R, declared scalar, T, se, w)] (se unused). Returns
+    (a, alpha, ys, server_fits) from production fit_consensus, fitted with the
+    contamination eps the variant names and, when given, its curve priors
+    (LAMBDA_SHAPE, LAMBDA_SMOOTH) — production reads all three as module globals."""
+    rows = [(server, R, rank_band(g), T, w) for server, R, g, T, _, w in decls]
+    names = ["EPS_CONTAMINATION"] + (["LAMBDA_SHAPE", "LAMBDA_SMOOTH"] if priors else [])
+    keep = {n: getattr(mapping, n) for n in names}
+    mapping.EPS_CONTAMINATION = eps
+    if priors:
+        mapping.LAMBDA_SHAPE, mapping.LAMBDA_SMOOTH = priors
+    try:
+        a, alpha, ys, _, server_fits = fit_consensus(rows)
+    finally:
+        for n, v in keep.items():
+            setattr(mapping, n, v)
+    return a, alpha, ys, server_fits
 
 
 # ---------------------------------------------------------------------------
@@ -351,8 +256,12 @@ def main():
                          "baseline.")
     ap.add_argument("--rob-eps", default=None,
                     help="comma-list of extra contamination eps values to sweep; each "
-                         "adds a blocks-mass+rob@<eps> variant (fit with that eps, "
+                         "adds a spans+rob@<eps> variant (fit with that eps, "
                          "scored plain like everything else).")
+    ap.add_argument("--priors", default=None,
+                    help="comma-list of LAMBDA_SHAPE:LAMBDA_SMOOTH pairs; each adds a "
+                         "spans+rob@prior variant — the production anchors and eps "
+                         "at those curve priors.")
     ap.add_argument("--drop-eval", default=None,
                     help="comma-list of userprefix8:server declarations to drop from "
                          "the EVAL set only (training keeps them). For scoring on "
@@ -458,36 +367,61 @@ def main():
                                     se if eiv else 0.0, w))
         return out
 
-    # eiv was measurably worse across every covariate in the first full run
-    # (see the memory/report); keep only career+eiv as the recorded control.
+    # Production's anchors: one per stable declaration (mapping.declaration_spans),
+    # built once per (user, server) — they do not depend on the folding.
+    def _rate(rows):
+        f = fitter.fit(rows)
+        return f[0] if f is not None else None
+    spans_by_pair = {}
+    for (uid, server), srows in surveys.sort_values("t").groupby(["user_id", "server"]):
+        times, rows = att[uid]
+        bands = [rank_band(v) for v in srows["rank_value"].to_numpy(float)]
+        spans = mapping.declaration_spans(times, rows, srows["t"].to_numpy(float), bands, _rate)
+        spans_by_pair[(uid, server)] = spans or [(bands[-1], career[uid][0], len(rows))]
+
+    def span_decls(uids, weighting):
+        """weighting: 'decl' (production: every stable declaration weight 1), 'pair'
+        (each (user, server) pair totals 1), 'user' (each user totals 1)."""
+        uids = set(uids)
+        n_user = defaultdict(int)
+        for (uid, _), spans in spans_by_pair.items():
+            n_user[uid] += len(spans)
+        out = []
+        for (uid, server), spans in spans_by_pair.items():
+            if uid not in uids:
+                continue
+            w = {"decl": 1.0, "pair": 1.0 / len(spans), "user": 1.0 / n_user[uid]}[weighting]
+            out += [(server, R, g + 0.5, T_of[uid], 0.0, w) for g, R, _ in spans]
+        return out
+
     # +rob = fit with the production contamination mixture (EPS_CONTAMINATION);
     # scoring stays the plain ordinal NLL for every variant so diffs are paired.
     VARIANTS = [
         ("career",          lambda u: point_decls(u, career, False), 0.0),
-        ("career+eiv",      lambda u: point_decls(u, career, True), 0.0),
         ("career+rob",      lambda u: point_decls(u, career, False), EPS_CONTAMINATION),
         ("win120",          lambda u: point_decls(u, win, False), 0.0),
         ("blocks",          lambda u: block_decls(u, False, "equal"), 0.0),
         ("blocks-mass",     lambda u: block_decls(u, False, "mass"), 0.0),
         ("blocks-mass+rob", lambda u: block_decls(u, False, "mass"), EPS_CONTAMINATION),
         ("blocks-raw",      lambda u: block_decls(u, False, "raw"), 0.0),
+        ("spans+rob",       lambda u: span_decls(u, "decl"), EPS_CONTAMINATION),
+        ("spans-pair+rob",  lambda u: span_decls(u, "pair"), EPS_CONTAMINATION),
+        ("spans-user+rob",  lambda u: span_decls(u, "user"), EPS_CONTAMINATION),
     ]
     if args.variants:
         keep = set(args.variants.split(","))
         VARIANTS = [v for v in VARIANTS if v[0] in keep]
     if args.rob_eps:
         for tok in args.rob_eps.split(","):
-            VARIANTS.append((f"blocks-mass+rob@{tok}",
-                             lambda u: block_decls(u, False, "mass"), float(tok)))
+            VARIANTS.append((f"spans+rob@{tok}", lambda u: span_decls(u, "decl"), float(tok)))
+    PRIORS = {}
+    if args.priors:
+        for tok in args.priors.split(","):
+            shape, smooth = (float(v) for v in tok.split(":"))
+            name = f"spans+rob@{tok}"
+            PRIORS[name] = (shape, smooth)
+            VARIANTS.append((name, lambda u: span_decls(u, "decl"), EPS_CONTAMINATION))
     LENSES = [("career-lens", career), ("win120-lens", win)]
-
-    # --- sanity: se=0/w=1/eps=EPS_CONTAMINATION reproduces production fit_consensus
-    prod_decls = [(s, R, rank_band(g), T) for (s, R, g, T, _, _) in point_decls(users, career, False)]
-    a_p, al_p, ys_p, _, _ = fit_consensus(prod_decls)
-    a_c, al_c, _, _ = fit_consensus_cv(point_decls(users, career, False),
-                                       eps=EPS_CONTAMINATION)
-    print(f"  sanity vs production fit: max|Δcurve| = {np.max(np.abs(a_p - a_c)):.2e}, "
-          f"|Δalpha| = {abs(al_p - al_c):.2e}")
 
     # --- CV ---------------------------------------------------------------------
     drop_eval = set()
@@ -515,7 +449,8 @@ def main():
                     for _, row in latest[latest["user_id"].isin(test_set)].iterrows()
                     if (row["user_id"][:8], row["server"]) not in drop_eval]
             for vname, builder, veps in VARIANTS:
-                fitres = fit_consensus_cv(builder(train_users), eps=veps)
+                fitres = fit_consensus_cv(builder(train_users), eps=veps,
+                                          priors=PRIORS.get(vname))
                 if fitres is None:
                     continue
                 for lens_name, _ in LENSES:
