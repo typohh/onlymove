@@ -34,26 +34,23 @@ REMOTE_DIR = "/workspace/onlymove"
 STATE_FILE = "orchestration_state.json"
 
 # Pipeline steps allowed on the remote. Maps short name → python -m module path.
-# `calibrate19` and `calibrate_handicap` are auxiliary diagnostics, not
-# main-pipeline steps, but they fit the same provision-upload-run-sync flow.
+# `losing_lines` is an auxiliary step, not a main-pipeline one, but it fits the
+# same provision-upload-run-sync flow.
 PIPELINE_STEPS = {
     "tune": "pipeline.tune_engine",
     "generate": "pipeline.generate_tsumegos",
     "benchmark": "pipeline.benchmark_bots",
     "losing_lines": "auxiliary.add_losing_lines",
-    "calibrate19": "auxiliary.calibrate_ranks_19x19",
-    "calibrate_handicap": "auxiliary.calibrate_handicap_ranks",
 }
 
 # Steps that take a mandatory positional board size as their first arg — it's
 # forwarded verbatim to the remote `python -m pipeline.<step> <size>`, which
 # selects tsumegos/<size>/, attempts/<size>/, and the engine board dimensions.
-# The calibrate* steps are fixed-board auxiliary diagnostics and take no size.
 SIZE_REQUIRED_STEPS = {"tune", "generate", "benchmark", "losing_lines"}
 
 # Files uploaded from the local repo. We ship the CUDA katago build to the
 # remote (vast.ai NVIDIA GPUs); the local repo's bots/katago is OpenCL and is
-# not uploaded. utils/katago_controller.py reads KATAGO_PATH from the
+# not uploaded. utils/katago/controller.py reads KATAGO_PATH from the
 # environment, so we set that to bots/katago_cuda12 when launching the step.
 # THE CUDA VERSION IS IN THE NAME because the binary is not portable across
 # them: it links libcublas.so.<major>, so a host whose runtime is a different
@@ -91,10 +88,7 @@ MODEL_DOWNLOADS = {
 }
 
 # Output dirs to rsync back. Each contains per-size subdirs (e.g. tsumegos/13/).
-# calibration_19x19_sgf and calibration_handicap_sgf are the SGF dumps from
-# the calibrate19 / calibrate_handicap steps.
-REMOTE_OUTPUT_DIRS = ["tsumegos", "attempts",
-                      "calibration_19x19_sgf", "calibration_handicap_sgf"]
+REMOTE_OUTPUT_DIRS = ["tsumegos", "attempts"]
 
 # Freshly generated SGFs land HERE, not in tsumegos/<size>/, so that a generator
 # running on a schedule cannot change the corpus underneath work in progress.
@@ -114,9 +108,6 @@ TSUMEGO_STAGING = os.path.join("tsumegos", "new")
 # state dirs the step reads to resume incrementally. For benchmark, attempts/
 # holds prior bot results — uploading them lets test_bot skip already-processed
 # tsumegos and append only new entries (it already merges existing+new on write).
-# For calibrate_handicap, the rank fit and pair-selection priorities are
-# seeded from the existing SGF corpus; without these, the remote starts cold
-# and wastes games re-learning the kyu / dan gaps.
 # losing_lines is the one step whose input dir IS the corpus it works on. Run it
 # with `--out-dir tsumegos/fixed/<size>` so it writes beside its input instead of
 # over it: the uploaded tsumegos/<size>/ then never changes, which is what makes
@@ -125,13 +116,12 @@ TSUMEGO_STAGING = os.path.join("tsumegos", "new")
 STEP_INPUT_DIRS = {
     "benchmark": ["attempts"],
     "losing_lines": ["tsumegos"],
-    "calibrate_handicap": ["calibration_handicap_sgf"],
 }
 
 # Minimal pip deps for the remote steps. The full requirements.txt brings
-# torch/sklearn for rank+package, which we never run remotely. scipy is
-# needed only by calibrate_handicap (logistic MLE refit) but is cheap to
-# install, so we add it unconditionally rather than branching by step.
+# torch/sklearn for rank+package, which we never run remotely. scipy is not
+# needed by the generation steps; it is here because the `ablate` stack below
+# reaches it at import time and installs on top of this set.
 REMOTE_PIP_PACKAGES = ["sgfmill>=1.1.1", "numpy>=1.21.0", "scipy>=1.10.0"]
 
 # --- the refit-tier ablation panel (`ablate`) ------------------------------
