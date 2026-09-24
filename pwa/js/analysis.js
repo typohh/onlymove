@@ -8,48 +8,11 @@ import { loadSgf, playMoveOnBranch, undoMove, getCurrentNode, redraw } from './b
 import { updateAnalysisUI, updateAllUI } from './ui.js';
 import { playStoneSound } from './audio.js';
 import { getTerm } from './i18n.js';
-import { getScoreFromComment, getWinrateFromComment, formatEvalComment, setEvalComment } from './sgf.js';
+import { getScoreFromComment, getWinrateFromComment, formatEvalComment, setEvalComment, subtreeReachesConclusion } from './sgf.js';
 import { APP_MODES, ANALYSIS_STATUS } from './constants.js';
 import { populateMotifBubble } from './motif-bubble.js';
 import { onEnterReview as onboardingEnterReview } from './onboarding.js';
 
-
-/**
- * Whether `node` is a branch the pipeline played out to a DOUBLE PASS.
- *
- * Follows children[0]: the pipeline appends children in its candidate order and
- * always recurses into the first, so the first child IS the continuation it
- * followed. Measured on rebuilt 13x13 files this holds for 120/120 answers and
- * 120/120 best refutations, and accepts 0 of 10,645 other root variations.
- *
- * Two cheaper-looking tests are both wrong, and were measured to be. "A pass
- * appears somewhere in the subtree" is the deduction behind two corpus purges.
- * "A pass-PAIR appears somewhere" is not much better: the pipeline's shallow
- * sweep writes a move and its best response, so a pass answered by a pass
- * manufactures the shape with nothing played out — 32,445 extra children. And
- * following the highest-visit child drifts off the line entirely, because the
- * engine ranks its candidates by LCB rather than raw visits.
- *
- * This says the line was PLAYED OUT, not that it resolves the way the problem
- * claims — 7.5% of principal lines end with the solver losing. Whether a
- * resolved line is a win is read from the evaluation, not from here.
- */
-function subtreeReachesConclusion(node) {
-    if (!node) return false;
-    const isPass = (n) => !!(n.move && n.move.pass);
-    let n = node;
-    let prevWasPass = isPass(node);
-    // The pipeline caps a variation at MAX_VARIATION_DEPTH = 800 plies.
-    for (let step = 0; step < 802; step++) {
-        const kids = (n.children || []).filter(c => c.move);
-        if (kids.length === 0) return false;
-        n = kids[0];
-        const cur = isPass(n);
-        if (cur && prevWasPass) return true;
-        prevWasPass = cur;
-    }
-    return false;
-}
 
 /**
  * Initializes and enters the analysis mode.

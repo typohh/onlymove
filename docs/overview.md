@@ -53,7 +53,7 @@ Knowing what the system does *not* do prevents most wrong turns.
 - **No accounts in the usual sense.** No email, no password, no session. A short code identifies a profile and anyone holding it holds the profile. Signing in with Google is a way to look that code up again, not a second kind of account.
 - **No server-side personalization.** The server does not decide what a player sees. If you find yourself wanting it to, the reason is usually that some client state was not made durable enough.
 - **No per-user model state anywhere.** Every personal quantity is a function of the player's history. Nothing is carried forward, warmed up or annealed, so nothing can be corrupted into a state it cannot leave.
-- **No test suite and no CI.** Verification is manual: run the pipeline step and read its diagnostics, or run the app locally and exercise the path.
+- **No CI, and tests only where two implementations must agree.** `tests/` holds each Python function and its JavaScript mirror to the same answer, and checks the one-way import boundary inside `utils/`. Everything else is verified manually: run the pipeline step and read its diagnostics, or run the app locally and exercise the path; the ablations re-measure the fits and the published figures.
 - **No automatic deploys.** Publishing the data and deploying the app are two separate manual acts, and they can be out of step.
 - **No curriculum, no difficulty tiers, no hand-labelled tags.** Every label in the app is either measured or generated.
 

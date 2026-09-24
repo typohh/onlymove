@@ -47,7 +47,7 @@ export function getVisitsFromComment(comment) {
   if (match) {
     return parseInt(match[1], 10);
   }
-  return comment.match(/%\//) ? 30 : null;
+  return comment.match(/-?[\d.]+%\/-?[\d.]+/) ? 30 : null;
 }
 
 /**
@@ -125,6 +125,46 @@ export function setEvalComment(node, winrate, score, visits) {
   }
   node.comment = formatEvalComment(winrate, score, visits);
   return true;
+}
+
+/**
+ * Whether `node` is a branch the pipeline played out to a DOUBLE PASS.
+ *
+ * Follows children[0]: the pipeline appends children in its candidate order and
+ * always recurses into the first, so the first child IS the continuation it
+ * followed. Measured on rebuilt 13x13 files this holds for 120/120 answers and
+ * 120/120 best refutations, and accepts 0 of 10,645 other root variations.
+ *
+ * Two cheaper-looking tests are both wrong, and were measured to be. "A pass
+ * appears somewhere in the subtree" is the deduction behind two corpus purges.
+ * "A pass-PAIR appears somewhere" is not much better: the pipeline's shallow
+ * sweep writes a move and its best response, so a pass answered by a pass
+ * manufactures the shape with nothing played out — 32,445 extra children. And
+ * following the highest-visit child drifts off the line entirely, because the
+ * engine ranks its candidates by LCB rather than raw visits.
+ *
+ * This says the line was PLAYED OUT, not that it resolves the way the problem
+ * claims — 7.5% of principal lines end with the solver losing. Whether a
+ * resolved line is a win is read from the evaluation, not from here.
+ *
+ * Mirrors subtree_reaches_conclusion in utils/katago/add_variations.py; the two
+ * must agree, and tests/test_js_twins_sgf.py holds them to it.
+ */
+export function subtreeReachesConclusion(node) {
+    if (!node) return false;
+    const isPass = (n) => !!(n.move && n.move.pass);
+    let n = node;
+    let prevWasPass = isPass(node);
+    // The pipeline caps a variation at MAX_VARIATION_DEPTH = 800 plies.
+    for (let step = 0; step < 802; step++) {
+        const kids = (n.children || []).filter(c => c.move);
+        if (kids.length === 0) return false;
+        n = kids[0];
+        const cur = isPass(n);
+        if (cur && prevWasPass) return true;
+        prevWasPass = cur;
+    }
+    return false;
 }
 
 // Standard Go board notation: column letters skip 'I' (A..H, J..T), row is

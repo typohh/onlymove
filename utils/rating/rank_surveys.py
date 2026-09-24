@@ -67,12 +67,13 @@ def rank_to_value(s):
     "1d" -> 0.5, "9d" -> 8.5. Code wanting the band's LOWER edge subtracts 0.5."""
     if not isinstance(s, str):
         return None
-    s = s.strip().lower()
-    m = re.fullmatch(r"(\d{1,2})([kd])", s)
+    m = re.fullmatch(r"\s*(\d{1,2})\s*([kd])\s*", s, flags=re.IGNORECASE)
     if not m:
         return None
     n = int(m.group(1))
-    return (0.5 - n) if m.group(2) == "k" else (n - 0.5)
+    if n < 1:
+        return None
+    return (0.5 - n) if m.group(2).lower() == "k" else (n - 0.5)
 
 
 def rank_band(v):
