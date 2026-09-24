@@ -353,16 +353,19 @@ CREATE TABLE IF NOT EXISTS leaderboard (
 -- MONTHLY HISTORY. One row per finished UTC calendar month, written by the
 -- month-change cron (recordMonthlyLeaderboards) from the rows whose
 -- `best_rank_month` is that month. `data` is a JSON array of `[user_id,
--- best_rank, best_rank_timed]` — RAW user ids by design: the snapshot must not
--- bake in an identity, since a linked name can change or be unlinked, a
+-- best_rank, best_rank_timed, country]` — RAW user ids by design: the snapshot
+-- must not bake in an identity, since a linked name can change or be unlinked, a
 -- self-chosen alias can be re-picked, and a profile can be hidden AFTER the
 -- month closed, and all three have to be respected by a later read. The page
 -- resolves identity on the fly off external_ids / user_aliases /
--- hidden_profiles. A month is written once (the cron no-ops when the row
+-- hidden_profiles. `country` is the exception: the flag the weekly board would
+-- show, BAKED at the freeze (its geo-IP source is pruned with the live row);
+-- the read prefers the current one while the live row survives, and withholds
+-- either from a hidden profile. A month is written once (the cron no-ops when the row
 -- exists), so a snapshot does not drift as the live rows are pruned or reset.
 CREATE TABLE IF NOT EXISTS monthly_leaderboards (
     month      TEXT PRIMARY KEY,   -- 'YYYY-MM' (UTC)
-    data       TEXT NOT NULL,      -- JSON [[user_id, best_rank, best_rank_timed], ...]
+    data       TEXT NOT NULL,      -- JSON [[user_id, best_rank, best_rank_timed, country], ...]
     created_at TEXT NOT NULL
 );
 

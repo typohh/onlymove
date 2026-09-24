@@ -433,6 +433,23 @@ function parseDeclared(json) {
         .sort((a, b) => (a.server < b.server ? -1 : a.server > b.server ? 1 : 0));
 }
 
+// The ONE country a row shows. Precedence: the 'EGD' heartbeat (the EGD federation
+// code, refetched weekly — the most reliable) → the binding (EGD, frozen at link
+// time) → the leaderboard row (edge geo-IP, stamped on every /report — the universal
+// fallback that gives ANY active player a flag) → a human survey (older geo-IP).
+// `row` carries `declared`, `country_code` (external_ids) and `country` (leaderboard).
+// The weekly board resolves it on read; the monthly freeze BAKES its result into the
+// snapshot, since the live row holding the geo-IP is pruned after the month.
+export function resolveRowCountry(row) {
+    let egd = null, survey = null;
+    for (const d of parseDeclared(row.declared)) {
+        if (!d.country) continue;
+        if (d.server === 'EGD') egd = d.country;
+        else if (!survey) survey = d.country;
+    }
+    return egd || row.country_code || row.country || survey || null;
+}
+
 // --- EGD lookup -----------------------------------------------------------------
 // Public JSON, no key. Returns { egd_name, gor, country_code } or null on a network
 // error / non-Ok retcode (callers keep the last known value on a transient miss).
@@ -983,18 +1000,11 @@ export async function readLeaderboardRows(env, { activeDays = 7 } = {}) {
         if (rank === null) { belowMin++; continue; }
         // External ranks: the machine heartbeats ('EGD' GoR, 'AGAR' AGA rating) and
         // the player's own survey declarations, which the Declared column shows for
-        // every system they have no linked account on. Country is harvested in the
-        // same pass — the 'EGD' heartbeat's country is the EGD federation code (the
-        // most reliable, since it comes from EGD), a human survey's is Cloudflare
-        // geo-IP. All skipped entirely for a hidden user — their ranks and country
-        // are exactly what they've opted to hide.
+        // every system they have no linked account on. Skipped entirely for a hidden
+        // user — their ranks are exactly what they've opted to hide.
         let egd = null;             // { gor, label, lastGameAt } — verified EGD data
         let aga = null;             // { rating, label, lastGameAt } — verified AGA data
-        let egdCountry = null;      // 'EGD' heartbeat — EGD federation code (reliable)
-        let surveyCountry = null;   // any human survey row — Cloudflare geo-IP
         const declared = new Map(); // system -> the player's own latest declared label
-        // The 'EGD' heartbeat carries the EGD federation code, other servers the
-        // geo-IP country.
         if (!isHidden) for (const d of parseDeclared(r.declared)) {
             if (d.server === 'EGD') {
                 const gor = parseInt(d.rank, 10);
@@ -1005,7 +1015,6 @@ export async function readLeaderboardRows(env, { activeDays = 7 } = {}) {
                         lastGameAt: isoDateOrNull(d.last_game_at),
                     };
                 }
-                if (d.country) egdCountry = d.country;
             } else if (d.server === 'AGAR') {
                 // New-format heartbeats store the raw AGA rating in `rank`; legacy
                 // rows stored the label ("5d" -> NaN here) and read as rating-less.
@@ -1021,7 +1030,6 @@ export async function readLeaderboardRows(env, { activeDays = 7 } = {}) {
                 // A human declaration. Unknown/retired system names are ignored —
                 // `decl` is keyed by the systems we hold a coupling for.
                 if (RANK_MAP && RANK_MAP[d.server]) declared.set(d.server, d.rank);
-                if (d.country && !surveyCountry) surveyCountry = d.country;
             }
         }
         // EGF activity criterion: an inactive rating (last tournament too long ago for
@@ -1067,14 +1075,9 @@ export async function readLeaderboardRows(env, { activeDays = 7 } = {}) {
             if (Number.isFinite(v)) decl.AGA = { v, exact: true };
         }
         // A hidden user is stripped of name/country and reported as unlinked, so the
-        // page renders them as an anonymous ranked row. Country falls back GoR (EGD, most
-        // reliable) → the binding (EGD, frozen at link time) → leaderboard row (edge geo-IP,
-        // stamped on every /report — the universal fallback that gives ANY active player a
-        // flag) → survey (older geo-IP), so the flag shows for anyone with a country from
-        // any source, not just linked rows.
+        // page renders them as an anonymous ranked row.
         const name = isHidden ? null : r.display_name;
-        const country = isHidden ? null
-            : (egdCountry || r.country_code || r.country || surveyCountry || null);
+        const country = isHidden ? null : resolveRowCountry(r);
         const registered = isHidden ? false : !!r.registered;
         // The self-chosen alias, withheld from a hidden profile exactly like the
         // name and the declared ranks. It rides ALONGSIDE `registered` rather
@@ -1138,9 +1141,12 @@ export function monthlyPeaksFromAttempts(attempts, params) {
 // The month-change cron (src/index.js). FREEZES the calendar month that just
 // ended: every row whose `best_rank_month` is that month — i.e. a user who was
 // active in it and reached the list-entry gate at some point — becomes one JSON
-// entry `[user_id, best_rank, best_rank_timed]`. The raw user id is stored, NOT a
-// name: identity is resolved at READ time so an unlink, an alias re-pick or a hide
-// applies to history too.
+// entry `[user_id, best_rank, best_rank_timed, country]`. The raw user id is
+// stored, NOT a name: identity is resolved at READ time so an unlink, an alias
+// re-pick or a hide applies to history too. The country is the exception, BAKED
+// as the one the weekly board shows (resolveRowCountry): its geo-IP source lives on
+// the live row, which the prune removes. It is baked for hidden users too and
+// withheld at read, so an un-hide restores it.
 //
 // IDEMPOTENT and self-healing: the month is written once and the cron no-ops for
 // the rest of the month, so a missed hourly tick is repaired by the next one
@@ -1161,8 +1167,11 @@ export async function recordMonthlyLeaderboards(env, { nowMs = Date.now() } = {}
         ).bind(month).first();
         if (seen) return null;
         const res = await env.DB.prepare(
-            `SELECT user_id, best_rank, best_rank_timed FROM leaderboard
-              WHERE best_rank_month = ?1 AND best_rank IS NOT NULL`
+            `SELECT l.user_id, l.best_rank, l.best_rank_timed, l.country, l.declared,
+                    x.country_code
+               FROM leaderboard l
+               LEFT JOIN external_ids x ON x.user_id = l.user_id
+              WHERE l.best_rank_month = ?1 AND l.best_rank IS NOT NULL`
         ).bind(month).all();
         const entries = ((res && res.results) || [])
             .filter((r) => Number.isFinite(Number(r.best_rank)))
@@ -1170,6 +1179,7 @@ export async function recordMonthlyLeaderboards(env, { nowMs = Date.now() } = {}
                 r.user_id,
                 Number(r.best_rank),
                 Number.isFinite(Number(r.best_rank_timed)) ? Number(r.best_rank_timed) : null,
+                resolveRowCountry(r),
             ]);
         // No entries: do NOT create the row. An empty month has no board to show,
         // and offering one in the period selector is worse than omitting it — this
@@ -1216,8 +1226,10 @@ export async function listMonthlyLeaderboards(env) {
 // Identity is stitched here, off the same three small tables the weekly board
 // reads, and ONLY for the ids in the blob: a hidden profile withholds name, alias
 // and country exactly as it does live, and a row with neither a linked name nor an
-// alias renders Anonymous. `country` therefore comes from the binding alone (the
-// live row's geo-IP fallback is not part of the frozen data).
+// alias renders Anonymous. `country` is the CURRENT one (resolveRowCountry) while
+// the user's live row survives, else the snapshot's baked one (the entry's fourth
+// element; absent in a pre-country snapshot) — withheld from a hidden user either
+// way. The live rows are fetched for the blob's ids only, by primary key.
 export async function readMonthlyLeaderboard(env, month) {
     if (!env.DB) return { rows: [], users: 0 };
     const res = await env.DB.prepare(
@@ -1229,11 +1241,17 @@ export async function readMonthlyLeaderboard(env, month) {
     if (!Array.isArray(entries) || !entries.length) return { rows: [], users: 0 };
     const ids = new Set(entries.map((e) => (Array.isArray(e) ? e[0] : null)).filter(Boolean));
 
-    const [xres, ares, hres] = await Promise.all([
+    const [xres, ares, hres, lres] = await Promise.all([
         env.DB.prepare(`SELECT user_id, display_name, country_code FROM external_ids`).all(),
         env.DB.prepare(`SELECT user_id, adjective, color, animal FROM user_aliases`).all(),
         env.DB.prepare(`SELECT user_id FROM hidden_profiles`).all(),
+        env.DB.prepare(
+            `SELECT user_id, country, declared FROM leaderboard
+              WHERE user_id IN (SELECT value FROM json_each(?1))`
+        ).bind(JSON.stringify([...ids])).all(),
     ]);
+    const live = new Map();
+    for (const l of ((lres && lres.results) || [])) live.set(l.user_id, l);
     const hidden = new Set();
     for (const h of ((hres && hres.results) || [])) hidden.add(h.user_id);
     const ident = new Map();
@@ -1263,7 +1281,10 @@ export async function readMonthlyLeaderboard(env, month) {
         rows.push({
             name: isHidden ? null : (x ? x.display_name : null),
             registered: !isHidden && !!x,
-            country: isHidden ? null : ((x && x.country_code) || null),
+            country: isHidden ? null
+                : live.has(userId)
+                    ? resolveRowCountry({ ...live.get(userId), country_code: x ? x.country_code : null })
+                    : (normalizeCountry(e[3]) || null),
             alias: (!isHidden && a) ? { adjective: a.adjective, color: a.color, animal: a.animal } : null,
             currentInternal: bestRank,
             est,

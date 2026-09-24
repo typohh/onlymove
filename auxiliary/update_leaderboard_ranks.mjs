@@ -216,7 +216,8 @@ async function loadLeaderboardModule() {
         stdin: {
             contents: `
                 export { computeRank, serializeBuffer, RANK_START_MIN, BUFFER_CAP, monthlyPeak,
-                         monthlyPeaksFromAttempts, monthKeyAt, declaredJsonSql } from './src/leaderboard.js';
+                         monthlyPeaksFromAttempts, monthKeyAt, declaredJsonSql,
+                         resolveRowCountry } from './src/leaderboard.js';
                 export { rankToLabel } from './shared/rank-math.js';
             `,
             resolveDir: PWA_DIR,
@@ -812,12 +813,41 @@ async function main() {
             }
             if (++replayed % 250 === 0) console.log(`  ${replayed}/${histUsers.length}...`);
         }
+        // Each entry's baked country (see recordMonthlyLeaderboards), in the read's
+        // own precedence: a user whose live row survives gets its current country;
+        // otherwise the one already in the month's snapshot, resolved at the freeze
+        // while that row still held the geo-IP; otherwise what survives of the rest —
+        // the binding and the declared cache recomputed from rank_surveys.
+        const bakedCountry = new Map();  // month -> Map<userId, country>
+        const hasMonthly = sqliteJson(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='monthly_leaderboards'").length > 0;
+        if (hasMonthly) for (const { month, data } of sqliteJson('SELECT month, data FROM monthly_leaderboards')) {
+            let arr = [];
+            try { arr = JSON.parse(data) || []; } catch { arr = []; }
+            const m = new Map();
+            for (const e of arr) if (Array.isArray(e) && typeof e[3] === 'string' && e[3]) m.set(e[0], e[3]);
+            bakedCountry.set(month, m);
+        }
+        const freshCountry = new Map();  // userId -> { country, live }
+        for (const r of sqliteJson(
+            `SELECT u.user_id, l.country, x.country_code, ${lb.declaredJsonSql('u.user_id')} AS declared,
+                    (l.user_id IS NOT NULL) AS live
+               FROM (SELECT DISTINCT user_id FROM tsumego_reports WHERE is_repeat = 0) u
+               LEFT JOIN leaderboard l ON l.user_id = u.user_id
+               LEFT JOIN external_ids x ON x.user_id = u.user_id`
+        )) freshCountry.set(r.user_id, { country: lb.resolveRowCountry(r), live: !!r.live });
         const nowIso = new Date().toISOString();
         const orderedMonths = [...months.keys()].sort();
-        let entryCount = 0;
+        let entryCount = 0, withCountry = 0;
         for (const month of orderedMonths) {
+            const baked = bakedCountry.get(month);
             const entries = [...months.get(month).entries()]
-                .map(([u, p]) => [u, p.rank, Number.isFinite(p.timed) ? p.timed : null]);
+                .map(([u, p]) => {
+                    const f = freshCountry.get(u) || { country: null, live: false };
+                    const country = (f.live ? f.country : (baked && baked.get(u)) || f.country) || null;
+                    if (country) withCountry++;
+                    return [u, p.rank, Number.isFinite(p.timed) ? p.timed : null, country];
+                });
             entryCount += entries.length;
             statements.push(
                 `INSERT INTO monthly_leaderboards (month, data, created_at) `
@@ -837,7 +867,8 @@ async function main() {
                 + `WHERE user_id = ${sqlStr(u)};`
             );
         }
-        console.log(`history: ${orderedMonths.length} finished month(s), ${entryCount} entries; `
+        console.log(`history: ${orderedMonths.length} finished month(s), ${entryCount} entries `
+            + `(${withCountry} with a country); `
             + `${currentRows} live row(s) get the ${curMonth} peak (${((Date.now() - t0) / 1000).toFixed(0)}s)`);
         if (!orderedMonths.length) {
             console.warn('history: no finished months reconstructed — nothing to write to monthly_leaderboards');
