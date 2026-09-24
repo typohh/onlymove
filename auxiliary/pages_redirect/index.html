@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<link rel="canonical" href="https://onlymove.net/">
+<title>Only Move has moved</title>
+<style>
+  :root { --bg: #f4efe6; --fg: #2b2620; --muted: #6b6258; --card: #fffdf8; --line: #d9cfbf; --accent: #2b2620; --accent-fg: #fffdf8; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #1c1a17; --fg: #ece5d8; --muted: #a39a8c; --card: #26231f; --line: #3d3831; --accent: #ece5d8; --accent-fg: #1c1a17; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 16px;
+         background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 440px; width: 100%; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 24px; }
+  h1 { font-size: 1.3rem; margin: 0 0 12px; }
+  p { margin: 0 0 12px; }
+  .muted { color: var(--muted); font-size: 0.9rem; }
+  .code { display: flex; gap: 8px; align-items: center; margin: 16px 0; }
+  .code output { flex: 1; font: 600 1.4rem/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0.08em;
+                 padding: 12px; border: 1px dashed var(--line); border-radius: 8px; text-align: center; user-select: all; }
+  button, a.go { font: inherit; border-radius: 8px; padding: 10px 14px; cursor: pointer; }
+  button { background: transparent; color: var(--fg); border: 1px solid var(--line); }
+  a.go { display: block; text-align: center; text-decoration: none; background: var(--accent); color: var(--accent-fg); margin-top: 16px; }
+  [hidden] { display: none; }
+</style>
+</head>
+<body>
+<main id="notice" hidden>
+  <h1 data-t="title"></h1>
+  <p data-t="moved"></p>
+  <p data-t="codeIntro"></p>
+  <div class="code"><output id="code"></output><button id="copy" type="button" data-t="copy"></button></div>
+  <p data-t="howTo"></p>
+  <p class="muted" data-t="install"></p>
+  <a class="go" id="go" href="https://onlymove.net/" data-t="go"></a>
+</main>
+<script>
+// onlymove.pages.dev is the app's retired address. Its old client wrote
+// attempts without the account-sync digest, so this deployment replaces it.
+// The account code lives in THIS origin's localStorage and cannot be carried
+// to onlymove.net (a credential does not belong in a URL), so a player who has
+// one is shown it once before being sent on; anyone else is redirected at once.
+(function () {
+  var TARGET = 'https://onlymove.net/';
+  var SEEN_KEY = 'movedNoticeShown';
+  var T = {
+    en: { title: 'Only Move has moved', moved: 'The app now lives at onlymove.net. This old address no longer saves your answers.',
+          codeIntro: 'Your account code on this old address is:', copy: 'Copy', copied: 'Copied',
+          howTo: 'To keep your history and rank, open onlymove.net and enter this code under Menu → More → Account.',
+          install: 'If you added this app to your home screen, remove it and add onlymove.net instead.', go: 'Continue to onlymove.net' },
+    zh: { title: 'Only Move 已搬家', moved: '应用现已迁至 onlymove.net。此旧地址不再保存你的答题记录。',
+          codeIntro: '你在此旧地址上的账户代码是：', copy: '复制', copied: '已复制',
+          howTo: '要保留你的历史记录和段位，请打开 onlymove.net，并在 菜单 → 更多 → 账户 中输入此代码。',
+          install: '如果你曾把此应用添加到主屏幕，请删除它，改为添加 onlymove.net。', go: '前往 onlymove.net' },
+    ja: { title: 'Only Move は移転しました', moved: 'アプリは onlymove.net に移りました。この旧アドレスでは解答が保存されなくなりました。',
+          codeIntro: 'この旧アドレスでのアカウントコード：', copy: 'コピー', copied: 'コピーしました',
+          howTo: '履歴と段級位を引き継ぐには、onlymove.net を開き、メニュー → その他 → アカウント でこのコードを入力してください。',
+          install: 'このアプリをホーム画面に追加している場合は削除し、onlymove.net を追加し直してください。', go: 'onlymove.net へ進む' },
+    ko: { title: 'Only Move가 이전했습니다', moved: '앱이 onlymove.net으로 옮겨졌습니다. 이 이전 주소에서는 더 이상 답이 저장되지 않습니다.',
+          codeIntro: '이 이전 주소에서의 계정 코드:', copy: '복사', copied: '복사됨',
+          howTo: '기록과 급수를 유지하려면 onlymove.net을 열고 메뉴 → 더 보기 → 계정에서 이 코드를 입력하세요.',
+          install: '이 앱을 홈 화면에 추가했다면 삭제하고 onlymove.net을 다시 추가하세요.', go: 'onlymove.net으로 이동' }
+  };
+  var code = null, seen = false;
+  try { code = localStorage.getItem('userId'); seen = localStorage.getItem(SEEN_KEY) === '1'; } catch (e) {}
+  if (!code || !/^[A-Za-z0-9_-]{8}$/.test(code) || seen) { location.replace(TARGET); return; }
+
+  var lang = (navigator.language || 'en').slice(0, 2).toLowerCase();
+  var t = T[lang] || T.en;
+  document.documentElement.lang = T[lang] ? lang : 'en';
+  document.title = t.title;
+  var nodes = document.querySelectorAll('[data-t]');
+  for (var i = 0; i < nodes.length; i++) nodes[i].textContent = t[nodes[i].getAttribute('data-t')];
+  document.getElementById('code').textContent = code;
+  document.getElementById('notice').hidden = false;
+
+  document.getElementById('copy').addEventListener('click', function () {
+    var btn = this;
+    var done = function () { btn.textContent = t.copied; };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(code).then(done, function () {});
+  });
+  document.getElementById('go').addEventListener('click', function () {
+    try { localStorage.setItem(SEEN_KEY, '1'); } catch (e) {}
+  });
+})();
+</script>
+</body>
+</html>
