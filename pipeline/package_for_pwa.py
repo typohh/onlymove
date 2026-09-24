@@ -993,14 +993,13 @@ def emit_se_floor_curve(output_dir):
     Emitted from the same ratings CSVs as problem_params.bin, every run, before
     compute_data_version so its bytes cache-bust with everything else.
 
-    Expect a narrow RIDGE of high information (low floor) at the bottom of M's knot
-    range — currently rank -20, M's leftmost knot. Information is a_p²/M'², and M's
-    first interval is far shallower in rank-per-rating than its second, so slope in
-    rank space roughly doubles across that one knot while a_p is still large. It is a
-    property of the shipped curve, reproduced faithfully here rather than smoothed
-    away: the per-attempt information the estimator itself accumulates has the same
-    ridge, so flattening it here would make the floor disagree with the se it is a
-    floor ON. Do not widen the kernel to hide it — see se_floor.SE_FLOOR_MIN_EFFECTIVE."""
+    The curve's shape IS the floor's shape: information is a_p²/M'², so it is highest
+    (the floor tightest) wherever a rank spans the most rating — M's two ends — and
+    lowest where ranks are cheapest. Whatever structure M has is reproduced here
+    faithfully rather than smoothed away: the per-attempt information the estimator
+    itself accumulates has the same structure, so flattening it here would make the
+    floor disagree with the se it is a floor ON. Do not widen the kernel to hide any
+    of it — see se_floor.SE_FLOOR_MIN_EFFECTIVE."""
     ratings_root = os.path.join(PROJECT_ROOT, RATINGS_ROOT)
     curve_path = os.path.join(output_dir, "tsumegos", "rating_to_rank.json")
     with open(curve_path) as f:

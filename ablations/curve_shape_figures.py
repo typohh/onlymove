@@ -12,10 +12,11 @@ Two conversions matter and neither is re-derived here.
 
   A SEGMENT COST is the rating distance between two neighbouring rank knots,
   divided by the rank distance between them — rating units per rank, local to
-  that stretch of the ladder. Its reciprocal is the curve's gradient in rank per
-  rating unit, which is what turns a problem's discrimination into a rank-space
-  slope, and therefore what makes the information (and the floor below) jump
-  across a knot where the curve's steepness changes.
+  that stretch of the ladder (the knots sit at every band edge, so a segment is
+  one band). Its reciprocal is the curve's gradient in rank per rating unit, which
+  is what turns a problem's discrimination into a rank-space slope, and therefore
+  what the information (and the floor below) follows: where a rank costs more
+  rating, each problem says more about rank and the floor is tighter.
 
   A FLOOR is the standard error a full window at that rank would still leave.
   The shipped curve carries mean per-attempt INFORMATION, because information is
@@ -67,11 +68,6 @@ POPULATION_PATH = os.path.join(TSUMEGOS_DIR, "population_constants.json")
 DAN_LO, DAN_HI = 0.0, 9.0            # the 1d…9d bands
 MIDKYU_LO, MIDKYU_HI = -15.0, -5.0   # the 15k…6k bands
 
-# The weak-end trough is read within this many ranks of the rating→rank curve's
-# WEAKEST knot. It has to be a neighbourhood of that knot rather than "the lowest
-# floor on the kyu side": the curve has a second information ridge at the 1k/1d
-# boundary, whose floor is lower still, and the two are different features.
-TROUGH_HALF_WIDTH = 2.0
 
 
 def _load_curve():
@@ -139,10 +135,6 @@ def measure():
     require(dan.any(), "the SE-floor grid does not reach the dan range")
     require(midkyu.any(), "the SE-floor grid does not reach the middle kyus")
     weak_knot = float(ranks[0])
-    trough = np.abs(grid - weak_knot) <= TROUGH_HALF_WIDTH
-    require(trough.any(),
-            "the SE-floor grid has no knot near the rating→rank curve's weakest knot")
-    trough_i = int(np.argmin(np.where(trough, floors, np.inf)))
 
     return {
         "n_knots": int(ranks.size),
@@ -155,13 +147,12 @@ def measure():
         "cost_dan_max": float(cost[dan_seg].max()),
         "cost_dan_mean": float(cost[dan_seg].mean()),
         "cost_weak_edge": float(cost[0]),
-        "gradient_ratio": float(cost[0] / cost[1]),   # rank-per-rating, second ÷ first
         "floor_dan_min": float(floors[dan].min()),
         "floor_dan_mean": float(floors[dan].mean()),
         "floor_midkyu_max": float(floors[midkyu].max()),
         "floor_midkyu_mean": float(floors[midkyu].mean()),
-        "floor_trough": float(floors[trough_i]),
-        "floor_trough_at": float(grid[trough_i]),
+        "floor_peak": float(floors.max()),
+        "floor_peak_at": float(grid[int(np.argmax(floors))]),
         "floor_grid_lo": float(grid[0]),
         "floor_grid_hi": float(grid[-1]),
     }
@@ -194,9 +185,6 @@ def figures():
                "widest dan-range segment ÷ the curve's cheapest segment"),
         Figure("curve.rating_per_rank_weak_edge", m["cost_weak_edge"], ".2f",
                "rating units one rank costs on the outermost weak-side segment"),
-        Figure("curve.first_second_gradient_ratio", m["gradient_ratio"], ".1f",
-               "the curve's SECOND segment ÷ its FIRST in rank per rating unit — how "
-               "far a rank-space slope jumps across that one knot"),
         Figure("sefloor.dan_min", m["floor_dan_min"], ".2f",
                f"tightest SE floor over the dan range, in ranks — knots in {dan_span}"),
         Figure("sefloor.midkyu_max", m["floor_midkyu_max"], ".2f",
@@ -208,10 +196,6 @@ def figures():
                f"mean floor over the middle kyus ÷ mean floor over the dan range, each "
                f"an unweighted mean over that region's knots ({kyu_span}; {dan_span}) — "
                f"the TYPICAL kyu-vs-dan comparison, not the extremes"),
-        Figure("sefloor.weak_trough", m["floor_trough"], ".2f",
-               f"tightest SE floor within {TROUGH_HALF_WIDTH:.0f} ranks of the rating→rank "
-               f"curve's weakest knot, in ranks — the weak-end trough, which is a "
-               f"different feature from the ridge at the 1k/1d boundary"),
     ]
 
 
@@ -234,8 +218,6 @@ def main():
           f"({m['cost_weak_edge'] / m['cost_cheapest']:.1f}x the cheapest; "
           f"{'wider' if m['cost_weak_edge'] > m['cost_dan_max'] else 'no wider'} "
           f"than every dan segment)")
-    print(f"{'segment 2 / segment 1':>26}{m['gradient_ratio']:>10.4f}   "
-          f"in rank per rating unit — the jump in rank-space slope across that knot")
 
     print(f"\nSE floor: the standard error in RANKS a full at-rank window still leaves, "
           f"over the shipped\n  information curve's knots (internal rank "
@@ -252,10 +234,8 @@ def main():
     print(f"{'typical ratio':>26}"
           f"{m['floor_midkyu_mean'] / m['floor_dan_mean']:>10.4f}   "
           f"mean middle-kyu ÷ mean dan")
-    print(f"{'weak-end trough':>26}{m['floor_trough']:>10.4f}   "
-          f"at internal rank {m['floor_trough_at']:+.1f} "
-          f"({value_to_rank(m['floor_trough_at'])}), within {TROUGH_HALF_WIDTH:.0f} ranks "
-          f"of the curve's weakest knot")
+    print(f"{'loosest anywhere':>26}{m['floor_peak']:>10.4f}   "
+          f"at internal rank {m['floor_peak_at']:+.1f} ({value_to_rank(m['floor_peak_at'])})")
 
 
 if __name__ == "__main__":
