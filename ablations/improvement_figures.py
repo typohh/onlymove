@@ -1,38 +1,43 @@
 #!/usr/bin/env python3
 """How much players improve while using the app — the table pwa/about.html shows,
 measured two independent ways and split into double-digit kyu, single-digit kyu
-and dan.
+and dan, every change stated per 100 first-time problems solved.
 
-  Rating  each player's rank from the SHIPPED window estimator on their first
-          WINDOW first-time attempts against their latest WINDOW, for every player
-          with at least 2×WINDOW (so the two windows never overlap). The estimator
-          runs unmodified under node (`ablations/improvement.mjs`) on the published
-          problem parameters, so both windows are read on today's scale. It is the
-          posterior MEAN, not the shown rank: the display offset tracks how loose the
-          posterior is, which differs between a first and a latest window for reasons
-          that are not strength.
+  Rating  each player's rank from the SHIPPED window estimator on three windows of
+          WINDOW first-time attempts — their first, the one centred on the middle of
+          their history, and their latest — for every player with at least
+          3×WINDOW (so the windows never overlap). EARLY is first → middle, LATE is
+          middle → latest, and the problems a step spans are those between its two
+          windows' centres. The estimator runs unmodified under node
+          (`ablations/improvement.mjs`) on the published problem parameters, so every
+          window is read on today's scale. It is the posterior MEAN, not the shown
+          rank: the display offset tracks how loose the posterior is, which differs
+          between windows for reasons that are not strength.
   Survey  the rank a player declared on a server, first declaration against last,
-          for every (player, server) with declarations on two or more UTC days.
-          The declarations the rank mapping screened out as implausible
-          (`ratings/declaration_exclusions.csv`) void their whole (player, server)
-          pair. A player on several servers counts once, averaged over them.
+          for every (player, server) with declarations on two or more UTC days, over
+          the first-time problems solved between the two. The declarations the rank
+          mapping screened out as implausible (`ratings/declaration_exclusions.csv`)
+          void their whole (player, server) pair. A player on several servers counts
+          once, averaged over them.
 
-A player's band is the midpoint of their two readings, never the first alone: banding
-on the first reading puts the players it under-read in the weakest band, and they
-then "improve" by regression to the mean alone.
+A player's band is the midpoint of their first and last readings, never the first
+alone: banding on the first reading puts the players it under-read in the weakest
+band, and they then "improve" by regression to the mean alone.
 
-The change is normalised to 30 days as the band's mean change over its median days
-between readings (for the rating, between the two windows' middle attempts); its
-spread is the across-player SD scaled by the same factor. "Improved" is a gain of at
-least IMPROVED_RATING ranks on the continuous rating, and any gain on the survey,
-whose ranks are whole bands — so both count roughly one band's step.
+The rate is the band's TOTAL change over its TOTAL problems (mean change / mean
+problems × 100). Per player it would be dominated by whoever solved almost nothing
+between two readings, and over the median it credits them with problems they did not
+solve. Its spread is the across-player SD of the change scaled by the same factor.
+"Improved" is a gain of at least IMPROVED_RATING ranks on the continuous rating, and
+any gain on the survey, whose ranks are whole bands — so both count roughly one
+band's step.
 
-    improvement.window_problems                the WINDOW itself
-    improvement.{rating,survey}_{band}_n       players in the band
-    improvement.{rating,survey}_{band}_per30   mean change per 30 days, ranks
-    improvement.{rating,survey}_{band}_per30_sd  its across-player spread
-    improvement.{rating,survey}_{band}_improved  share of players who improved
-    improvement.{rating,survey}_days           median days between readings, all bands
+    improvement.window_problems                  the WINDOW itself
+    improvement.{rating,survey}_{band}_n         players in the band
+    improvement.rating_{band}_{early,late}_per100[_sd], _{early,late}_improved
+    improvement.survey_{band}_per100[_sd], survey_{band}_improved
+    improvement.rating_{early,late}_problems     median problems a step spans
+    improvement.survey_problems                  median problems between declarations
 
     ./.venv/bin/python3 -m ablations.improvement_figures
 """
@@ -63,9 +68,9 @@ PARAMS_BIN = os.path.join(PWA_ROOT, "tsumegos", "problem_params.bin")
 RATINGS_DIR = os.path.join(PROJECT_ROOT, "ratings")
 HELPER = os.path.join(PROJECT_ROOT, "ablations", "improvement.mjs")
 
-WINDOW = 150
+WINDOW = 100
 IMPROVED_RATING = 0.5
-PER_DAYS = 30
+PER_PROBLEMS = 100
 # Band edges on the internal rank scale (0 = the 1k/1d boundary, integers are band
 # EDGES): double-digit kyu is 10k and weaker, dan is 1d and stronger.
 DDK_BELOW = -9.0
@@ -76,10 +81,6 @@ BAND_LABEL = {"ddk": "DDK", "sdk": "SDK", "dan": "Dan"}
 
 def band_of(v):
     return "ddk" if v < DDK_BELOW else ("dan" if v >= DAN_FROM else "sdk")
-
-
-def _days(a, b):
-    return (np.datetime64(b[:23]) - np.datetime64(a[:23])) / np.timedelta64(1, "D")
 
 
 # --- rating ------------------------------------------------------------------------
@@ -94,12 +95,12 @@ def load_params():
             for row, v in zip(raw[:, :4], vals)}
 
 
-def rating_windows(params):
-    """Per player with at least 2×WINDOW usable first-time attempts, the first and
-    latest WINDOW of them. Deduped exactly as the leaderboard's buffer rebuild is
-    (GROUP BY problem, created_at keeps the ORIGINAL row), in insert order, and
-    restricted to problems still published — the estimator has nothing to read an
-    attempt on a retired problem with."""
+def usable_attempts(params, users=None):
+    """{user: [(rating, slope, floor, success, created_at), ...]} of first-time
+    attempts, deduped exactly as the leaderboard's buffer rebuild is (GROUP BY
+    problem, created_at keeps the ORIGINAL row), in insert order, and restricted to
+    problems still published — the estimator has nothing to read an attempt on a
+    retired problem with, and the survey counts problems on the same footing."""
     require(os.path.exists(DB_SQLITE), f"no {DB_SQLITE} — run pipeline.fetch_database")
     con = sqlite3.connect(f"file:{DB_SQLITE}?mode=ro", uri=True)
     try:
@@ -114,28 +115,38 @@ def rating_windows(params):
     require(rows, "tsumego_reports holds no first-time attempts")
     by_user = {}
     for user, problem, success, at in rows:
+        if users is not None and user not in users:
+            continue
         p = params.get(problem)
         if p is not None:
             by_user.setdefault(user, []).append((*p, 1 if success else 0, at))
+    return by_user
+
+
+def rating_windows(params):
+    """Per player with at least 3×WINDOW usable first-time attempts, the first,
+    middle and latest WINDOW of them, and the problems between consecutive windows'
+    centres."""
     players = []
-    for user, att in by_user.items():
-        if len(att) < 2 * WINDOW:
+    for user, att in usable_attempts(params).items():
+        n = len(att)
+        if n < 3 * WINDOW:
             continue
-        first, last = att[:WINDOW], att[-WINDOW:]
+        m0 = n // 2 - WINDOW // 2
         players.append({
-            "user": user,
-            "first": [a[:4] for a in first], "last": [a[:4] for a in last],
-            "days": _days(first[WINDOW // 2][4], last[WINDOW // 2][4]),
+            "windows": [[a[:4] for a in w] for w in
+                        (att[:WINDOW], att[m0:m0 + WINDOW], att[-WINDOW:])],
+            "early_problems": m0, "late_problems": n - WINDOW - m0,
         })
-    require(players, f"no player has {2 * WINDOW} usable first-time attempts")
+    require(players, f"no player has {3 * WINDOW} usable first-time attempts")
     return players
 
 
-def run_helper(players):
+def run_helper(windows):
+    """The shipped estimator's posterior-mean rank for each window."""
     node = shutil.which("node")
     require(node is not None, "no `node` on PATH — the client estimator runs under node")
     require(os.path.exists(HELPER), f"no {HELPER}")
-    windows = [w for p in players for w in (p["first"], p["last"])]
     with tempfile.TemporaryDirectory(prefix="improvement-") as tmp:
         path = os.path.join(tmp, "payload.json")
         with open(path, "w") as f:
@@ -151,20 +162,28 @@ def run_helper(players):
     require(len(rank) == len(windows),
             f"improvement.mjs returned {len(rank)} ranks for {len(windows)} windows")
     require(all(np.isfinite(r) for r in rank), "the estimator returned a non-finite rank")
-    return [{"first": rank[2 * i], "last": rank[2 * i + 1], "days": p["days"]}
-            for i, p in enumerate(players)]
+    return rank
 
 
-def measure_rating():
-    readings = run_helper(rating_windows(load_params()))
-    return [{"band": band_of((r["first"] + r["last"]) / 2), "change": r["last"] - r["first"],
-             "days": r["days"], "improved": r["last"] - r["first"] >= IMPROVED_RATING}
-            for r in readings]
+def measure_rating(params):
+    players = rating_windows(params)
+    rank = run_helper([w for p in players for w in p["windows"]])
+    out = []
+    for i, p in enumerate(players):
+        first, middle, last = rank[3 * i:3 * i + 3]
+        out.append({
+            "band": band_of((first + last) / 2),
+            "early": {"change": middle - first, "problems": p["early_problems"],
+                      "improved": middle - first >= IMPROVED_RATING},
+            "late": {"change": last - middle, "problems": p["late_problems"],
+                     "improved": last - middle >= IMPROVED_RATING},
+        })
+    return out
 
 
 # --- survey ------------------------------------------------------------------------
 
-def measure_survey():
+def measure_survey(params):
     """One entry per player who re-declared a server rank on a later day. The
     machine heartbeat rows (EGD, AGAR) share the table but are not declarations,
     and are left out by keeping SERVERS only."""
@@ -193,98 +212,127 @@ def measure_survey():
         if key in voided or len({at[:10] for _, at in decl}) < 2:
             continue
         (v0, a0), (v1, a1) = decl[0], decl[-1]
-        per_user.setdefault(key[0], []).append((v0, v1, _days(a0, a1)))
+        per_user.setdefault(key[0], []).append((v0, v1, a0, a1))
     require(per_user, "no player re-declared a server rank on a later day")
+    attempts = usable_attempts(params, set(per_user))
     out = []
-    for decl in per_user.values():
-        change = float(np.mean([v1 - v0 for v0, v1, _ in decl]))
-        mid = float(np.mean([(v0 + v1) / 2 for v0, v1, _ in decl]))
-        out.append({"band": band_of(mid), "change": change,
-                    "days": float(np.median([d for _, _, d in decl])),
-                    "improved": change > 0})
+    for user, decl in per_user.items():
+        att = attempts.get(user, [])
+        change = float(np.mean([v1 - v0 for v0, v1, _, _ in decl]))
+        mid = float(np.mean([(v0 + v1) / 2 for v0, v1, _, _ in decl]))
+        solved = float(np.mean([sum(1 for a in att if a0 < a[4] <= a1)
+                                for _, _, a0, a1 in decl]))
+        out.append({"band": band_of(mid), "all": {
+            "change": change, "problems": solved, "improved": change > 0}})
     return out, len(voided)
 
 
 # --- the table ---------------------------------------------------------------------
 
-def summarize(players, source):
+def rate(steps, source):
+    """Total change over total problems, per PER_PROBLEMS; see the module note."""
+    change = np.array([s["change"] for s in steps])
+    problems = np.array([s["problems"] for s in steps], dtype=float)
+    require(problems.mean() > 0, f"{source}: its players solved no problems between readings")
+    scale = PER_PROBLEMS / problems.mean()
+    return {"per100": float(change.mean()) * scale,
+            "per100_sd": float(change.std(ddof=1)) * scale,
+            "improved": float(np.mean([s["improved"] for s in steps])),
+            "problems": float(np.median(problems))}
+
+
+def summarize(players, source, phases):
     rows = {}
     for band in BANDS:
         g = [p for p in players if p["band"] == band]
         require(len(g) >= 2, f"{source}: {len(g)} players in {BAND_LABEL[band]}, "
                              "too few for a spread")
-        change = np.array([p["change"] for p in g])
-        days = float(np.median([p["days"] for p in g]))
-        require(days > 0, f"{source}: {BAND_LABEL[band]}'s median days between readings is {days}")
-        scale = PER_DAYS / days
-        rows[band] = {
-            "n": len(g), "days": days, "mean": float(change.mean()),
-            "per30": float(change.mean()) * scale,
-            "per30_sd": float(change.std(ddof=1)) * scale,
-            "improved": float(np.mean([p["improved"] for p in g])),
-        }
-    rows["days"] = float(np.median([p["days"] for p in players]))
+        rows[band] = {"n": len(g)}
+        for ph in phases:
+            rows[band][ph] = rate([p[ph] for p in g], f"{source} {BAND_LABEL[band]} {ph}")
+    for ph in phases:
+        rows[f"{ph}_problems"] = float(np.median([p[ph]["problems"] for p in players]))
     return rows
 
 
 def measure():
-    survey, n_voided = measure_survey()
-    return {"rating": summarize(measure_rating(), "rating"),
-            "survey": summarize(survey, "survey"), "voided": n_voided}
+    params = load_params()
+    survey, n_voided = measure_survey(params)
+    return {"rating": summarize(measure_rating(params), "rating", ("early", "late")),
+            "survey": summarize(survey, "survey", ("all",)), "voided": n_voided}
 
 
 def figures():
     m = measure()
+    rat, sur = m["rating"], m["survey"]
+    rating_what = (f"the shipped window estimator's rank over {WINDOW}-attempt windows, "
+                   "per 100 first-time problems")
+    survey_what = ("declared server rank, first against last declaration, per 100 "
+                   "first-time problems solved between them, screened declarations excluded")
     out = [Figure("improvement.window_problems", WINDOW, "d",
-                  "first-time attempts in each of the two windows the rating change "
-                  "compares (a player's first and latest)")]
-    what = {
-        "rating": "the shipped window estimator's rank, first against latest "
-                  f"{WINDOW} first-time attempts",
-        "survey": "declared server rank, first against last declaration, screened "
-                  "declarations excluded",
-    }
-    for source in ("rating", "survey"):
-        s = m[source]
-        fmt = "+.1f" if source == "rating" else "+.2f"
-        for band in BANDS:
-            r = s[band]
-            b = BAND_LABEL[band]
+                  "first-time attempts in each of the three windows the rating change "
+                  "compares (a player's first, middle and latest)")]
+    for band in BANDS:
+        b = BAND_LABEL[band]
+        out.append(Figure(f"improvement.rating_{band}_n", rat[band]["n"], "d",
+                          f"{b} players with {3 * WINDOW}+ first-time attempts"))
+        for ph, span in (("early", "first to middle window"),
+                         ("late", "middle to latest window")):
+            r = rat[band][ph]
             out += [
-                Figure(f"improvement.{source}_{band}_n", r["n"], "d",
-                       f"{b} players measured by {what[source]}"),
-                Figure(f"improvement.{source}_{band}_per30", r["per30"], fmt,
-                       f"{b}: mean change per {PER_DAYS} days in ranks, {what[source]}"),
-                Figure(f"improvement.{source}_{band}_per30_sd", r["per30_sd"], fmt[1:],
-                       f"{b}: across-player SD of that change, same scaling"),
-                Figure(f"improvement.{source}_{band}_improved", r["improved"], "%.0f",
-                       f"{b}: share of players who improved, {what[source]}"),
+                Figure(f"improvement.rating_{band}_{ph}_per100", r["per100"], "+.2f",
+                       f"{b}, {span}: band total change over total problems, {rating_what}"),
+                Figure(f"improvement.rating_{band}_{ph}_per100_sd", r["per100_sd"], ".2f",
+                       f"{b}, {span}: across-player SD of the change, same scaling"),
+                Figure(f"improvement.rating_{band}_{ph}_improved", r["improved"], "%.0f",
+                       f"{b}, {span}: share of players gaining {IMPROVED_RATING}+ rank"),
             ]
-        out.append(Figure(f"improvement.{source}_days", s["days"], ".0f",
-                          f"median days between the two readings, {what[source]}"))
+        r = sur[band]["all"]
+        out += [
+            Figure(f"improvement.survey_{band}_n", sur[band]["n"], "d",
+                   f"{b} players who re-declared a server rank on a later day"),
+            Figure(f"improvement.survey_{band}_per100", r["per100"], "+.2f",
+                   f"{b}: band total change over total problems, {survey_what}"),
+            Figure(f"improvement.survey_{band}_per100_sd", r["per100_sd"], ".2f",
+                   f"{b}: across-player SD of the declared change, same scaling"),
+            Figure(f"improvement.survey_{band}_improved", r["improved"], "%.0f",
+                   f"{b}: share of players whose declared rank rose"),
+        ]
+    out += [
+        Figure("improvement.rating_early_problems", rat["early_problems"], ".0f",
+               "median first-time problems between the first and middle windows' centres"),
+        Figure("improvement.rating_late_problems", rat["late_problems"], ".0f",
+               "median first-time problems between the middle and latest windows' centres"),
+        Figure("improvement.survey_problems", sur["all_problems"], ".0f",
+               "median first-time problems solved between a player's first and last "
+               "declaration"),
+    ]
     return out
 
 
 def main():
     m = measure()
+    rat, sur = m["rating"], m["survey"]
     print("\n" + "=" * 78)
-    print(f"Rating: shipped window-estimator rank, first vs latest {WINDOW} first-time "
-          f"attempts (players with {2 * WINDOW}+).")
+    print(f"Rating: shipped window-estimator rank on a player's first, middle and latest "
+          f"{WINDOW} first-time attempts (players with {3 * WINDOW}+); early = first → "
+          f"middle, late = middle → latest.")
     print(f"Survey: declared server rank, first vs last declaration on a later day; "
           f"{m['voided']} (player, server) pairs voided by the mapping's screen.")
-    print(f"Band = midpoint of the two readings. Per {PER_DAYS} days = mean change / "
-          f"median days × {PER_DAYS}; SD scaled the same.")
+    print(f"Band = midpoint of first and last readings. Per {PER_PROBLEMS} problems = "
+          f"band total change / total problems; SD scaled the same.")
     print(f"Improved = rating gain >= {IMPROVED_RATING} rank, survey gain > 0.\n")
-    print(f"  {'':<8}{'band':<6}{'players':>8}{'days':>7}{'mean':>8}"
-          f"{'per 30d':>10}{'sd':>8}{'improved':>10}")
-    for source in ("rating", "survey"):
-        for band in BANDS:
-            r = m[source][band]
-            print(f"  {source:<8}{BAND_LABEL[band]:<6}{r['n']:>8}{r['days']:>7.0f}"
-                  f"{r['mean']:>+8.2f}{r['per30']:>+10.2f}{r['per30_sd']:>8.2f}"
-                  f"{100 * r['improved']:>9.0f}%")
-        print(f"  {source:<8}median days between readings, all bands: "
-              f"{m[source]['days']:.0f}")
+    print(f"  {'band':<6}{'n':>5}{'early/100':>11}{'sd':>7}{'up':>6}"
+          f"{'late/100':>11}{'sd':>7}{'up':>6} |{'n':>5}{'survey/100':>12}{'sd':>7}{'up':>6}")
+    for band in BANDS:
+        e, l, s = rat[band]["early"], rat[band]["late"], sur[band]["all"]
+        print(f"  {BAND_LABEL[band]:<6}{rat[band]['n']:>5}"
+              f"{e['per100']:>+11.2f}{e['per100_sd']:>7.2f}{100 * e['improved']:>5.0f}%"
+              f"{l['per100']:>+11.2f}{l['per100_sd']:>7.2f}{100 * l['improved']:>5.0f}% |"
+              f"{sur[band]['n']:>5}{s['per100']:>+12.2f}{s['per100_sd']:>7.2f}"
+              f"{100 * s['improved']:>5.0f}%")
+    print(f"  median problems spanned: early {rat['early_problems']:.0f}, late "
+          f"{rat['late_problems']:.0f}, between declarations {sur['all_problems']:.0f}")
 
 
 if __name__ == "__main__":

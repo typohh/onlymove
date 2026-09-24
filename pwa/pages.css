@@ -210,6 +210,12 @@ tbody tr:nth-child(even) {
     background: var(--surface);
 }
 
+/* A wide numeric table: tighter gutters so its columns fit the page width
+   before the wrapper has to scroll. */
+table.compact th, table.compact td {
+    padding: 0.45rem 0.4rem;
+}
+
 /* --- Panels and the footer ------------------------------------------------ */
 .toc {
     margin: 2rem 0;
