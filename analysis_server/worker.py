@@ -221,12 +221,16 @@ def main():
     # waits out its full query timeout on a request that will never be answered.
     # The pipeline never meets this because each of its runs is single-size; a
     # server takes both. Overridden per-caller, so the tuner's own file is
-    # untouched.
+    # untouched. The NN cache is shrunk for the same reason: the config's is
+    # sized for pipeline batch runs, while here a cached position only pays off
+    # within one review session over a shared root — a problem is rarely
+    # reviewed again before its entries would have been evicted anyway.
     controller.start_engine(
         get_model(DEFAULT_MODEL), max(ALL_BOARD_SIZES),
         extra_overrides=(f"requireMaxBoardSize=false,"
                          f"numAnalysisThreads={POLL_THREADS},"
-                         f"numSearchThreadsPerAnalysisThread={SEARCH_THREADS}"))
+                         f"numSearchThreadsPerAnalysisThread={SEARCH_THREADS},"
+                         f"nnCacheSizePowerOfTwo=14"))
     try:
         warm_up(controller)
         threads = [threading.Thread(target=poll_loop, args=(controller,), daemon=True)
