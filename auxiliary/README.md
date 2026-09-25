@@ -49,7 +49,7 @@ Faithful offline ports of client code, for debugging one account against the loc
 
 ## Fleet stats
 
-- **`leaderboard_player_stats.mjs`** — per-player report over the leaderboard: novel attempt counts per board, median solve time, attempts/day, and the onlymove estimate against the verified EGF/AGA rating, with a summary correlation. `--with-unlinked`.
+- **`leaderboard_player_stats.mjs`** — per-player report over the players the `/leaderboard` page lists (active in the past week, at or above the list-entry gate, linked or not), in the page's default order: novel attempt counts per board, median solve time, attempts/day, and the onlymove estimate against the verified EGF/AGA rating. `--inactive` adds the table's rows that have been idle for over a week.
 - **`rank_activity_buckets.py`** — recently-active users (24h / 7d) bucketed by rank band × tsumegos-per-day. Writes `rank_activity_buckets.png` (gitignored; `--no-plot` to skip).
 - **`db_stats.py`** — top-line stats from `db/d1.sql`: totals, recent weekly activity, tenure × activity-rate cohort grid.
 - **`share_stats.mjs`** — the `share_events` share-link analytics: links created and links opened per country, the two series by month, and the top sharers with name, production rank and country. A create row's `user_id` is the SHARER and an open row's is the VIEWER, and no share token is stored, so the two populations are reported side by side and never as a funnel; ranks come from the stored leaderboard buffer or a rebuilt one (`leaderboard_rank_lib.mjs`), and the sharer's country names which of its independent sources won (EGD federation code / linked identity / leaderboard geo-IP / survey geo-IP / their own share events). `--top --months --countries --json --no-user-ids`.

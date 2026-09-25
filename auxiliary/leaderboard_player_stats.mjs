@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // auxiliary/leaderboard_player_stats.mjs
 //
-// Read-only report: for every leaderboard player with a LINKED external account (and,
-// with --with-unlinked, every other leaderboard row appended BELOW them), print
+// Read-only report: for every player the /leaderboard page LISTS — active in the trailing
+// week and at or above the RANK_START_MIN list-entry gate, linked external account or
+// not — in the page's default order (strongest first by the untimed onlymove rank), print
 //   - their country      (the /leaderboard page's flag, on every row incl. anonymous)
 //   - novel (is_repeat = 0) 9x9 attempt count
 //   - novel 13x13 attempt count
@@ -53,10 +54,8 @@
 // population_constants.json}. Run `./.venv/bin/python3 -m pipeline.fetch_database`
 // first so the leaderboard rows + tsumego_reports are fresh.
 //
-// Run with --help for the flags. On --with-unlinked the two groups are sorted
-// strongest-first INDEPENDENTLY rather than merged into one order, so the linked block
-// reads exactly as it does without the flag — it is the block with verified ratings
-// beside the estimate.
+// Run with --help for the flags. The activity window is measured from NOW, as the
+// Worker does, so a stale mirror under-lists — the staleness warning below says when.
 
 import fs from 'node:fs';
 import {
@@ -72,10 +71,12 @@ rating. Not a calibration check — see ablations/check_mapped_vs_declared_rank.
 
 Usage: node auxiliary/leaderboard_player_stats.mjs [options]
 
-  --with-unlinked   also list every leaderboard row WITHOUT a linked external
-                    account, appended below the linked players (--all is an alias)
+  --inactive        also list the leaderboard table's rows idle for over a week
+                    (kept by its longer retention, but not shown on the page),
+                    merged into the same order and marked ‡
   --aga             add the est. AGA and real AGA columns (off by default)
-  --user <id>       limit to this user id; repeatable
+  --user <id>       limit to this user id; repeatable. A named user is shown even
+                    when inactive or below the list-entry gate
   --json            machine-readable JSON: { players }
   --help, -h        show this message
 
@@ -84,15 +85,15 @@ Reads db/d1.sqlite and the local pwa/tsumegos/ data files; run
 
 const args = process.argv.slice(2);
 let asJson = false;
-let withUnlinked = false;
 let withAga = false;
+let withInactive = false;
 const onlyUsers = new Set();
 for (let i = 0; i < args.length; i++) {
     const a = args[i];
     if (a === '--help' || a === '-h') { console.log(USAGE); process.exit(0); }
     else if (a === '--json') asJson = true;
-    else if (a === '--with-unlinked' || a === '--all') withUnlinked = true;
     else if (a === '--aga') withAga = true;
+    else if (a === '--inactive') withInactive = true;
     else if (a === '--user') {
         const uid = args[++i];
         if (uid === undefined) { console.error('--user needs a user id\n\n' + USAGE); process.exit(1); }
@@ -157,7 +158,12 @@ async function main() {
 
     // `country` here is the edge geo-IP stamped on every /report — the page's universal
     // flag fallback, and the only country an anonymous row has.
-    const lbRows = sqliteJson('SELECT user_id, buffer, country FROM leaderboard');
+    // The page's activity window: readLeaderboardRows' `last_active >= now - 7 days`.
+    // The table's retention is longer than that, so the filter is not implied by the
+    // cron's pruning.
+    const ACTIVE_DAYS = 7;
+    const activeSince = new Date(Date.now() - ACTIVE_DAYS * 86400000).toISOString();
+    const lbRows = sqliteJson('SELECT user_id, buffer, country, last_active FROM leaderboard');
 
     // Display name + country off the `external_ids` binding, snapshotted from
     // EGD/AGA when the user linked — the same source readLeaderboardRows stitches.
@@ -193,23 +199,21 @@ async function main() {
         }
     }
 
-    // Default scope: players with a linked external account (the successor to the old
-    // "everyone on the EGD leaderboard" — the table now holds one row per ACTIVE USER,
-    // anonymous rows included). --with-unlinked appends every other leaderboard row.
+    // Default scope: the rows the page lists — active in the window, linked or not. The
+    // list-entry gate needs the rank, so it is applied after the per-row computation.
     const isLinked = (uid) => linkedIds.has(uid) || egdBy.has(uid) || agaBy.has(uid);
-    // The weekly cron PRUNES idle leaderboard rows, so a linked player who stopped
-    // playing has no row (and no stored buffer) — they'd silently vanish from the
-    // ground-truth set. Include every linked user regardless, rebuilding the missing
-    // buffer from tsumego_reports below exactly as buildRowStateFromReports does.
-    const byId = new Map(lbRows.map((r) => [r.user_id, { ...r, rebuilt: false }]));
-    for (const uid of new Set([...linkedIds, ...egdBy.keys(), ...agaBy.keys()])) {
-        if (!byId.has(uid)) byId.set(uid, { user_id: uid, buffer: null, rebuilt: true });
+    // Naming a user with --user IS the request to see them, so it bypasses both the
+    // activity window and the gate. A named user whose row the cron has pruned gets its
+    // buffer rebuilt from tsumego_reports below, exactly as buildRowStateFromReports does.
+    let rows;
+    if (onlyUsers.size) {
+        const byId = new Map(lbRows.map((r) => [r.user_id, { ...r, rebuilt: false }]));
+        rows = [...onlyUsers].map((uid) => byId.get(uid)
+            || { user_id: uid, buffer: null, country: null, last_active: null, rebuilt: true });
+    } else {
+        rows = lbRows.filter((r) => withInactive || (r.last_active && r.last_active >= activeSince))
+            .map((r) => ({ ...r, rebuilt: false }));
     }
-    // Naming a user with --user IS the request to see them, so it carries its own
-    // scope — otherwise an unlinked id would report "no matching players".
-    let rows = [...byId.values()].filter((r) => withUnlinked || isLinked(r.user_id)
-        || onlyUsers.has(r.user_id));
-    if (onlyUsers.size) rows = rows.filter((r) => onlyUsers.has(r.user_id));
     if (!rows.length) { console.log('no matching players'); return; }
 
     const idList = rows.map((r) => `'${r.user_id.replace(/'/g, "''")}'`).join(',');
@@ -318,7 +322,8 @@ async function main() {
         perDayBy.get(dr.user_id)[dr.d] = dr.n;
     }
 
-    const out = rows.map((r) => {
+    const RANKED_MIN = mod.RANK_START_MIN;   // production's list-entry / rank gate
+    let out = rows.map((r) => {
         const { onlymoveRank, egfRank, agaRank, se, usable } =
             mod.computeRankBoth(mod.parseBuffer(r.buffer), params);
         const c = countBy.get(r.user_id) || { 9: 0, 13: 0 };
@@ -355,6 +360,8 @@ async function main() {
             country,
             linked: isLinked(r.user_id),
             registered: linkedIds.has(r.user_id), rebuilt: !!r.rebuilt,
+            lastActive: r.last_active || null,
+            inactive: !r.last_active || r.last_active < activeSince,
             gor: Number.isFinite(gor) ? gor : null,
             agaRating: Number.isFinite(agaRating) ? agaRating : null,
             novel9: c[9] || 0, novel13: c[13] || 0,
@@ -370,15 +377,22 @@ async function main() {
             se, usableNovel: usable,
         };
     });
-    // Linked block first, then the unlinked one; strongest first by onlymove rank
-    // WITHIN each block, unranked (null) sinking to that block's bottom.
-    out.sort((a, b) => (Number(b.linked) - Number(a.linked))
-        || ((b.onlymoveRank ?? -Infinity) - (a.onlymoveRank ?? -Infinity)));
+    // The page's list-entry gate (resolveRowRank: no rank below RANK_START_MIN usable
+    // attempts). Sub-gate active players are only tallied, as the page's footer does.
+    let belowGate = 0;
+    if (!onlyUsers.size) {
+        const listed = out.filter((p) => p.usableNovel >= RANKED_MIN && p.onlymoveRank !== null);
+        belowGate = out.length - listed.length;
+        out = listed;
+        if (!out.length) { console.log(`no listed players (${belowGate} active below the gate)`); return; }
+    }
+    // The page's default order: strongest first by the untimed onlymove rank, one list
+    // regardless of link status; an unranked (null) --user row sinks to the bottom.
+    out.sort((a, b) => (b.onlymoveRank ?? -Infinity) - (a.onlymoveRank ?? -Infinity));
 
-    if (asJson) { console.log(JSON.stringify({ players: out }, null, 2)); return; }
+    if (asJson) { console.log(JSON.stringify({ players: out, belowGate }, null, 2)); return; }
 
-    const RANKED_MIN = mod.RANK_START_MIN;   // production's list-entry / rank gate
-    const nameCell = (p) => p.name + (p.rebuilt ? ' †' : '');
+    const nameCell = (p) => p.name + (p.rebuilt ? ' †' : p.inactive ? ' ‡' : '');
     // Widen to the longest name rather than truncating: the country column sits right
     // after it, so a fixed width would run the two together on a long name.
     const W = {
@@ -397,13 +411,7 @@ async function main() {
         + (withAga ? pad('est. AGA', W.est) + pad('real AGA', W.real) : '')
         + padl('surveys', W.srv));
     console.log('─'.repeat(ruleW));
-    let inUnlinked = false;
     for (const p of out) {
-        if (!p.linked && !inUnlinked) {
-            inUnlinked = true;
-            const caption = ' no linked external account ';
-            console.log('──' + caption + '─'.repeat(Math.max(0, ruleW - caption.length - 2)));
-        }
         console.log(
             pad(nameCell(p), W.name)
             + pad(p.country || '—', W.cc)
@@ -422,8 +430,13 @@ async function main() {
     }
     const nLinked = out.filter((p) => p.linked).length;
     console.log(
-        `\n${nLinked} externally-linked player(s)`
-        + (withUnlinked ? ` + ${out.length - nLinked} unlinked leaderboard row(s)` : '') + '. '
+        (onlyUsers.size
+            ? `\n${out.length} named player(s), shown regardless of activity and the list-entry gate. `
+            : `\n${out.length} listed player(s) (${nLinked} with a linked external account`
+                + (withInactive ? `, ${out.filter((p) => p.inactive).length} idle ‡` : '')
+                + `), ${withInactive ? 'on the leaderboard table' : `active since ${activeSince.slice(0, 10)}`}`
+                + ` with ≥ ${RANKED_MIN} usable attempts; `
+                + `${belowGate} more below that gate, not listed. `)
         + `"novel" = distinct-attempt (is_repeat=0) count over all history; `
         + `median / sd = median and standard deviation of solve time over novel timed attempts `
         + `(the sd is raw, so a left-open tab inflates it — solve time is right-skewed); `
@@ -436,13 +449,10 @@ async function main() {
         + `surveys = rank declarations the player has SELF-REPORTED (rows, so a re-declaration counts again); the weekly 'EGD'/'AGAR' machine heartbeats are excluded.\n`
         + `The shown rank is deliberately conservative while a posterior is wide, so est-vs-real here is NOT the mapping's bias — `
         + `ablations/check_mapped_vs_declared_rank.py measures that.\n`
-        + `Ranks are shown for EVERYONE (the production buf ≥ ${RANKED_MIN} gate is dropped here); `
-        + `players below that threshold are low-confidence — see se in --json.`
+        + `Order = the /leaderboard page's default (onlymove units), linked or not; a player with no linked account has no real EGF${withAga ? '/AGA' : ''}.`
+        + (out.some((p) => p.inactive && !p.rebuilt) ? `\n‡ = idle since before ${activeSince.slice(0, 10)}: still in the leaderboard table, but not shown on the page.` : '')
         + (out.some((p) => p.rebuilt) ? `\n† = no leaderboard row (pruned as idle); buffer rebuilt from tsumego_reports, as the Worker would on their next report.` : '')
-        + (hasVerifiedCols ? `\n* = production would withhold this verified rating as out of date (EGF activity criterion); kept here.` : '')
-        + (withUnlinked
-            ? `\nRows below the divider have no linked external account (one per active user, anonymous included), so they carry no verified rating.`
-            : `\nRun with --with-unlinked to append every other leaderboard row below.`));
+        + (hasVerifiedCols ? `\n* = production would withhold this verified rating as out of date (EGF activity criterion); kept here.` : ''));
 }
 
 await main();
