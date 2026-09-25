@@ -165,9 +165,10 @@ def _time_adjusted_rho(surveys, user_rating, sql_path):
             "alpha": min(a_best, 0.0), "g1": g1, "n_users": len(users_list), "n_pairs": len(pairs)}
 
 
-def survey_weighted_rho(ratemap, slopemap, min_attempts=20, min_server=4, time_adjust=True):
+def survey_weighted_rho(ratemap, slopemap, floormap, lapse, min_attempts=20, min_server=4,
+                        time_adjust=True):
     """Composite survey objective (calibration to real ranks). For each survey user, fit their MLE
-    80%-clear rating (fit_user_rating over their attempts with these per-problem ratings/slopes); then,
+    80%-clear rating (fit_user_rating over their attempts with these per-problem ratings/slopes/floors and λ); then,
     PER SERVER, the Spearman against the declared rank, and the n-weighted average over servers.
 
     Per-server Spearman is offset- AND scale-invariant, so it is robust to server-population imbalance
@@ -195,7 +196,8 @@ def survey_weighted_rho(ratemap, slopemap, min_attempts=20, min_server=4, time_a
             pooled.extend(attempts.get((uid[:8], s), []))
         if len(pooled) < min_attempts:
             continue
-        R, nj = fit_user_rating(pooled, ratemap, min_n=min_attempts, slopes=slopemap)
+        R, nj = fit_user_rating(pooled, ratemap, min_n=min_attempts, slopes=slopemap,
+                                floors=floormap, lapse=lapse)
         if R is not None and nj >= min_attempts:
             user_rating[uid[:8]] = R
     serv = defaultdict(list)
@@ -426,7 +428,7 @@ def run_validation(ratings_dir, seed, frac, expect_hash=None, no_survey=False,
         # weighted (non-time-adjusted) survey rho is still computed + returned in `out` (and the
         # per-server breakdown drives the time-adjustment), but no longer PRINTED — the time-adjusted
         # rho is the metric that matters; the raw weighted number was misleading noise next to it.
-        wrho, per, ta = survey_weighted_rho(rat, slp)
+        wrho, per, ta = survey_weighted_rho(rat, slp, flr, lam)
         out.update(survey_rho=wrho, survey_per_server=per, time_adjust=ta)
         if ta is not None and "rho" in ta:
             print(f"  survey rho (time-adjusted): {ta['rho']:.4f} cross-fitted vs base {ta['rho_base']:.4f} "

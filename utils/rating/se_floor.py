@@ -18,7 +18,7 @@ accumulates. Keep them in step.
 
 import numpy as np
 
-from utils.rating.ratings_io import load_size_value_maps
+from utils.rating.ratings_io import interp_extrap_vec as interp_extrap, load_size_value_maps
 
 # Gaussian kernel half-width in stones, over problem rank. Measured: against a
 # 500-problem local mean it is the point where the estimate stops moving with the
@@ -46,20 +46,6 @@ SE_FLOOR_MAX_INTERP_RUN = 2
 _CALIBRATION_P = 0.8
 _FLOOR_MAX = 0.78
 _SLOPE_LO, _SLOPE_HI, _MSLOPE_FLOOR = 0.05, 3.0, 1e-3
-
-
-def interp_extrap(x, xs, ys):
-    """np.interp with LINEAR extension past both ends — pwa/shared/rank-math.js
-    interpExtrap. M is extrapolated by design (the corpus runs past the labelled
-    ladder at both ends); see the "the rank is never clamped" note in CLAUDE.md."""
-    x = np.asarray(x, dtype=float)
-    y = np.interp(x, xs, ys)
-    lo, hi = x < xs[0], x > xs[-1]
-    if lo.any():
-        y[lo] = ys[0] + (x[lo] - xs[0]) * (ys[1] - ys[0]) / (xs[1] - xs[0])
-    if hi.any():
-        y[hi] = ys[-1] + (x[hi] - xs[-1]) * (ys[-1] - ys[-2]) / (xs[-1] - xs[-2])
-    return y
 
 
 def rank_space_slope(rating, a_p, cr, ck):
@@ -110,27 +96,27 @@ def corpus_rank_information(ratings_dir, curves, lapse, sizes):
     """(ranks, infos) over the WHOLE rated corpus, sorted by rank.
 
     Reads the backend ratings/<size>/ CSVs directly — the same source
-    package_for_pwa ships — so neither caller depends on pwa/tsumegos/.
+    package_for_pwa ships — so neither caller depends on pwa/tsumegos/. A size
+    with no curve or no ratings raises: leaving it out would price the floor on
+    part of the corpus while every size is served.
     """
     ranks, infos = [], []
     for size in sizes:
         curve = curves.get(str(size))
         if curve is None:
-            continue
+            raise KeyError(f"no rating→rank curve for size {size}")
         cr = np.asarray(curve["ratings"], dtype=float)
         ck = np.asarray(curve["ranks"], dtype=float)
-        rmap, smap, fmap = load_size_value_maps(ratings_dir, size, missing_ok=True)
-        tids = [t for t in rmap if t in smap and t in fmap]
+        rmap, smap, fmap = load_size_value_maps(ratings_dir, size)
+        tids = list(rmap)
         if not tids:
-            continue
+            raise ValueError(f"ratings/{size}: no rated problems")
         rating = np.array([rmap[t] for t in tids], dtype=float)
         slope = np.array([smap[t] for t in tids], dtype=float)
         floor = np.array([fmap[t] for t in tids], dtype=float)
         ranks.append(interp_extrap(rating, cr, ck))
         infos.append(rank_space_slope(rating, slope, cr, ck) ** 2
                      * anchor_info(floor, lapse))
-    if not ranks:
-        return np.zeros(0), np.zeros(0)
     r = np.concatenate(ranks)
     inf = np.concatenate(infos)
     order = np.argsort(r)

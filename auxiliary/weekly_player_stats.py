@@ -27,26 +27,10 @@ from datetime import datetime, timezone
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 from utils.paths import DB_SQLITE
+from utils.rating.ratings_io import interp_extrap
 DB_PATH = DB_SQLITE
 RATING_TO_RANK = os.path.join(PROJECT_ROOT, "ratings", "rating_to_rank.json")
 RATINGS_CSV = os.path.join(PROJECT_ROOT, "ratings", "{size}", "tsumego_ratings.csv")
-
-
-def interp_extrap(x, xs, ys):
-    """Linear interp with end-slope extrapolation (mirror of shared/rank-math.js)."""
-    n = len(xs)
-    if x <= xs[0]:
-        return ys[0] + (ys[1] - ys[0]) / (xs[1] - xs[0]) * (x - xs[0])
-    if x >= xs[n - 1]:
-        return ys[n - 1] + (ys[n - 1] - ys[n - 2]) / (xs[n - 1] - xs[n - 2]) * (x - xs[n - 1])
-    lo, hi = 0, n - 1
-    while hi - lo > 1:
-        mid = (lo + hi) >> 1
-        if xs[mid] <= x:
-            lo = mid
-        else:
-            hi = mid
-    return ys[lo] + (ys[hi] - ys[lo]) * (x - xs[lo]) / (xs[hi] - xs[lo])
 
 
 def rank_to_label(v):

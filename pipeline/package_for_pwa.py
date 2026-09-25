@@ -933,18 +933,21 @@ def emit_problem_params(output_dir):
     resolution, so neither has to walk the shard zips. ~2.6MB for ~165k problems.
 
     Re-reads the ratings CSVs directly (not the per-size in-memory maps, which are
-    absent on a skipped-shard run), so it always covers every size."""
+    absent on a skipped-shard run), so it always covers every size. Every rated
+    problem is written: a size without CSVs, a problem missing a slope or floor
+    (load_size_value_maps) or an id that is not 8 hex digits raises, because a
+    problem absent here is one the client re-derive and the Worker cannot price."""
     ratings_root = os.path.join(PROJECT_ROOT, RATINGS_ROOT)
     chunks = []
     for size in ALL_BOARD_SIZES:
-        ratings, slopes, floors = load_size_value_maps(ratings_root, size, missing_ok=True)
+        ratings, slopes, floors = load_size_value_maps(ratings_root, size)
         for tid, rating in ratings.items():
-            if len(tid) != 8 or tid not in slopes or tid not in floors:
-                continue
             try:
                 id_bytes = bytes.fromhex(tid)
             except ValueError:
-                continue
+                id_bytes = b""
+            if len(tid) != 8 or len(id_bytes) != 4:
+                raise ValueError(f"ratings/{size}: {tid!r} is not an 8-hex tsumego id")
             vals = np.array([rating, slopes[tid], floors[tid]], dtype="<f4").tobytes()
             chunks.append(id_bytes + vals)
     out_path = os.path.join(output_dir, "tsumegos", "problem_params.bin")

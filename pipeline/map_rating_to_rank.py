@@ -194,7 +194,7 @@ def load_ratings(ratings_dir, size):
     """{tsumego_id: rating} from ratings/<size>/tsumego_ratings.csv — the 80%-clear
     black-box scalar package_for_pwa ships."""
     return load_value_map(
-        os.path.join(ratings_dir, str(size), RATINGS_CSV), "rating", missing_ok=True)
+        os.path.join(ratings_dir, str(size), RATINGS_CSV), "rating")
 
 
 def load_slopes(ratings_dir, size):
@@ -202,14 +202,14 @@ def load_slopes(ratings_dir, size):
     (`quality`). fit_user_rating uses these so the survey 80%-clear ratings anchor M with
     the SAME per-problem slope the client estimator uses."""
     return load_value_map(
-        os.path.join(ratings_dir, str(size), SLOPE_CSV), "slope", missing_ok=True)
+        os.path.join(ratings_dir, str(size), SLOPE_CSV), "slope")
 
 
 def load_floors(ratings_dir, size):
     """{tsumego_id: c_p} from tsumego_floors.csv — the per-problem 4PL guessing floor,
     fed (with the global ceiling λ) through fit_user_rating to match the client's irt.js."""
     return load_value_map(
-        os.path.join(ratings_dir, str(size), FLOOR_CSV), "floor", missing_ok=True)
+        os.path.join(ratings_dir, str(size), FLOOR_CSV), "floor")
 
 
 def _shape_at(ys):

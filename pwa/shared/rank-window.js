@@ -33,10 +33,7 @@ import SE_FLOOR_CURVE from '../tsumegos/se_floor.json';
 // buffer flatten produce IDENTICAL inputs. The problem's raw rating maps to the
 // internal rank x = applyM(rating); the success-curve slope is the problem's
 // own 2PL discrimination a_p converted to logit-per-internal-rank via M's local
-// steepness. LOGIT_PER_RATING is only the fallback a_p for legacy entries without
-// a stored slope; LOGIT_PER_RANK_FALLBACK is the slope when M' is unusable.
-export const LOGIT_PER_RATING = 1.6;
-export const LOGIT_PER_RANK_FALLBACK = 0.28;
+// steepness.
 const SLOPE_LO = 0.05, SLOPE_HI = 3.0;
 const MSLOPE_FLOOR = 1e-3;
 
@@ -50,26 +47,25 @@ function mSlope(rating, curve) {
     return (applyM(rating + h, curve) - applyM(rating - h, curve)) / (2 * h);
 }
 
-// Clamp a converted per-attempt slope; degenerate/absent slope -> the rank fallback.
+// Clamp a converted per-attempt slope into [SLOPE_LO, SLOPE_HI].
 export function clampSlope(s) {
-    if (!Number.isFinite(s) || s <= 0) return LOGIT_PER_RANK_FALLBACK;
     return Math.min(SLOPE_HI, Math.max(SLOPE_LO, s));
 }
 
-// a_p (raw 2PL discrimination) -> logit-per-internal-rank at `rating`, guarded
-// against pathological tiny |M'|. Falls back to LOGIT_PER_RATING when a_p is absent.
+// a_p (raw 2PL discrimination, positive) -> logit-per-internal-rank at `rating`,
+// guarded against pathological tiny |M'|.
 export function slopeInRankSpace(rating, aP, curve) {
-    const a = (typeof aP === 'number' && aP > 0) ? aP : LOGIT_PER_RATING;
-    return clampSlope(a / Math.max(Math.abs(mSlope(rating, curve)), MSLOPE_FLOOR));
+    return clampSlope(aP / Math.max(Math.abs(mSlope(rating, curve)), MSLOPE_FLOOR));
 }
 
 // One flattened attempt in internal-rank space: { x, slope, correct, floor, kappa }.
-// `curve` is the attempt's size curve; `rating` its raw rating; `aP` its problemSlope
-// (fallback applied if absent); `floorRaw` its problemFloor (3PL guessing floor).
-// Returns null when the curve or rating is unusable — the caller may then apply its
-// own legacy fallback (e.g. a stored normalized problemRank).
+// `curve` is the attempt's size curve; `rating` its raw rating; `aP` its problemSlope;
+// `floorRaw` its problemFloor (3PL guessing floor). Returns null for an entry
+// missing any of them: every shipped problem carries all three, so such an entry
+// is malformed and is skipped, never filled with a default.
 export function flattenAttempt(rating, aP, floorRaw, correct, curve) {
-    if (!curve || typeof rating !== 'number') return null;
+    if (!curve || !Number.isFinite(rating) || !Number.isFinite(floorRaw)
+        || !Number.isFinite(aP) || aP <= 0) return null;
     const floor = clampFloor(floorRaw);
     return {
         x: applyM(rating, curve),

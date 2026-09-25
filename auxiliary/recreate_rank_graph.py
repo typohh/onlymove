@@ -92,8 +92,6 @@ LOGIT_CALIBRATION = math.log(CALIBRATION_P / (1 - CALIBRATION_P))
 FLOOR_MAX = 0.78
 SLOPE_LO, SLOPE_HI = 0.05, 3.0
 MSLOPE_FLOOR = 1e-3
-LOGIT_PER_RATING = 1.6           # fallback per-attempt slope (legacy/no a_p)
-LOGIT_PER_RANK_FALLBACK = 0.28
 X_CLAMP_LO, X_CLAMP_HI = -15.0, 45.0
 
 HOUR_MS = 3600 * 1000
@@ -140,8 +138,6 @@ def lapse_from(pc):
 
 
 def clamp_floor(c):
-    if not isinstance(c, (int, float)):
-        return 0.0
     return min(max(float(c), 0.0), FLOOR_MAX)
 
 
@@ -201,16 +197,11 @@ class RankingSystem:
             return None
         xs, ys = self.curve[sz]
         rating = self.ratings[sz][tid]
-        a_p = self.slopes[sz].get(tid)
-        if a_p is None or a_p <= 0:
-            a_p = LOGIT_PER_RATING
+        a_p = self.slopes[sz][tid]
         x = interp_extrap(rating, xs, ys)
         denom = max(abs(self._m_slope(rating, xs, ys)), MSLOPE_FLOOR)
-        slope = a_p / denom
-        if not math.isfinite(slope) or slope <= 0:
-            slope = LOGIT_PER_RANK_FALLBACK
-        slope = min(SLOPE_HI, max(SLOPE_LO, slope))
-        floor = clamp_floor(self.floors[sz].get(tid))
+        slope = min(SLOPE_HI, max(SLOPE_LO, a_p / denom))
+        floor = clamp_floor(self.floors[sz][tid])
         return x, slope, floor, clear_kappa(floor, self.lapse)
 
     # --- server display (rank-translation.js + stats-ui.js skillToDisplay) ----

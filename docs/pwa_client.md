@@ -33,7 +33,7 @@ From the user's point of view 9×9 and 13×13 share **one rank** (front-page lab
 Two consumers do real work to pool:
 
 - The recall logistic carries a **`SIZE_IS_13` fixed effect** (9×9 is the baseline) whose coefficient divided by the logit-per-rank is the statistics panel's "stronger/weaker on 13×13" readout.
-- The career decomposition (`rank-decomposition.js`) pools in **internal-rank space** with a per-attempt slope `LOGIT_PER_RATING / |M'(rating)|` that maps each attempt through its own size's curve, so both boards share one skill curve without a rank-space slope bias.
+- The career decomposition (`rank-decomposition.js`) pools in **internal-rank space** with a per-attempt slope `a_p / |M'(rating)|` (the problem's own discrimination) that maps each attempt through its own size's curve, so both boards share one skill curve without a rank-space slope bias.
 
 A `mergeSharedAcrossSizes_v2` migration flattens any legacy per-size rank and model buckets: the rank becomes the **maximum** of the two, so a strong 9×9 player immediately gets hard 13×13 problems, and the model buckets are dropped so the shared models retrain.
 

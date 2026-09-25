@@ -185,24 +185,23 @@ def load_problem_params(ratings_dir, needed):
     (rating ← tsumego_ratings.csv, slope ← tsumego_slopes.csv, floor ←
     tsumego_floors.csv). Reading the backend directly keeps the pipeline
     from depending on the served pwa/tsumegos/ artifacts (package_for_pwa is the
-    sole bridge into pwa/)."""
+    sole bridge into pwa/).
+
+    A needed problem absent from the ratings is a retired one and is left out —
+    its attempts outlive it. One that IS rated has its slope and floor by
+    construction (load_size_value_maps refuses maps that disagree), and a slope
+    that is not positive raises rather than dropping the problem."""
     params = {}
     by_size = defaultdict(set)
     for (size, tid) in needed:
         by_size[size].add(tid)
     for size, tids in by_size.items():
-        size_dir = os.path.join(ratings_dir, str(size))
-        if not os.path.isdir(size_dir):
-            print(f"  WARNING: {size_dir} missing; skipping size {size}")
-            continue
-        ratings, slopes, floors = load_size_value_maps(
-            ratings_dir, size, keep=tids, missing_ok=True)
-        for tid in tids:
-            r, s = ratings.get(tid), slopes.get(tid)
-            if s is None or r is None or not np.isfinite(s) or s <= 0 or not np.isfinite(r):
-                continue
-            params[(size, tid)] = (float(r), float(s),
-                                   float(np.clip(floors.get(tid, 0.0), 0, FLOOR_MAX)))
+        ratings, slopes, floors = load_size_value_maps(ratings_dir, size, keep=tids)
+        for tid in ratings:
+            if not slopes[tid] > 0:
+                raise ValueError(f"ratings/{size}: slope {slopes[tid]} for {tid} is not positive")
+            params[(size, tid)] = (ratings[tid], slopes[tid],
+                                   float(np.clip(floors[tid], 0, FLOOR_MAX)))
     return params
 
 
@@ -319,16 +318,15 @@ def fit_rank_prior(by_user, params, apply_m, lapse, ratings_dir, curves):
         ratings_dir, curves, lapse, ALL_BOARD_SIZES)
     lo_t, hi_t = r.mean() - PRIOR_GRID_SD * r.std(ddof=1), r.mean() + PRIOR_GRID_SD * r.std(ddof=1)
     grid = se_floor.grid_from_bounds(lo_t, hi_t, PRIOR_GRID_STEP)
-    if corpus_r.size:
-        # Walk the bounds inward until the emitter's own read of this grid is
-        # clean. Edges absorb and isolated interior knots interpolate, so this
-        # normally does nothing; it moves only when the corpus genuinely stops.
-        while grid.size > 2:
-            try:
-                se_floor.mean_info_curve(grid, corpus_r, corpus_i)
-                break
-            except RuntimeError:
-                grid = grid[1:-1]
+    # Walk the bounds inward until the emitter's own read of this grid is
+    # clean. Edges absorb and isolated interior knots interpolate, so this
+    # normally does nothing; it moves only when the corpus genuinely stops.
+    while grid.size > 2:
+        try:
+            se_floor.mean_info_curve(grid, corpus_r, corpus_i)
+            break
+        except RuntimeError:
+            grid = grid[1:-1]
     must_lo, must_hi = PRIOR_GRID_MUST_CONTAIN
     if grid.size < 3 or grid[0] > must_lo or grid[-1] < must_hi:
         span = f"[{grid[0]:+.1f}, {grid[-1]:+.1f}]" if grid.size else "empty"

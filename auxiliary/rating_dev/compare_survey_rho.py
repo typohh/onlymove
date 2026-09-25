@@ -40,7 +40,7 @@ MIN_ATTEMPTS = 20
 MIN_SERVER = 4
 
 
-def _user_ratings(ratemap, slopemap, surveys, attempts, sizes):
+def _user_ratings(ratemap, slopemap, floormap, lapse, surveys, attempts, sizes):
     """Each survey user's MLE 80%-clear rating under one model's parameters."""
     from utils.rating.fit_rank_curves import fit_user_rating
     out = {}
@@ -50,7 +50,8 @@ def _user_ratings(ratemap, slopemap, surveys, attempts, sizes):
             pooled.extend(attempts.get((uid[:8], s), []))
         if len(pooled) < MIN_ATTEMPTS:
             continue
-        R, nj = fit_user_rating(pooled, ratemap, min_n=MIN_ATTEMPTS, slopes=slopemap)
+        R, nj = fit_user_rating(pooled, ratemap, min_n=MIN_ATTEMPTS, slopes=slopemap,
+                                floors=floormap, lapse=lapse)
         if R is not None and nj >= MIN_ATTEMPTS:
             out[uid[:8]] = R
     return out
@@ -91,15 +92,19 @@ def main():
     z = np.load(args.joint, allow_pickle=True)
     joint_rate = {str(t): float(r) for t, r in zip(z["tid"], z["rating"])}
     joint_slope = {str(t): float(a) for t, a in zip(z["tid"], z["slope"])}
-    prod_rate, prod_slope, _fl, _lam, _th = load_ratings(args.prod_dir)
+    joint_floor = {str(t): float(c) for t, c in zip(z["tid"], z["floor"])}
+    joint_lapse = float(z["lapse"])
+    prod_rate, prod_slope, prod_floor, prod_lapse, _th = load_ratings(args.prod_dir)
     print(f"joint {len(joint_rate)} problems | production {len(prod_rate)}")
 
     surveys = latest_per_user_server(load_rank_surveys(SQL_PATH_DEFAULT))
     attempts = load_attempts_for_users(SQL_PATH_DEFAULT,
                                        set(surveys["user_id"].unique()),
                                        first_time_only=True)
-    ur_j = _user_ratings(joint_rate, joint_slope, surveys, attempts, SIZES)
-    ur_p = _user_ratings(prod_rate, prod_slope, surveys, attempts, SIZES)
+    ur_j = _user_ratings(joint_rate, joint_slope, joint_floor, joint_lapse,
+                         surveys, attempts, SIZES)
+    ur_p = _user_ratings(prod_rate, prod_slope, prod_floor, prod_lapse,
+                         surveys, attempts, SIZES)
     # Restrict to users BOTH models rate, so the comparison is exactly paired —
     # a user scored by only one model would otherwise shift that model's rho for
     # a reason unrelated to its quality.

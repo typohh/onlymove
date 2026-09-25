@@ -61,6 +61,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 from utils.paths import DB_SQLITE  # noqa: E402
+from utils.rating.ratings_io import interp_extrap  # noqa: E402
 from utils.katago.coords import gtp_to_xy  # noqa: E402
 
 # --- Artifact locations (backend + shipped) --------------------------------
@@ -109,22 +110,6 @@ def sigmoid(z):  # math-utils.js
 
 def norm_cdf(z):  # math-utils.js: 0.5*(1+erf(z/sqrt2))
     return 0.5 * (1.0 + math.erf(z / math.sqrt(2.0)))
-
-
-def interp_extrap(x, xs, ys):  # shared/rank-math.js
-    n = len(xs)
-    if x <= xs[0]:
-        return ys[0] + (ys[1] - ys[0]) / (xs[1] - xs[0]) * (x - xs[0])
-    if x >= xs[n - 1]:
-        return ys[n - 1] + (ys[n - 1] - ys[n - 2]) / (xs[n - 1] - xs[n - 2]) * (x - xs[n - 1])
-    a, b = 0, n - 1
-    while b - a > 1:
-        m = (a + b) >> 1
-        if xs[m] <= x:
-            a = m
-        else:
-            b = m
-    return ys[a] + (ys[b] - ys[a]) * (x - xs[a]) / (xs[b] - xs[a])
 
 
 def beta_prob_above_half(pos, neg):  # stats-compute.js

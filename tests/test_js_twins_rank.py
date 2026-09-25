@@ -2,7 +2,7 @@
 server couplings, and the per-attempt transforms the SE floor is built in.
 
   interp_extrap           utils/rating/ratings_io.py  (scalar)
-  interp_extrap           utils/rating/se_floor.py    (vectorized)
+  interp_extrap_vec       utils/rating/ratings_io.py  (vectorized)
   interpExtrap            pwa/shared/rank-math.js
   apply_M                 utils/rating/ratings_io.py  <->  applyM (pwa/shared/rank-window.js)
   rank_band, rank_to_value, value_to_rank, gor_to_value, aga_rating_to_value
@@ -26,7 +26,7 @@ import pytest
 
 from pipeline import fit_population_constants
 from utils.rating import fit_rank_curves, se_floor
-from utils.rating.ratings_io import apply_M, interp_extrap
+from utils.rating.ratings_io import apply_M, interp_extrap, interp_extrap_vec
 from utils.rating.rank_surveys import (aga_rating_to_value, gor_to_value, rank_band,
                                        rank_to_value, value_to_rank)
 
@@ -71,14 +71,14 @@ def test_interp_extrap_agrees(js):
     calls, expected = [], []
     for xs, ys in _curves():
         pts = _probe_points(xs, rng)
-        vec = se_floor.interp_extrap(pts, xs, ys)
+        vec = interp_extrap_vec(np.array(pts), xs, ys)
         for x, v in zip(pts, vec):
             calls.append((RANK_MATH, "interpExtrap", (x, xs, ys)))
             expected.append((x, interp_extrap(x, xs, ys), float(v)))
     got = js.run(calls)
     for (x, scalar, vectorized), j in zip(expected, got):
         assert _close(j, scalar), ("ratings_io", x, j, scalar)
-        assert _close(j, vectorized), ("se_floor", x, j, vectorized)
+        assert _close(j, vectorized), ("interp_extrap_vec", x, j, vectorized)
 
 
 def test_apply_m_agrees(js):
@@ -174,3 +174,42 @@ def test_extrapolation_is_unclamped(js, module, name):
     xs, ys = [0.0, 1.0, 2.0], [0.0, 1.0, 3.0]
     args = (50.0, xs, ys) if name == "interpExtrap" else (50.0, {"ratings": xs, "ranks": ys})
     assert js.call(module, name, *args) == interp_extrap(50.0, xs, ys) == 99.0
+
+
+def test_missing_problem_params_are_refused_not_defaulted(js):
+    """Every shipped problem carries a rating, slope and floor, so neither side
+    has a default for any of them: the client skips such an entry (flattenAttempt
+    returns null) and the backend fit raises on a rated problem missing one."""
+    curve = {"ratings": [0.0, 1.0, 2.0], "ranks": [-5.0, 0.0, 5.0]}
+    good = (1.0, 1.5, 0.2, True, curve)
+    malformed = [
+        (None, 1.5, 0.2, True, curve), (1.0, None, 0.2, True, curve),
+        (1.0, 0.0, 0.2, True, curve), (1.0, -1.0, 0.2, True, curve),
+        (1.0, 1.5, None, True, curve), (1.0, math.nan, 0.2, True, curve),
+        (1.0, 1.5, 0.2, True, None),
+    ]
+    got = js.run([(RANK_WINDOW, "flattenAttempt", good)]
+                 + [(RANK_WINDOW, "flattenAttempt", m) for m in malformed])
+    assert got[0] is not None
+    assert got[1:] == [None] * len(malformed)
+
+    attempts = [("aaaaaaaa", 1), ("bbbbbbbb", 0)] * 5
+    ratings = {"aaaaaaaa": 0.5, "bbbbbbbb": 1.5}
+    slopes = {"aaaaaaaa": 1.5, "bbbbbbbb": 1.2}
+    floors = {"aaaaaaaa": 0.1, "bbbbbbbb": 0.3}
+    R, n = fit_rank_curves.fit_user_rating(attempts, ratings, slopes=slopes,
+                                           floors=floors, lapse=0.01)
+    assert n == 10 and math.isfinite(R)
+    with pytest.raises(KeyError):
+        fit_rank_curves.fit_user_rating(attempts, ratings, slopes={"aaaaaaaa": 1.5},
+                                        floors=floors, lapse=0.01)
+    with pytest.raises(KeyError):
+        fit_rank_curves.fit_user_rating(attempts, ratings, slopes=slopes,
+                                        floors={"bbbbbbbb": 0.3}, lapse=0.01)
+    with pytest.raises(ValueError):
+        fit_rank_curves.fit_user_rating(attempts, ratings, slopes={**slopes, "aaaaaaaa": 0.0},
+                                        floors=floors, lapse=0.01)
+    # A problem with no rating at all is a retired one: its attempts drop out.
+    R2, n2 = fit_rank_curves.fit_user_rating(attempts + [("cccccccc", 1)], ratings,
+                                             slopes=slopes, floors=floors, lapse=0.01)
+    assert (R2, n2) == (R, n)

@@ -158,9 +158,17 @@ const LN_S_TRAIN_MAX = 8;
 // (problemFloor) and the discrimination a_p (problemSlope). a_p is used RAW as
 // the weight on the rank gap — no rank-unit conversion (M is near-linear by its
 // uniform-spacing prior), so the fitted PROBLEM_DIFFICULTY multiplier absorbs
-// the rank↔rating unit constant. Legacy rows without a_p/c_p fall back to
-// a_p = A_REF and c_p = 0, i.e. plain 2PL behaviour.
-const A_REF = 1.6;   // representative a_p (corpus mean); legacy-row default slope
+// the rank↔rating unit constant. A row missing either (or its problemRank) is
+// malformed and is skipped — hasProblemParams — never given a default.
+const A_REF = 1.6;   // representative a_p (corpus mean): the reference-failure
+                     // readout's slope and the displayed coefficient's scale
+
+// Whether an answer-history row carries the per-problem values the model reads.
+// Every shipped problem has all three, so a row without them is malformed.
+function hasProblemParams(a) {
+    return Number.isFinite(a.problemRank) && Number.isFinite(a.problemSlope)
+        && a.problemSlope > 0 && Number.isFinite(a.problemFloor);
+}
 
 // Neutral value of the PROBLEM_DIFFICULTY multiplier — the coefficient at which
 // coeff·a_p·(rank gap) equals the 2PL's a_p·(gap in raw-rating units): the rating
@@ -213,16 +221,15 @@ function retentionLogit(features, params, floor) {
 // is DIFFICULTY_NEUTRAL ≈ 5.4 — the rank↔rating unit constant, since the gap is
 // in rank units while a_p is per rating unit. `userRank` defaults to the
 // active shared rank; training rows approximate it with the current rank. When
-// userRank is unknown (very early), falls back to absolute. `slope` defaults to
-// A_REF for legacy rows that predate per-problem a_p.
-function buildFeatures({ isRepeat, timePct = 0.5, reviewPct = 0, problemRank = PRIOR_MEAN, size, r = 0, userRank, slope }) {
+// userRank is unknown (very early), falls back to absolute. `problemRank` and
+// `slope` are required: callers pass only rows hasProblemParams admits.
+function buildFeatures({ isRepeat, timePct = 0.5, reviewPct = 0, problemRank, size, r = 0, userRank, slope }) {
     const f = Array(Object.keys(MODEL_INDICES).length).fill(0);
     const uRank = (typeof userRank === 'number') ? userRank : (typeof state.userRank === 'number' ? state.userRank : PRIOR_MEAN);
-    const aP = (typeof slope === 'number' && slope > 0) ? slope : A_REF;
     f[MODEL_INDICES.INTERCEPT] = 1;
     f[MODEL_INDICES.TIME_SOLVING] = timePct;
     f[MODEL_INDICES.REVIEW_TIME] = reviewPct;
-    f[MODEL_INDICES.PROBLEM_DIFFICULTY] = aP * (uRank - (problemRank ?? PRIOR_MEAN));
+    f[MODEL_INDICES.PROBLEM_DIFFICULTY] = slope * (uRank - problemRank);
     // 9x9 is the baseline; SIZE_IS_13 carries the 13x13 offset. Merged-history
     // entries carry `size`; active-play entries don't, so assume the active size.
     f[MODEL_INDICES.SIZE_IS_13] = (size ?? state.boardSize) === 13 ? 1 : 0;
@@ -285,7 +292,7 @@ export function recentFailureWindowHours(params, history, { userRank, days = 7, 
         .sort((a, b) => a - b);
     const hrs = [];
     for (const a of recent) {
-        if (a.correct || typeof a.problemRank !== 'number') continue;   // failures only
+        if (a.correct || !hasProblemParams(a)) continue;   // failures only
         const reviewPct = calculatePercentile(allReviewTimes,
             (a.accumulatedReview || 0) + (a.reviewTime || 0));
         const S = stabilityDaysForRepeat(buildFeatures({
@@ -384,7 +391,7 @@ function featuresForTrainingRow(td, i) {
         size: p.size,
         r: p.successSinceFailure || 0,
         userRank: state.userRank,   // current rank approximates the rank at attempt time
-        slope: p.problemSlope,      // per-problem a_p (3PL discrimination); A_REF if absent
+        slope: p.problemSlope,      // per-problem a_p (3PL discrimination)
     });
 }
 
@@ -479,6 +486,7 @@ export function getRecallCandidates(options = {}) {
         if (lastAnswer.ignored) continue; // Exclude ignored problems
         if (state.unavailableProblemIds.has(problemId)) continue; // Exclude problems that failed to load this session
         if (!lastAnswer.date) continue;
+        if (!hasProblemParams(lastAnswer)) continue;
 
         let condition = lastAnswer.problemRank < state.userRank && lastAnswer.successSinceFailure !== undefined;
         if (requireLastAnswerIncorrect) {
@@ -590,7 +598,7 @@ export function buildRecallSchedule(size) {
     for (const problemId in lastAnswers) {
         const lastAnswer = lastAnswers[problemId];
         if (lastAnswer.ignored) continue;
-        if (lastAnswer.problemRank === undefined || lastAnswer.problemRank >= userRank) continue;
+        if (!hasProblemParams(lastAnswer) || lastAnswer.problemRank >= userRank) continue;
         if (lastAnswer.successSinceFailure === undefined) continue;
         if (!lastAnswer.date) continue;
 
@@ -777,7 +785,7 @@ export function calculateAndStoreStatsResults() {
         // Shared recall model: trained on the union of both sizes' histories.
         // Every feature it reads (problemRank, time/review percentiles, the
         // recall-formula term) is board-independent, so pooling is on one scale.
-        const validHistory = getMergedAnswerHistory().filter(p => p.problemRank !== undefined && p.timeTaken !== undefined && p.date !== undefined);
+        const validHistory = getMergedAnswerHistory().filter(p => hasProblemParams(p) && p.timeTaken !== undefined && p.date !== undefined);
         if (validHistory.length < 10) {
             setStatsResults(null);
             return;
@@ -902,7 +910,7 @@ export function prepareTrainingData(history, validHistory) {
         weights: Array.from({ length: n }, (_, i) => (i + 1) / n),
         percentileTime,
         percentileReview,
-        // Per-row 3PL guessing floor (problemFloor); 0 for legacy rows → 2PL.
+        // Per-row 3PL guessing floor (problemFloor); validHistory admits only rows with one.
         floors: history.map(p => clampFloor(p.problemFloor)),
         elapsedDays,
         isRepeatArr,

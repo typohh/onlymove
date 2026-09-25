@@ -27,7 +27,10 @@ def load_value_map(csv_path, value_col, *, keep=None, missing_ok=False):
 
     keep: optional id allowlist — ids outside it are dropped.
     missing_ok: if True a missing file yields {} instead of raising.
-    Rows whose value_col is absent or non-numeric are skipped.
+
+    A row whose value is absent, non-numeric or non-finite RAISES, as does a file
+    with no header: these values are per-problem model parameters, and a problem
+    silently missing one is served, rated or packaged on a default nobody fitted.
     """
     out = {}
     if missing_ok and not os.path.exists(csv_path):
@@ -35,30 +38,44 @@ def load_value_map(csv_path, value_col, *, keep=None, missing_ok=False):
     keep_set = None if keep is None else set(keep)
     with open(csv_path, newline="") as f:
         reader = csv.DictReader(f)
-        if not reader.fieldnames:
-            return out  # existing-but-empty CSV (no header) -> no rows
+        if not reader.fieldnames or value_col not in reader.fieldnames:
+            raise ValueError(f"{csv_path}: no '{value_col}' column")
         id_col = reader.fieldnames[0]
-        for row in reader:
+        for line, row in enumerate(reader, start=2):
             tid = row[id_col]
             if keep_set is not None and tid not in keep_set:
                 continue
             try:
-                out[tid] = float(row[value_col])
-            except (TypeError, ValueError, KeyError):
-                pass
+                v = float(row[value_col])
+            except (TypeError, ValueError) as e:
+                raise ValueError(f"{csv_path}:{line}: {value_col} "
+                                 f"{row[value_col]!r} for {tid} is not a number") from e
+            if not np.isfinite(v):
+                raise ValueError(f"{csv_path}:{line}: {value_col} for {tid} is {v}")
+            out[tid] = v
     return out
 
 
 def load_size_value_maps(ratings_dir, size, *, keep=None, missing_ok=False):
     """(ratings, slopes, floors) {tsumego_id: float} maps for one board size from
     ratings/<size>/ — each CSV's value column is named for what it holds
-    (tsumego_ratings' 'rating', tsumego_slopes' 'slope', tsumego_floors' 'floor')."""
+    (tsumego_ratings' 'rating', tsumego_slopes' 'slope', tsumego_floors' 'floor').
+
+    The three come from ONE fit and must cover the same problems; any id in one
+    map but not the others raises rather than leaving a caller to fill the gap."""
     sd = os.path.join(ratings_dir, str(size))
-    return (
+    maps = (
         load_value_map(os.path.join(sd, RATINGS_CSV), "rating", keep=keep, missing_ok=missing_ok),
         load_value_map(os.path.join(sd, SLOPE_CSV), "slope", keep=keep, missing_ok=missing_ok),
         load_value_map(os.path.join(sd, FLOOR_CSV), "floor", keep=keep, missing_ok=missing_ok),
     )
+    ids = set(maps[0])
+    for name, m in zip(("slope", "floor"), maps[1:]):
+        if set(m) != ids:
+            odd = sorted(ids ^ set(m))
+            raise ValueError(f"{sd}: ratings and {name}s cover different problems "
+                             f"({len(odd)} differ, e.g. {', '.join(odd[:5])})")
+    return maps
 
 
 def load_lapse(ratings_dir):
@@ -66,22 +83,22 @@ def load_lapse(ratings_dir):
     derived under and the client uses. train_mirt writes it to rating_constants.json
     (the authoritative source — it learns λ jointly); fit_population_constants only
     reads it THROUGH into population_constants.json. So prefer rating_constants.json,
-    fall back to population_constants.json, then 0.0 — otherwise a re-run of
+    read population_constants.json only where rating_constants.json is absent (the
+    published pwa/tsumegos/ carries only population_constants.json) — otherwise a re-run of
     train_mirt (fresh λ) followed by map_rating_to_rank would anchor the curve under
     a one-cycle-stale λ still sitting in population_constants.json. fit_user_rating's
     4PL must use THIS λ so the anchor matches the client's rank estimator
-    (pwa/js/irt.js LAPSE)."""
+    (pwa/js/irt.js LAPSE). Neither file, or a file without a valid λ, raises."""
     for fname in ("rating_constants.json", "population_constants.json"):
         path = os.path.join(ratings_dir, fname)
         if os.path.exists(path):
-            try:
-                with open(path) as f:
-                    v = json.load(f).get("fat_finger_rate")
-                if isinstance(v, (int, float)) and 0.0 <= v < 1.0:
-                    return float(v)
-            except (ValueError, OSError):
-                pass
-    return 0.0
+            with open(path) as f:
+                v = json.load(f).get("fat_finger_rate")
+            if not (isinstance(v, (int, float)) and 0.0 <= v < 1.0):
+                raise ValueError(f"{path}: fat_finger_rate {v!r} is not a rate in [0, 1)")
+            return float(v)
+    raise FileNotFoundError(f"no rating_constants.json or population_constants.json "
+                            f"in {ratings_dir} — run train_mirt")
 
 
 def load_rating_rank_curve(ratings_dir, *, size="9"):

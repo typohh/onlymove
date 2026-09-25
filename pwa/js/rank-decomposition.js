@@ -10,7 +10,7 @@
 // shared by 9x9 and 13x13, so a single merged skill curve is well-defined only
 // there. Each attempt is mapped through ITS OWN size's M before pooling:
 //   - x = applyM(rawRating, sizeCurve)            (internal rank)
-//   - slope = LOGIT_PER_RATING / |M'(rawRating)|  (logit per internal rank)
+//   - slope = a_p / |M'(rawRating)|               (logit per internal rank)
 // The per-attempt slope preserves calibration: the success curve has constant
 // slope in rating space, so in rank space the slope must vary with the local
 // steepness of M. With it, a
@@ -52,9 +52,9 @@
 
 import { state, updateUserRank, updateServeRank, updateDisplayRank, updateRankSe } from './state.js';
 import { interpExtrap } from '../shared/rank-math.js';
-import { estimateWindowRankFromFlat, windowMLE, displayRankFor, WIN_CAP, applyM, flattenAttempt, seFloorAt, LOGIT_PER_RANK_FALLBACK, weightedMedianOverWindow } from '../shared/rank-window.js';
+import { estimateWindowRankFromFlat, windowMLE, displayRankFor, WIN_CAP, applyM, flattenAttempt, seFloorAt, weightedMedianOverWindow } from '../shared/rank-window.js';
 import { sigmoid, gaussianWeight as gaussianWeightUntruncated, lowerBound } from './math-utils.js';
-import { clearKappa, clampFloor, clearSpan, anchorInfo } from './irt.js';
+import { clearKappa, clearSpan, anchorInfo } from './irt.js';
 // Baked at build time from the pipeline's output (pwa/tsumegos/rating_to_rank.json).
 import RATING_RANK_MAP from '../tsumegos/rating_to_rank.json';
 
@@ -78,13 +78,10 @@ const KERNEL_TRUNC_SIGMA = 4;
 // a_p (stored as `problemSlope`, shipped raw by package_for_pwa), converted to a
 // logit-per-internal-rank slope by dividing by the local steepness of M. The
 // EGF anchor (map_rating_to_rank → fit_user_rating) uses the same per-problem
-// a_p, so the rank loop stays closed. LOGIT_PER_RATING is only the FALLBACK slope
-// for legacy entries that predate `problemSlope`; set near the corpus-mean a_p
-// (~1.6) so an un-backfilled attempt isn't mis-scaled against the re-anchored M.
-// The per-attempt slope constants (LOGIT_PER_RATING, LOGIT_PER_RANK_FALLBACK,
-// SLOPE_LO/HI, MSLOPE_FLOOR) + the applyM / slope-in-rank-space transform now live
+// a_p, so the rank loop stays closed. The per-attempt slope constants
+// (SLOPE_LO/HI, MSLOPE_FLOOR) + the applyM / slope-in-rank-space transform live
 // in pwa/shared/rank-window.js so the Worker's buffer flatten matches this one;
-// applyM, flattenAttempt and LOGIT_PER_RANK_FALLBACK are imported above.
+// applyM and flattenAttempt are imported above.
 
 // Working coordinate is the internal rank (see shared/rank-math.js for the
 // convention), clamped past either end for very weak/strong users.
@@ -158,10 +155,10 @@ export function loadRatingRankMap() {
 // on any [0,1] range):
 // selection only ranks candidates, so only the ORDER matters — a sharp problem is
 // quadratically preferred and a flat or guessable one down-weighted, by genuine
-// information rather than a min-max remap. A missing floor reads as 0, which
-// recovers the plain 2PL-with-lapse weight.
+// information rather than a min-max remap. A problem missing its slope or floor
+// is malformed and weighs nothing; there is no default for either.
 export function problemInfoWeight(slope, floor) {
-    if (typeof slope !== 'number' || !Number.isFinite(slope) || slope <= 0) return 0;
+    if (!Number.isFinite(slope) || slope <= 0 || !Number.isFinite(floor)) return 0;
     return slope * slope * anchorInfo(floor);
 }
 
@@ -418,10 +415,9 @@ function poolLinear(attempts, t0, tau, lo, hi, x0, effN) {
 // carry `size`; otherwise the active size is assumed): x is the internal rank
 // index applyM(rawRating), slope is the logit-per-internal-rank at that rating
 // = a_p / |M'(rating)|, where a_p is the problem's own 2PL discrimination
-// (`problemSlope`). Legacy entries without `problemSlope` fall back to the
-// LOGIT_PER_RATING constant. `problemRating` holds the raw rating (legacy entries
-// may carry a separate `problemRawRating`). Attempts whose size curve is missing
-// fall back to the stored problemRank with a representative slope, or are dropped.
+// (`problemSlope`). `problemRating` holds the raw rating (legacy entries may
+// carry a separate `problemRawRating`). An entry missing its size curve, rating,
+// slope or floor is dropped (flattenAttempt returns null for it).
 export function flattenAttempts(answerHistory) {
     return answerHistory
         .filter(a => typeof a.date === 'number' && !a.isRepeat && !a.linked)
@@ -434,15 +430,7 @@ export function flattenAttempts(answerHistory) {
             // Main path: raw rating mapped through the size curve via the SHARED
             // transform (identical to the Worker's buffer flatten).
             const f = flattenAttempt(raw, a.problemSlope, a.problemFloor, a.correct, c);
-            if (f) return { ...f, t: a.date, src: a };
-            // Legacy fallback: no usable curve, but a stored problemRank.
-            if (typeof a.problemRank === 'number') {
-                const flr = clampFloor(a.problemFloor);
-                return { t: a.date, x: a.problemRank,
-                         slope: LOGIT_PER_RANK_FALLBACK, correct: a.correct ? 1 : 0,
-                         floor: flr, kappa: clearKappa(flr), src: a };
-            }
-            return null;
+            return f ? { ...f, t: a.date, src: a } : null;
         })
         .filter(Boolean)
         .sort((a, b) => a.t - b.t);

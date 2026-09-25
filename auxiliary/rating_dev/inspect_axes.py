@@ -43,7 +43,7 @@ if PROJECT_ROOT not in sys.path:
 
 from utils.katago.board_render import load_lookup, render_problem  # noqa: E402
 from utils.rating.rank_surveys import value_to_rank  # noqa: E402
-from utils.rating.se_floor import interp_extrap  # noqa: E402
+from utils.rating.ratings_io import interp_extrap_vec as interp_extrap  # noqa: E402
 from utils.rating.tail_agreement import TAIL_HINGE, hinge_z, hinged_r  # noqa: E402
 
 

@@ -2565,8 +2565,9 @@ def main():
             from auxiliary.rating_dev.validate_ratings import survey_weighted_rho
             ratemap = {t: float(rating[i]) for (sz, t), i in key_idx.items()}
             slopemap = {t: float(a_np[i]) for (sz, t), i in key_idx.items()}
+            floormap = {t: float(c_np[i]) for (sz, t), i in key_idx.items()}
             t_s = time.time()
-            wrho, per, ta = survey_weighted_rho(ratemap, slopemap)
+            wrho, per, ta = survey_weighted_rho(ratemap, slopemap, floormap, float(lam))
             print(f"  SURVEY rho (base, per-server n-weighted): {wrho:.4f}   "
                   f"[{sum(n for n, _ in per.values())} declarations, "
                   f"{len(per)} servers, {time.time() - t_s:.0f}s]", flush=True)

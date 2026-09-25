@@ -41,7 +41,7 @@ export const LAPSE = POPULATION_CONSTANTS.fat_finger_rate;
 // curve passes through CALIBRATION_P — i.e. (CALIBRATION_P − c)/(1 − c − LAPSE).
 // One expression, shared by κ and by the anchor information below.
 function anchorRawClear(c) {
-    const cc = Math.max(typeof c === 'number' ? c : 0, 0);
+    const cc = Math.max(c, 0);
     return Math.min(Math.max((CALIBRATION_P - cc) / (1 - cc - LAPSE), 1e-6), 1 - 1e-6);
 }
 
@@ -85,11 +85,12 @@ export function anchorInfo(floorRaw) {
 // gradient dP/dinner is `clearSpan(floor)·praw·(1−praw)`. Shared so every call
 // site computes the span identically. Guarded ≥ 0.
 export function clearSpan(c) {
-    return Math.max(0, 1 - Math.max(typeof c === 'number' ? c : 0, 0) - LAPSE);
+    return Math.max(0, 1 - Math.max(c, 0) - LAPSE);
 }
 
-// Coerce a possibly-missing per-problem floor into [0, FLOOR_MAX]; legacy rows
-// without a floor fall back to 0 (i.e. plain 2PL-with-lapse behaviour).
+// A per-problem floor clamped into [0, FLOOR_MAX]. Every shipped problem carries
+// one, so there is no default: a caller holding an entry without a numeric floor
+// skips that entry (see flattenAttempt) rather than inventing one.
 export function clampFloor(c) {
-    return Math.min(Math.max(typeof c === 'number' ? c : 0, 0), FLOOR_MAX);
+    return Math.min(Math.max(c, 0), FLOOR_MAX);
 }

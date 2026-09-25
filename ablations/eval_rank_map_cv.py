@@ -79,7 +79,7 @@ from pipeline.map_rating_to_rank import (  # noqa: E402
 )
 from utils.paths import DB_SQLITE  # noqa: E402
 from utils.rating.fit_rank_curves import (  # noqa: E402
-    CALIBRATION_P, FLOOR_MAX, LOGIT_PER_RATING, fit_user_rating,
+    CALIBRATION_P, FLOOR_MAX, fit_user_rating,
     interp_extrap_vec, _unpack_thresholds,
 )
 from utils.rating.rank_surveys import SQL_PATH_DEFAULT, load_rank_surveys, rank_band  # noqa: E402
@@ -127,14 +127,11 @@ class RatingFitter:
                                slopes=self.slopes, floors=self.floors, lapse=self.lapse)
         if R is None or n < MIN_ATTEMPTS:
             return None
-        joined = [(self.ratings[t], (self.slopes.get(t) if self.slopes else None),
-                   (self.floors.get(t) if self.floors else None)) for t, _ in rows
+        joined = [(self.ratings[t], self.slopes[t], self.floors[t]) for t, _ in rows
                   if t in self.ratings]
         rr = np.array([r for r, _, _ in joined], float)
-        sl = np.array([(a if (a is not None and np.isfinite(a) and a > 0)
-                        else LOGIT_PER_RATING) for _, a, _ in joined], float)
-        c = np.array([min(max(f if (f is not None and np.isfinite(f)) else 0.0, 0.0),
-                          FLOOR_MAX) for _, _, f in joined], float)
+        sl = np.array([a for _, a, _ in joined], float)
+        c = np.clip(np.array([f for _, _, f in joined], float), 0.0, FLOOR_MAX)
         lam = max(0.0, float(self.lapse))
         span = np.clip(1.0 - c - lam, 1e-6, 1.0)
         q = np.clip((CALIBRATION_P - c) / span, 1e-6, 1.0 - 1e-6)

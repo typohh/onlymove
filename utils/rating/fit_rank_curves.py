@@ -26,13 +26,6 @@ import sys
 import numpy as np
 from scipy.special import expit
 
-# Slope of the success curve in RATING units (logit per rating unit). The
-# survey user's rating is "the problem rating where they clear CALIBRATION_P",
-# estimated by a logistic with this slope; the client (rank-decomposition.js)
-# MUST use the same principle and a matching slope, or the loop reopens. Value
-# is calibrated to the current rating scale (bots span ~1.5 rating over ~16
-# ranks ⇒ ~0.1 rating/rank; with ~0.28 logit/rank that's ~2.8 logit/rating).
-LOGIT_PER_RATING = 2.5
 CALIBRATION_P = 0.8  # matches the client / momentum: rank = where you clear 80%
 # Clamp per-problem floors below CALIBRATION_P so κ(c)=logit((P−c)/(1−c−λ)) stays
 # finite (κ→∞ as c→P). Mirrors pwa/js/irt.js clampFloor / FLOOR_MAX exactly.
@@ -47,8 +40,8 @@ if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 
-def fit_user_rating(attempts, raw_ratings, target=CALIBRATION_P, min_n=1,
-                    slopes=None, floors=None, lapse=0.0):
+def fit_user_rating(attempts, raw_ratings, *, slopes, floors, lapse,
+                    target=CALIBRATION_P, min_n=1):
     """The user's rating = the problem RATING at which they clear `target` (80%).
 
     Full 4PL MLE of R, IDENTICAL to the client's rank estimator
@@ -61,27 +54,28 @@ def fit_user_rating(attempts, raw_ratings, target=CALIBRATION_P, min_n=1,
     "clear r_p at target" anchor exact for ANY slope/floor — and because the
     shipped ratings were DERIVED under this same 4PL (per-problem floor c_p +
     global ceiling λ), the ability estimate is consistent with them. `slopes`
-    {tid: a_p} gives each attempt its own discrimination (else LOGIT_PER_RATING);
-    `floors` {tid: c_p} its guessing floor (else 0); `lapse` is the global ceiling
-    λ (population_constants.json fat_finger_rate). With floors=None & lapse=0 this
-    reduces EXACTLY to the old 2PL. The floor is what stops a careless failure on
+    {tid: a_p} gives each attempt its own discrimination, `floors` {tid: c_p} its
+    guessing floor, and `lapse` is the global ceiling λ (load_lapse). An attempt
+    on a problem absent from `raw_ratings` is dropped (a retired problem keeps its
+    attempts); a problem that HAS a rating but no slope or floor, or a slope that
+    is not positive, raises — the three come from one fit, and a default in its
+    place is a model nobody fitted. The floor is what stops a careless failure on
     a far-below-rank problem from yanking R, and matters most for strong users on
     easy problems. M is anchored on THIS quantity, so the client and the anchor
     MUST use the same per-problem a_p/c_p/λ or the loop reopens — keep them in
     lockstep with irt.js.
 
     Returns (R, n_joined) or (None, 0)."""
-    rows = [(raw_ratings[t], s, (slopes.get(t) if slopes else None),
-             (floors.get(t) if floors else None))
+    rows = [(raw_ratings[t], s, slopes[t], floors[t])
             for t, s in attempts if t in raw_ratings]
     if len(rows) < min_n:
         return None, 0
     rr = np.array([r for r, _, _, _ in rows], dtype=float)
     sc = np.array([s for _, s, _, _ in rows], dtype=float)
-    sl = np.array([(a if (a is not None and np.isfinite(a) and a > 0)
-                    else LOGIT_PER_RATING) for _, _, a, _ in rows], dtype=float)
-    c = np.array([min(max(f if (f is not None and np.isfinite(f)) else 0.0, 0.0),
-                      FLOOR_MAX) for _, _, _, f in rows], dtype=float)
+    sl = np.array([a for _, _, a, _ in rows], dtype=float)
+    if not (np.all(np.isfinite(sl)) and np.all(sl > 0)):
+        raise ValueError("fit_user_rating: a joined problem's slope is not a positive number")
+    c = np.clip(np.array([f for _, _, _, f in rows], dtype=float), 0.0, FLOOR_MAX)
     lam = max(0.0, float(lapse))
     span = np.clip(1.0 - c - lam, 1e-6, 1.0)              # (1 − floor − λ) asymptote span
     q = np.clip((target - c) / span, 1e-6, 1.0 - 1e-6)
