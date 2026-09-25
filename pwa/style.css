@@ -1031,12 +1031,12 @@ input, textarea, [contenteditable],
     font-style: italic;
     color: var(--ink);
 }
-/* Our answer to both: full ink in its own tinted block, set apart from the two
+/* Our answer to both: full ink in its own tinted block, leading the two
    paragraphs it answers. The negative side margins equal the side padding, so
    its text keeps the paragraphs' left edge and only the tint reaches past it
    into the card's own padding. */
 .board-size-picker .picker-pitch .picker-ours {
-    margin: 0.4286em -0.6em 0;
+    margin: 0.2857em -0.6em 0;
     padding: 0.5em 0.6em;
     border-radius: var(--radius);
     background: var(--surface);

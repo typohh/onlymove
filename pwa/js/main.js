@@ -97,8 +97,8 @@ function showBoardSizePicker({ dismissable = false, showIntro = false } = {}) {
                 // Top panel, first-time-only: who we are and why whole-board
                 // positions at the right difficulty beat games or a tsumego
                 // collection. A returning user switching sizes already knows
-                // the site. Games and tsumego each get a muted paragraph; our
-                // answer to both sits in its own tinted block beneath them.
+                // the site. Our answer leads in its own tinted block; games and
+                // tsumego follow as the muted paragraphs it answers.
                 if (showIntro) {
                     const pitch = document.createElement('div');
                     pitch.className = 'picker-pitch';
@@ -106,7 +106,7 @@ function showBoardSizePicker({ dismissable = false, showIntro = false } = {}) {
                     brand.className = 'picker-brand';
                     brand.textContent = getTerm('boardSizePickerBrand');
                     pitch.appendChild(brand);
-                    for (const key of ['boardSizePickerGames', 'boardSizePickerTsumego', 'boardSizePickerOurs']) {
+                    for (const key of ['boardSizePickerOurs', 'boardSizePickerGames', 'boardSizePickerTsumego']) {
                         const body = document.createElement('div');
                         body.className = key === 'boardSizePickerOurs' ? 'modal-body picker-ours' : 'modal-body';
                         appendPitchText(body, getTerm(key));
