@@ -1040,11 +1040,16 @@ input, textarea, [contenteditable],
     background: var(--surface-hi);
     color: var(--ink);
 }
+/* A hairline under the brand sets it off as the card's title rather than the
+   first line of the pitch. */
 .board-size-picker .picker-brand {
     font-weight: bold;
     /* Matches #ios-install-title, so the two headings read at one size. */
     font-size: 1.1em;
     text-align: center;
+    padding-bottom: 0.3em;
+    margin-bottom: 0.3em;
+    border-bottom: 1px solid var(--hairline);
 }
 /* A value cell in the rank grid: left-set inside its centred container, so rows
    of different widths keep one edge against their labels. */
