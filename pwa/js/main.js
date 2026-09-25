@@ -56,6 +56,29 @@ function getBoardSizeFromPath() {
 }
 
 /**
+ * Render a picker pitch string into `el`. The strings carry two marks:
+ * `**text**` for the emphasised phrases (the subject of each sentence, and the
+ * two things we offer) and `*text*` for the contrasting "but". Built as text
+ * nodes and spans, never innerHTML, so a translation cannot inject markup.
+ */
+function appendPitchText(el, text) {
+    for (const part of text.split(/(\*\*[^*]+\*\*|\*[^*]+\*)/)) {
+        if (!part) continue;
+        if (part.startsWith('**')) {
+            const b = document.createElement('strong');
+            b.textContent = part.slice(2, -2);
+            el.appendChild(b);
+        } else if (part.startsWith('*')) {
+            const em = document.createElement('em');
+            em.textContent = part.slice(1, -1);
+            el.appendChild(em);
+        } else {
+            el.appendChild(document.createTextNode(part));
+        }
+    }
+}
+
+/**
  * Cold-start picker shown to brand-new users (no `boardSize` in localStorage
  * and no URL hint). Returns a Promise that resolves to the chosen size.
  */
@@ -74,8 +97,8 @@ function showBoardSizePicker({ dismissable = false, showIntro = false } = {}) {
                 // Top panel, first-time-only: who we are and why whole-board
                 // positions at the right difficulty beat games or a tsumego
                 // collection. A returning user switching sizes already knows
-                // the site. The copy is blank-line-separated paragraphs (the
-                // i18n convention), one left-aligned body block each.
+                // the site. Games and tsumego each get a muted paragraph; our
+                // answer to both sits in its own tinted block beneath them.
                 if (showIntro) {
                     const pitch = document.createElement('div');
                     pitch.className = 'picker-pitch';
@@ -83,10 +106,10 @@ function showBoardSizePicker({ dismissable = false, showIntro = false } = {}) {
                     brand.className = 'picker-brand';
                     brand.textContent = getTerm('boardSizePickerBrand');
                     pitch.appendChild(brand);
-                    for (const para of getTerm('boardSizePickerIntro').split('\n\n')) {
+                    for (const key of ['boardSizePickerGames', 'boardSizePickerTsumego', 'boardSizePickerOurs']) {
                         const body = document.createElement('div');
-                        body.className = 'modal-body';
-                        body.textContent = para;
+                        body.className = key === 'boardSizePickerOurs' ? 'modal-body picker-ours' : 'modal-body';
+                        appendPitchText(body, getTerm(key));
                         pitch.appendChild(body);
                     }
                     modal.appendChild(pitch);

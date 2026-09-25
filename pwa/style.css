@@ -1015,11 +1015,30 @@ input, textarea, [contenteditable],
     gap: 0.2857em;
     text-align: left;
 }
-/* The pitch runs to two paragraphs. The panel gap keeps the brand close to the
-   first one, so the break between them gets extra margin to read as a break
-   rather than another line. */
+/* The pitch runs to three paragraphs. The panel gap keeps the brand close to
+   the first one, so the breaks between them get extra margin to read as breaks
+   rather than more lines. */
 .board-size-picker .picker-pitch .modal-body + .modal-body {
     margin-top: 0.2857em;
+}
+/* The games and tsumego paragraphs stay muted; only their subject and the
+   contrasting "but" take the full ink, so the two can be compared at a glance. */
+.board-size-picker .picker-pitch strong {
+    font-weight: bold;
+    color: var(--ink);
+}
+.board-size-picker .picker-pitch em {
+    font-style: italic;
+    color: var(--ink);
+}
+/* Our answer to both: full ink in its own tinted block, set apart from the two
+   paragraphs it answers. */
+.board-size-picker .picker-pitch .picker-ours {
+    margin-top: 0.4286em;
+    padding: 0.5em 0.6em;
+    border-radius: var(--radius);
+    background: var(--surface-hi);
+    color: var(--ink);
 }
 .board-size-picker .picker-brand {
     font-weight: bold;
