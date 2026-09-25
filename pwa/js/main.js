@@ -57,8 +57,8 @@ function getBoardSizeFromPath() {
 
 /**
  * Render a picker pitch string into `el`. The strings carry two marks:
- * `**text**` for the emphasised phrases (the subject of each sentence, and the
- * two things we offer) and `*text*` for the contrasting "but". Built as text
+ * `**text**` for the subject of each paragraph (games, tsumego, OnlyMove) and
+ * `*text*` for the contrasting "but". Built as text
  * nodes and spans, never innerHTML, so a translation cannot inject markup.
  */
 function appendPitchText(el, text) {

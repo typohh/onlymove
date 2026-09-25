@@ -1037,7 +1037,7 @@ input, textarea, [contenteditable],
     margin-top: 0.4286em;
     padding: 0.5em 0.6em;
     border-radius: var(--radius);
-    background: var(--surface-hi);
+    background: var(--surface);
     color: var(--ink);
 }
 /* A hairline under the brand sets it off as the card's title rather than the
