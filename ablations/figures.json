@@ -5572,6 +5572,370 @@
         "data_version": "9c13c8e1377632f9"
       }
     },
+    "motifs.corpus_dan.ko_pct": {
+      "value": 0.12971293569371178,
+      "fmt": "%.1f",
+      "text": "13.0",
+      "producer": "ablations.selfplay_motif_figures",
+      "tier": "methodology",
+      "note": "share of dan-rated 9×9 problems the 'ko' rule fires on",
+      "measured": {
+        "at": "2026-09-27T14:43:47Z",
+        "git": "11a4b1b488b",
+        "db_max_id": 556355,
+        "data_version": "9c13c8e1377632f9"
+      }
+    },
+    "motifs.corpus_dan.life_and_death_pct": {
+      "value": 0.024855173306579503,
+      "fmt": "%.1f",
+      "text": "2.5",
+      "producer": "ablations.selfplay_motif_figures",
+      "tier": "methodology",
+      "note": "share of dan-rated 9×9 problems the 'life and death' rule fires on",
+      "measured": {
+        "at": "2026-09-27T14:43:47Z",
+        "git": "11a4b1b488b",
+        "db_max_id": 556355,
+        "data_version": "9c13c8e1377632f9"
+      }
+    },
+    "motifs.corpus_dan.opening_pct": {
+      "value": 0.1557979222628564,
+      "fmt": "%.1f",
+      "text": "15.6",
+      "producer": "ablations.selfplay_motif_figures",
+      "tier": "methodology",
+      "note": "share of dan-rated 9×9 problems the 'opening' rule fires on",
+      "measured": {
+        "at": "2026-09-27T14:43:47Z",
+        "git": "11a4b1b488b",
+        "db_max_id": 556355,
+        "data_version": "9c13c8e1377632f9"
+      }
+    },
+    "motifs.corpus_dan.semeai_pct": {
+      "value": 0.01828538140392893,
+      "fmt": "%.1f",
+      "text": "1.8",
+      "producer": "ablations.selfplay_motif_figures",
+      "tier": "methodology",
+      "note": "share of dan-rated 9×9 problems the 'semeai' rule fires on",
+      "measured": {
+        "at": "2026-09-27T14:43:47Z",
+        "git": "11a4b1b488b",
+        "db_max_id": 556355,
+        "data_version": "9c13c8e1377632f9"
+      }
+    },
+    "motifs.corpus_dan.sente_pct": {
+      "value": 0.18719052396517688,
+      "fmt": "%.1f",
+      "text": "18.7",
+      "producer": "ablations.selfplay_motif_figures",
+      "tier": "methodology",
+      "note": "share of dan-rated 9×9 problems the 'sente' rule fires on",
+      "measured": {
+        "at": "2026-09-27T14:43:47Z",
+        "git": "11a4b1b488b",
+        "db_max_id": 556355,
+        "data_version": "9c13c8e1377632f9"
+      }
+    },
+    "motifs.corpus_dan.tenuki_pct": {
+      "value": 0.2682611087737467,
+      "fmt": "%.1f",
+      "text": "26.8",
+      "producer": "ablations.selfplay_motif_figures",
+      "tier": "methodology",
+      "note": "share of dan-rated 9×9 problems the 'tenuki' rule fires on",
+      "measured": {
+        "at": "2026-09-27T14:43:47Z",
+        "git": "11a4b1b488b",
+        "db_max_id": 556355,
+        "data_version": "9c13c8e1377632f9"
+      }
+    },
+    "motifs.corpus_dan.yose_pct": {
+      "value": 0.15256157157189554,
+      "fmt": "%.1f",
+      "text": "15.3",
+      "producer": "ablations.selfplay_motif_figures",
+      "tier": "methodology",
+      "note": "share of dan-rated 9×9 problems the 'yose' rule fires on",
+      "measured": {
+        "at": "2026-09-27T14:43:47Z",
+        "git": "11a4b1b488b",
+        "db_max_id": 556355,
+        "data_version": "9c13c8e1377632f9"
+      }
+    },
+    "motifs.corpus_dan_problems": {
+      "value": 30899,
+      "fmt": "~1000",
+      "text": "31,000",
+      "producer": "ablations.selfplay_motif_figures",
+      "tier": "methodology",
+      "note": "9×9 problems rated at dan level",
+      "measured": {
+        "at": "2026-09-27T14:43:47Z",
+        "git": "11a4b1b488b",
+        "db_max_id": 556355,
+        "data_version": "9c13c8e1377632f9"
+      }
+    },
+    "motifs.corpus_kyu.ko_pct": {
+      "value": 0.14519290214803415,
+      "fmt": "%.1f",
+      "text": "14.5",
+      "producer": "ablations.selfplay_motif_figures",
+      "tier": "methodology",
+      "note": "share of kyu-rated 9×9 problems the 'ko' rule fires on",
+      "measured": {
+        "at": "2026-09-27T14:43:47Z",
+        "git": "11a4b1b488b",
+        "db_max_id": 556355,
+        "data_version": "9c13c8e1377632f9"
+      }
+    },
+    "motifs.corpus_kyu.life_and_death_pct": {
+      "value": 0.035620798968733144,
+      "fmt": "%.1f",
+      "text": "3.6",
+      "producer": "ablations.selfplay_motif_figures",
+      "tier": "methodology",
+      "note": "share of kyu-rated 9×9 problems the 'life and death' rule fires on",
+      "measured": {
+        "at": "2026-09-27T14:43:47Z",
+        "git": "11a4b1b488b",
+        "db_max_id": 556355,
+        "data_version": "9c13c8e1377632f9"
+      }
+    },
+    "motifs.corpus_kyu.opening_pct": {
+      "value": 0.1774199913184168,
+      "fmt": "%.1f",
+      "text": "17.7",
+      "producer": "ablations.selfplay_motif_figures",
+      "tier": "methodology",
+      "note": "share of kyu-rated 9×9 problems the 'opening' rule fires on",
+      "measured": {
+        "at": "2026-09-27T14:43:47Z",
+        "git": "11a4b1b488b",
+        "db_max_id": 556355,
+        "data_version": "9c13c8e1377632f9"
+      }
+    },
+    "motifs.corpus_kyu.semeai_pct": {
+      "value": 0.08727621903897505,
+      "fmt": "%.1f",
+      "text": "8.7",
+      "producer": "ablations.selfplay_motif_figures",
+      "tier": "methodology",
+      "note": "share of kyu-rated 9×9 problems the 'semeai' rule fires on",
+      "measured": {
+        "at": "2026-09-27T14:43:47Z",
+        "git": "11a4b1b488b",
+        "db_max_id": 556355,
+        "data_version": "9c13c8e1377632f9"
+      }
+    },
+    "motifs.corpus_kyu.sente_pct": {
+      "value": 0.13196006471725663,
+      "fmt": "%.1f",
+      "text": "13.2",
+      "producer": "ablations.selfplay_motif_figures",
+      "tier": "methodology",
+      "note": "share of kyu-rated 9×9 problems the 'sente' rule fires on",
+      "measured": {
+        "at": "2026-09-27T14:43:47Z",
+        "git": "11a4b1b488b",
+        "db_max_id": 556355,
+        "data_version": "9c13c8e1377632f9"
+      }
+    },
+    "motifs.corpus_kyu.tenuki_pct": {
+      "value": 0.13015797850650462,
+      "fmt": "%.1f",
+      "text": "13.0",
+      "producer": "ablations.selfplay_motif_figures",
+      "tier": "methodology",
+      "note": "share of kyu-rated 9×9 problems the 'tenuki' rule fires on",
+      "measured": {
+        "at": "2026-09-27T14:43:47Z",
+        "git": "11a4b1b488b",
+        "db_max_id": 556355,
+        "data_version": "9c13c8e1377632f9"
+      }
+    },
+    "motifs.corpus_kyu.yose_pct": {
+      "value": 0.09199847414598214,
+      "fmt": "%.1f",
+      "text": "9.2",
+      "producer": "ablations.selfplay_motif_figures",
+      "tier": "methodology",
+      "note": "share of kyu-rated 9×9 problems the 'yose' rule fires on",
+      "measured": {
+        "at": "2026-09-27T14:43:47Z",
+        "git": "11a4b1b488b",
+        "db_max_id": 556355,
+        "data_version": "9c13c8e1377632f9"
+      }
+    },
+    "motifs.corpus_kyu_problems": {
+      "value": 76023,
+      "fmt": "~1000",
+      "text": "76,000",
+      "producer": "ablations.selfplay_motif_figures",
+      "tier": "methodology",
+      "note": "9×9 problems rated at kyu level",
+      "measured": {
+        "at": "2026-09-27T14:43:47Z",
+        "git": "11a4b1b488b",
+        "db_max_id": 556355,
+        "data_version": "9c13c8e1377632f9"
+      }
+    },
+    "motifs.selfplay.ko_pct": {
+      "value": 0.1373217171362327,
+      "fmt": "%.1f",
+      "text": "13.7",
+      "producer": "ablations.selfplay_motif_figures",
+      "tier": "methodology",
+      "note": "share of 9×9 self-play positions the 'ko' rule fires on, the played move standing in for the answer",
+      "measured": {
+        "at": "2026-09-27T14:43:47Z",
+        "git": "11a4b1b488b",
+        "db_max_id": 556355,
+        "data_version": "9c13c8e1377632f9"
+      }
+    },
+    "motifs.selfplay.life_and_death_pct": {
+      "value": 0.011540082905922856,
+      "fmt": "%.1f",
+      "text": "1.2",
+      "producer": "ablations.selfplay_motif_figures",
+      "tier": "methodology",
+      "note": "share of 9×9 self-play positions the 'life and death' rule fires on, the played move standing in for the answer",
+      "measured": {
+        "at": "2026-09-27T14:43:47Z",
+        "git": "11a4b1b488b",
+        "db_max_id": 556355,
+        "data_version": "9c13c8e1377632f9"
+      }
+    },
+    "motifs.selfplay.opening_pct": {
+      "value": 0.2634722124639921,
+      "fmt": "%.1f",
+      "text": "26.3",
+      "producer": "ablations.selfplay_motif_figures",
+      "tier": "methodology",
+      "note": "share of 9×9 self-play positions the 'opening' rule fires on, the played move standing in for the answer",
+      "measured": {
+        "at": "2026-09-27T14:43:47Z",
+        "git": "11a4b1b488b",
+        "db_max_id": 556355,
+        "data_version": "9c13c8e1377632f9"
+      }
+    },
+    "motifs.selfplay.semeai_pct": {
+      "value": 0.01178599030422258,
+      "fmt": "%.1f",
+      "text": "1.2",
+      "producer": "ablations.selfplay_motif_figures",
+      "tier": "methodology",
+      "note": "share of 9×9 self-play positions the 'semeai' rule fires on, the played move standing in for the answer",
+      "measured": {
+        "at": "2026-09-27T14:43:47Z",
+        "git": "11a4b1b488b",
+        "db_max_id": 556355,
+        "data_version": "9c13c8e1377632f9"
+      }
+    },
+    "motifs.selfplay.sente_pct": {
+      "value": 0.18455350242394436,
+      "fmt": "%.1f",
+      "text": "18.5",
+      "producer": "ablations.selfplay_motif_figures",
+      "tier": "methodology",
+      "note": "share of 9×9 self-play positions the 'sente' rule fires on, the played move standing in for the answer",
+      "measured": {
+        "at": "2026-09-27T14:43:47Z",
+        "git": "11a4b1b488b",
+        "db_max_id": 556355,
+        "data_version": "9c13c8e1377632f9"
+      }
+    },
+    "motifs.selfplay.tenuki_pct": {
+      "value": 0.2910665355160542,
+      "fmt": "%.1f",
+      "text": "29.1",
+      "producer": "ablations.selfplay_motif_figures",
+      "tier": "methodology",
+      "note": "share of 9×9 self-play positions the 'tenuki' rule fires on, the played move standing in for the answer",
+      "measured": {
+        "at": "2026-09-27T14:43:47Z",
+        "git": "11a4b1b488b",
+        "db_max_id": 556355,
+        "data_version": "9c13c8e1377632f9"
+      }
+    },
+    "motifs.selfplay.yose_pct": {
+      "value": 0.0035305276470174946,
+      "fmt": "%.1f",
+      "text": "0.4",
+      "producer": "ablations.selfplay_motif_figures",
+      "tier": "methodology",
+      "note": "share of 9×9 self-play positions the 'yose' rule fires on, the played move standing in for the answer",
+      "measured": {
+        "at": "2026-09-27T14:43:47Z",
+        "git": "11a4b1b488b",
+        "db_max_id": 556355,
+        "data_version": "9c13c8e1377632f9"
+      }
+    },
+    "motifs.selfplay_ci95_max_pp": {
+      "value": 0.9695238706016098,
+      "fmt": ".1f",
+      "text": "1.0",
+      "producer": "ablations.selfplay_motif_figures",
+      "tier": "methodology",
+      "note": "largest 95% half-width over the rules' self-play shares, in percentage points, clustered by game",
+      "measured": {
+        "at": "2026-09-27T14:43:47Z",
+        "git": "11a4b1b488b",
+        "db_max_id": 556355,
+        "data_version": "9c13c8e1377632f9"
+      }
+    },
+    "motifs.selfplay_games": {
+      "value": 1000,
+      "fmt": "d",
+      "text": "1000",
+      "producer": "ablations.selfplay_motif_figures",
+      "tier": "methodology",
+      "note": "9×9 self-play games, 3 visits a move on both sides",
+      "measured": {
+        "at": "2026-09-27T14:43:47Z",
+        "git": "11a4b1b488b",
+        "db_max_id": 556355,
+        "data_version": "9c13c8e1377632f9"
+      }
+    },
+    "motifs.selfplay_positions": {
+      "value": 56932,
+      "fmt": "~1000",
+      "text": "57,000",
+      "producer": "ablations.selfplay_motif_figures",
+      "tier": "methodology",
+      "note": "self-play positions scored, the random opening excluded",
+      "measured": {
+        "at": "2026-09-27T14:43:47Z",
+        "git": "11a4b1b488b",
+        "db_max_id": 556355,
+        "data_version": "9c13c8e1377632f9"
+      }
+    },
     "penalty.free_leak_is_slope": {
       "value": 0,
       "fmt": "d",
