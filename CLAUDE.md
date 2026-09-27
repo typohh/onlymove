@@ -122,7 +122,7 @@ Method: `methodology.md` §1.5–§1.14. Evidence for every constant, ablation a
 
 ### KataGo
 
-- **Don't hardcode the binary path** — `utils/katago/controller.py` reads `KATAGO_PATH`, defaulting to `bots/katago` (OpenCL).
+- **Don't hardcode the binary path** — launch through `resolve_katago` (`utils/katago/binary.py`), which picks the `bots/` build per machine (a CUDA build only on answering a probe query, else the OpenCL `bots/katago`), puts the venv's `nvidia-*` library directories on `LD_LIBRARY_PATH`, and caches the choice per host; `KATAGO_PATH` overrides it.
 - **`bots/analysis.cfg` is hardware-tuned in place** by `pipeline.tune_engine`; expect hand edits to be overwritten.
 - **`requireMaxBoardSize = true` in `bots/analysis.cfg` belongs to THIS repo's config only.** It turns the NN-buffer maximum into an exact requirement, and an off-size query kills KataGo's async bot thread with a message on stderr and NO response on stdout — so the caller waits out its full query timeout on a request that can never be answered. The pipeline never notices (single-size runs); `worker.py` passes `false` and runs one engine sized to the largest board.
 - **`KatagoController` is thread-safe by design** — one master reader thread fans responses out via per-query events, so `send_query` blocks from the caller's view.
