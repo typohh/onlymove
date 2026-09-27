@@ -147,7 +147,17 @@ export default {
                            (request.headers.get('accept') || '').includes('text/html');
       if (isNavigation) {
         const indexUrl = new URL('/index.html', url);
-        return env.ASSETS.fetch(new Request(indexUrl, request));
+        const page = await env.ASSETS.fetch(new Request(indexUrl, request));
+        // A shared problem link unfurls to no card: the site's preview (title,
+        // description, banner image) says nothing about the problem, so chat
+        // apps would attach a generic advert to someone's specific link.
+        if (url.searchParams.has('id')) {
+          return new HTMLRewriter()
+            .on('meta[property^="og:"], meta[name^="twitter:"], meta[name="description"]',
+                { element(el) { el.remove(); } })
+            .transform(page);
+        }
+        return page;
       }
     }
 
