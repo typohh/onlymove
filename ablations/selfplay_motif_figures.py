@@ -267,7 +267,7 @@ def selfplay(rules):
             t.join()
     finally:
         engine.controller.stop_engine()
-    require(not errors, f"self-play failed: {errors[0]}")
+    require(not errors, f"self-play failed: {errors[:1]}")
     require(all(r is not None for r in results), "self-play left games unplayed")
     return results
 
