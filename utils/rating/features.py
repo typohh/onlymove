@@ -1157,12 +1157,11 @@ def _game_phase_one(path):
 
     prefix = the linear move chain from root to the branch point (the game that
     led to the contested position); main_len = non-pass moves on the principal
-    line (first-child chain) of the CORRECT first move — here the child with the
-    best winrate comment, score breaking ties, matching cache_rating_features
-    slot 0. The principal line terminates in passes by construction."""
-    import re as _re
+    line (first-child chain) of the ANSWER. The answer is read positionally —
+    the branch node's first child, where generation writes it — never re-derived
+    from the eval comments, which are a shallower annotation than the search that
+    verified it. The principal line terminates in passes by construction."""
     import sgfmill.sgf
-    cmt_re = _re.compile(rb"(\d+\.?\d*)%/([-]?\d+\.?\d*)")
     with open(path, "rb") as f:
         game = sgfmill.sgf.Sgf_game.from_bytes(f.read())
     root = game.get_root()
@@ -1175,18 +1174,8 @@ def _game_phase_one(path):
         node = node[0]
     if node is not root and (node.has_property("B") or node.has_property("W")):
         prefix += 1                     # the branch node itself carries a move
-    best, best_key = None, None
-    for child in node:
-        if not (child.has_property("B") or child.has_property("W")):
-            continue
-        m = cmt_re.search((child.get_raw("C") if child.has_property("C") else b"") or b"")
-        if not m:
-            continue
-        key = (float(m.group(1)), float(m.group(2)))
-        if best_key is None or key > best_key:
-            best, best_key = child, key
     main_len = 0
-    cur = best
+    cur = node[0] if len(node) else None
     while cur is not None:
         if cur.has_property("B") or cur.has_property("W"):
             _color, mv = cur.get_raw_move()

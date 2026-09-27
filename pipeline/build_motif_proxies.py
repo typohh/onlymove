@@ -106,11 +106,9 @@ def label_one(args):
         _, setup_sgf, correct = parse_sgf(raw.decode("utf-8", "replace"))
     except Exception:
         return None
-    # The answer NODE, matched by coordinate to the winrate-chosen correct move
-    # rather than taken as variation_nodes[0]. The two agree by construction
-    # (the answer is written first and generation discards any file whose
-    # evaluations name another move) but matching costs nothing and does not
-    # depend on that invariant holding for every file.
+    # The answer NODE, matched by coordinate to parse_sgf's correct move — the
+    # first stone-playing variation, so the same node as variation_nodes[0]
+    # whenever that one carries a stone.
     answer_node = None
     if correct:
         for _n in variation_nodes:
