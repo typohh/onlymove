@@ -48,6 +48,7 @@ PRODUCERS = (
     "motif_null_figures",
     "axes_fit_figures",
     "cast_error_figures",
+    "selfplay_motif_figures",
     "refit_barrier_figures",
     "refit_lr_figures",
     "refit_seeds_figures",

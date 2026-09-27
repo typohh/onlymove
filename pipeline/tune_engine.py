@@ -14,7 +14,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 from utils.constants import ALL_BOARD_SIZES  # noqa: E402
-from utils.katago.controller import KATAGO_PATH, CONFIG_FILE  # noqa: E402
+from utils.katago.binary import CONFIG_FILE, resolve_katago  # noqa: E402
 from utils.katago.models import DEFAULT_MODEL, get_model  # noqa: E402
 
 
@@ -112,8 +112,9 @@ def run_test(batch_size, board_size, proc_holder=None):
     print(f"Testing Batch Size: {batch_size:<4} ... ", end='', flush=True)
 
     analysis_threads = max(1, int(batch_size * ANALYSIS_THREAD_FACTOR))
+    katago_path, env = resolve_katago()
     command = [
-        KATAGO_PATH, "analysis",
+        katago_path, "analysis",
         "-config", CONFIG_FILE,
         "-override-config",
         f"numAnalysisThreads={analysis_threads},nnMaxBatchSize={batch_size},"
@@ -131,7 +132,7 @@ def run_test(batch_size, board_size, proc_holder=None):
         process = subprocess.Popen(
             command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE if verbose else subprocess.DEVNULL,
-            text=True, bufsize=1,
+            text=True, bufsize=1, env=env,
         )
         if proc_holder is not None:
             proc_holder[0] = process  # publish so the watchdog can kill on timeout
@@ -267,7 +268,7 @@ def main():
     # get_model(DEFAULT_MODEL) downloads it if absent (run_test needs it).
     # Don't pull MODEL_HUMAN here — tune_engine never loads a human model, so
     # listing it only triggered a large pointless ~hundreds-of-MB download.
-    for path in [KATAGO_PATH, CONFIG_FILE, get_model(DEFAULT_MODEL)]:
+    for path in [resolve_katago()[0], CONFIG_FILE, get_model(DEFAULT_MODEL)]:
         if not os.path.exists(path):
             print(f"Error: Required file not found at '{path}'", file=sys.stderr)
             sys.exit(1)

@@ -35,9 +35,13 @@ class ProblemFinder:
         }
         self.edge_rows = {"1", "2", str(self.board_size - 1), str(self.board_size)}
 
-    def generate_initial_position(self):
+    def generate_initial_position(self, rng=random):
         """
         Generates a single game by starting with random moves and then balancing the game.
+
+        Args:
+            rng: the source of the random draws — the `random` module by default,
+                or a seeded `random.Random` for a repeatable opening.
 
         Returns:
             list: A list of moves representing the game sequence.
@@ -64,7 +68,7 @@ class ProblemFinder:
                 if p > 0 and is_valid(self.queries.get_move_from_idx(i))
             ]
 
-            chosen_idx = random.choices(legal_idxs)[0]
+            chosen_idx = rng.choices(legal_idxs)[0]
             move = self.queries.get_move_from_idx(chosen_idx)
 
             moves.append(move)

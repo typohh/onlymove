@@ -6,12 +6,7 @@ import threading
 
 from utils.katago.models import MODEL_HUMAN, get_model
 
-from utils.paths import PROJECT_ROOT
-CONFIG_FILE = os.path.join(PROJECT_ROOT, "bots", "analysis.cfg")
-# KATAGO_PATH defaults to the OpenCL build at bots/katago. Override via the
-# KATAGO_PATH environment variable on hosts that need a different binary
-# (e.g. bots/katago_cuda12 on a vast.ai NVIDIA instance).
-KATAGO_PATH = os.environ.get("KATAGO_PATH") or os.path.join(PROJECT_ROOT, "bots", "katago")
+from utils.katago.binary import CONFIG_FILE, resolve_katago
 
 # How long a single send_query blocks before giving up on a stuck/crashed engine.
 QUERY_TIMEOUT_SECONDS = 60 * 60
@@ -48,8 +43,9 @@ class KatagoController:
         overrides = f"maxBoardXSizeForNNBuffer={board_size},maxBoardYSizeForNNBuffer={board_size}"
         if extra_overrides:
             overrides += "," + extra_overrides
+        katago_path, env = resolve_katago()
         command = [
-            KATAGO_PATH, "analysis",
+            katago_path, "analysis",
             "-config", CONFIG_FILE,
             "-override-config", overrides,
         ]
@@ -60,7 +56,8 @@ class KatagoController:
         self.process = subprocess.Popen(
             command,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE if verbose else subprocess.DEVNULL, text=True, bufsize=1
+            stderr=subprocess.PIPE if verbose else subprocess.DEVNULL, text=True, bufsize=1,
+            env=env,
         )
         self.running = True
         self._master_reader_thread = threading.Thread(target=self._master_reader)
