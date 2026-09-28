@@ -46,6 +46,7 @@ function descriptionFor(component, side) {
 }
 
 const fmtRanks = (r) => Math.abs(r).toFixed(2);
+const fmtSignedRanks = (r) => `${r >= 0 ? '+' : '−'}${Math.abs(r).toFixed(2)}`;
 const fmtPct = (p) => String(Math.round(p * 100));
 
 /**
@@ -91,7 +92,8 @@ export function explainPace({ pace, reading }) {
     if (!r || !Number.isFinite(r.z)) {
         parts.push(getTerm('paceExplainNoData'));
     } else if (!isFlagged(r)) {
-        parts.push(getTerm(`paceExplain${key}Unresolved`, { ranks: fmtRanks(r.ranks) }));
+        // Signed as ranks GAINED per extra minute, the way the Time pane prints it.
+        parts.push(getTerm(`paceExplain${key}Unresolved`, { ranks: fmtSignedRanks(-r.ranks) }));
     } else {
         parts.push(getTerm(`paceExplain${key}${r.z < 0 ? 'Weak' : 'Strong'}`, { ranks: fmtRanks(r.ranks) }));
         if (Math.abs(r.z) <= CONFIDENT_Z) parts.push(getTerm('motifExplainTentative'));

@@ -90,11 +90,6 @@ export function buildMotifPane(kind, history = state.answerHistory) {
 
     const root = document.createElement('div');
     root.className = 'stats-issues';
-    // The strength pane closes with the pace rows, whatever the motif rows did.
-    const finish = () => {
-        if (kind === 'strength') appendPaceSection(root);
-        return root;
-    };
 
     const stats = computeMotifStats(history);
     if (!stats || stats.length === 0) {
@@ -102,7 +97,7 @@ export function buildMotifPane(kind, history = state.answerHistory) {
         empty.className = 'stats-issues-empty';
         empty.textContent = getTerm('statsIssuesNotEnough', { min: MIN_ATTEMPTS, count: usableMotifAttempts(history) });
         root.appendChild(empty);
-        return finish();
+        return root;
     }
 
     const rows = [];
@@ -126,7 +121,7 @@ export function buildMotifPane(kind, history = state.answerHistory) {
         empty.className = 'stats-issues-empty';
         empty.textContent = getTerm('statsIssuesNoAxes');
         root.appendChild(empty);
-        return finish();
+        return root;
     }
 
     // Strongest evidence first, on the reading this pane shows.
@@ -142,18 +137,23 @@ export function buildMotifPane(kind, history = state.answerHistory) {
     const scale = paneScale(kind, rows);
     for (const row of rows) table.appendChild(buildMotifRow(kind, row, recallSet, history, scale));
     root.appendChild(table);
-    if (kind !== 'strength') root.appendChild(buildIntervalNote());
+    root.appendChild(buildIntervalNote());
 
-    return finish();
+    return root;
 }
 
-// The pace rows (pace-readings.js): drawn exactly like strength rows — same
-// poles, same track, same two-step colour — on a scale of their own, since
-// their unit is ranks PER MINUTE rather than ranks. Both rows always show; a
-// reading with no data is the full-width "we don't know" band. The interval
-// note closes the pane here, as it covers both tables.
-function appendPaceSection(root) {
+// The pace rows (pace-readings.js), for the Time pane. Drawn on the strength
+// rows' track, but oriented the other way: the value is what an extra minute is
+// worth to the user beyond what it is worth to a typical player, so a positive
+// value means more time would have paid. The two ends carry no valence — both
+// are advice about how to spend time, not a weakness — so they share ONE colour
+// like the tendency ends, and the poles name the axis rather than weak/strong.
+// Both rows always show; a reading with no data is the full-width "we don't
+// know" band.
+export function buildPaceSection() {
     const readings = computePaceReadings();
+    const root = document.createElement('div');
+    root.className = 'stats-issues';
     const title = document.createElement('div');
     title.className = 'wk-section-title';
     title.textContent = getTerm('statsPaceTitle');
@@ -161,32 +161,53 @@ function appendPaceSection(root) {
 
     const table = document.createElement('div');
     table.className = 'wk-table';
-    table.appendChild(buildHeaderRow('strength'));
-    const rows = PACE_KINDS.map(pace => ({ pace, strength: readings[pace] }));
-    const scale = paneScale('strength', rows);
+    table.appendChild(buildHeaderRow('pace'));
+    const rows = PACE_KINDS.map(pace => ({ pace, reading: readings[pace], gain: timeGain(readings[pace]) }));
+    const scale = paneScale('pace', rows);
     for (const row of rows) table.appendChild(buildPaceRow(row, scale));
     root.appendChild(table);
+    const centre = document.createElement('div');
+    centre.className = 'wk-note';
+    centre.textContent = getTerm('statsPaceCentreNote');
+    root.appendChild(centre);
     root.appendChild(buildIntervalNote());
+    return root;
+}
+
+// A pace reading turned to face the Time pane: ranks GAINED per extra minute,
+// relative to a typical player. The reading itself is oriented like strength
+// (negative = more time helps), which the front-page flag still reads.
+function timeGain(r) {
+    if (!r) return null;
+    return { ranks: -r.ranks, lo: -r.hi, hi: -r.lo, z: -r.z };
 }
 
 function buildPaceRow(row, scale) {
     const el = document.createElement('div');
     el.className = 'wk-row';
-    const spec = cellFor('strength', row, scale);
-    el.dataset.tone = spec ? spec.tone : 'none';
-    el.style.setProperty('--wk-weight', (spec ? spec.weight : 0).toFixed(3));
+    const g = row.gain;
+    const rawFrac = (r) => 0.5 + r / (2 * scale);
+    const frac = (r) => clamp01(rawFrac(r));
+    const spec = g && {
+        frac: frac(g.ranks),
+        loFrac: frac(g.lo),
+        hiFrac: frac(g.hi),
+        ticks: unitTicks(rawFrac, 0, RANK_TICK),
+    };
+    el.dataset.tone = spec ? 'pace' : 'none';
+    el.style.setProperty('--wk-weight', (g ? toneWeight(g.z) : 0).toFixed(3));
 
     const lead = document.createElement('div');
     lead.className = 'wk-lead';
     const name = document.createElement('span');
     name.className = 'wk-name motif-hint';
     name.textContent = getTerm(PACE_NAME_KEYS[row.pace]);
-    hintAnchor(name, () => explainPace({ pace: row.pace, reading: row.strength }));
+    hintAnchor(name, () => explainPace({ pace: row.pace, reading: row.reading }));
     lead.appendChild(name);
     const value = document.createElement('span');
     value.className = 'wk-value';
     value.textContent = spec
-        ? getTerm('statsPaceRanksPerMinute', { value: fmtRank(row.strength.ranks) })
+        ? getTerm('statsPaceRanksPerMinute', { value: fmtRank(g.ranks) })
         : getTerm('statsMotifNoData');
     lead.appendChild(value);
     el.appendChild(lead);
@@ -211,13 +232,13 @@ function buildIntervalNote() {
 function paneScale(kind, rows) {
     let widest = 0;
     for (const row of rows) {
-        const r = row[kind];
+        const r = kind === 'pace' ? row.gain : row[kind];
         if (!r) continue;
-        const neutral = kind === 'strength' ? 0 : r.nullShare;
+        const neutral = kind === 'tendency' ? r.nullShare : 0;
         widest = Math.max(widest, Math.abs(r.lo - neutral), Math.abs(r.hi - neutral));
     }
     if (widest > 0) return widest * SCALE_MARGIN;
-    return kind === 'strength' ? RANK_FULL_SCALE : TENDENCY_FULL_SCALE;
+    return kind === 'tendency' ? TENDENCY_FULL_SCALE : RANK_FULL_SCALE;
 }
 
 // The two poles of the reading this pane shows, each at its own end of the track
@@ -226,6 +247,7 @@ function paneScale(kind, rows) {
 const POLES = {
     strength: ['statsMotifWeak', 'statsMotifStrong'],
     tendency: ['statsMotifUnder', 'statsMotifOver'],
+    pace: ['statsPaceHelpsLess', 'statsPaceHelpsMore'],
 };
 
 function buildHeaderRow(kind) {

@@ -22,7 +22,7 @@ import {
     historyRefreshesLeftToday,
     HISTORY_REFRESH_DAILY_CAP,
 } from './account-sync.js';
-import { buildMotifPane } from './stats-weaknesses.js';
+import { buildMotifPane, buildPaceSection } from './stats-weaknesses.js';
 import { buildRankSummaryText, buildRatingHistoryChart } from './stats-rank-pane.js';
 import { buildTimeUsageChart } from './stats-time-chart.js';
 import { buildProblemsPerDayChart } from './stats-activity-chart.js';
@@ -235,7 +235,15 @@ export async function showDetailedStats() {
                 buildRankSummaryText(merged, rankDecomp),
                 build && build.readout);
         };
-        const makeTimePane = () => combineChartWithText(buildTimeUsageChart(merged), timingText);
+        // The pace rows close the Time pane: they read the same time
+        // coefficients the timing text does, on a track of their own.
+        const makeTimePane = () => {
+            const pane = combineChartWithText(buildTimeUsageChart(merged), timingText);
+            const pace = buildPaceSection();
+            if (!pane) return pace;
+            pane.append(pace);
+            return pane;
+        };
         const makeActivityPane = () => combineChartWithText(buildProblemsPerDayChart(merged), resultText);
 
         // Weaknesses is the default (first) page. Empty panes (no weaknesses, too

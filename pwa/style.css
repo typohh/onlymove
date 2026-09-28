@@ -1791,7 +1791,7 @@ input, textarea, [contenteditable],
     padding-left: 1.5ch;
 }
 
-/* Heads the pace rows below the motif rows: same track, different subject. */
+/* Heads the pace rows under the Time chart. */
 .wk-section-title {
     margin-top: 0.9em;
     font-weight: 600;
@@ -1857,6 +1857,8 @@ input, textarea, [contenteditable],
 /* One colour for both tendency ends — see the note above. */
 .wk-row[data-tone="under"],
 .wk-row[data-tone="over"]   { --wk-tone: #d9534f; }
+/* Pace ends are advice either way, not a deficit: one un-valenced colour. */
+.wk-row[data-tone="pace"]   { --wk-tone: var(--accent); }
 
 .wk-track {
     position: relative;
