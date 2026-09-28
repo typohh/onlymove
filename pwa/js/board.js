@@ -193,10 +193,16 @@ function solvingRun() {
     return { level: Math.max(0, n - 1), firstId };
 }
 
+// The run as it stood when the board's problem was loaded (loadSgf). Every
+// repaint of that problem reads it, so the wear is fixed for as long as the
+// problem is on screen: measured afresh on each repaint, a minute's thought
+// would wipe the marks at the next click, the ghost stone's included.
+let pinnedRun = null;
+
 // Everything a board reads to draw its wear, set together so the stone set,
 // the stones' wear and the wood's wear describe one sitting.
 function applyWear(board) {
-    const run = solvingRun();
+    const run = pinnedRun ?? solvingRun();
     board.stoneSeed = currentStoneSeed();
     board.stoneFlawRate = flawRateForStreak(run.level);
     board.wearSeed = hashSeed(run.firstId);
@@ -248,6 +254,7 @@ export function loadSgf(sgfContent) {
     // previous problem; otherwise it survives the load and redraw() paints it
     // (colored by the new game's turn) on top of whatever stone now sits there.
     setGhostMove(null);
+    pinnedRun = solvingRun();
 
     const kifu = WGo.Kifu.fromSgf(sgfContent);
     const kifuReader = new WGo.KifuReader(kifu);
