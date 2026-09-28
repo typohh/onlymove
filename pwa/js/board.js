@@ -168,13 +168,14 @@ function currentStoneSeed() {
     return hashSeed(p && p.filename ? tsumegoIdOf(p.filename) : '');
 }
 
-// The stones and the wood wear with use: how many problems the user has
-// answered in the current run without a break, where a break is
-// STREAK_GAP_MS (one minute) with no attempt. Walked back from the newest attempt; a run
-// whose last attempt is older than the gap has ended, and counts zero. The
-// run's FIRST problem also names the sitting: the wood's wear is seeded from
-// it, so the marks stay put for the whole run (a run of zero is the problem
-// on screen, which becomes that first row once answered).
+// The stones and the wood wear with PACE: the level is the number of quick
+// answers in the current run, an answer being quick when it came within
+// STREAK_GAP_MS (one minute) of the one before. Walked back from the newest attempt; a
+// run whose last attempt is older than the gap has ended. The run's first
+// answer has no predecessor, so it says nothing about pace and adds no wear.
+// That first problem also names the sitting: the wood's wear is seeded from
+// it, so the marks stay put for the whole run (with no run, the problem on
+// screen, which becomes that first row once answered).
 const STREAK_GAP_MS = 60 * 1000;
 function solvingRun() {
     const rows = getMergedAnswerHistory();
@@ -189,7 +190,7 @@ function solvingRun() {
     const p = state.currentProblem;
     const firstId = n > 0 ? rows[rows.length - n].problemId
                           : (p && p.filename ? tsumegoIdOf(p.filename) : '');
-    return { length: n, firstId };
+    return { level: Math.max(0, n - 1), firstId };
 }
 
 // Everything a board reads to draw its wear, set together so the stone set,
@@ -197,9 +198,9 @@ function solvingRun() {
 function applyWear(board) {
     const run = solvingRun();
     board.stoneSeed = currentStoneSeed();
-    board.stoneFlawRate = flawRateForStreak(run.length);
+    board.stoneFlawRate = flawRateForStreak(run.level);
     board.wearSeed = hashSeed(run.firstId);
-    board.wearLevel = run.length;
+    board.wearLevel = run.level;
 }
 
 export function redraw() {
