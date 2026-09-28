@@ -1791,6 +1791,12 @@ input, textarea, [contenteditable],
     padding-left: 1.5ch;
 }
 
+/* Heads the pace rows below the motif rows: same track, different subject. */
+.wk-section-title {
+    margin-top: 0.9em;
+    font-weight: 600;
+}
+
 /* One reading per pane, so a row is a single stack: the line naming it, then the
    track it is drawn on. No name column — the name sits on the value's line. */
 .wk-row {

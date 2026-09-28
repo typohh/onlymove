@@ -7,39 +7,11 @@ import { getCurrentNode, getLegalMoveNode, playMoveByIndex, playNextMove } from 
 import { fadeOverlay } from './overlays.js';
 import { playStoneSound } from './audio.js';
 import { isCorrectMove, tsumegoIdOf, toBoardNotation, toCanonicalXy } from './sgf.js';
-import { APP_MODES, MODEL_INPUT_HISTORY_LENGTH } from './constants.js';
-import { MODEL_INDICES, benefitConfidenceForVar } from './recall-model.js';
-import { getTerm } from './i18n.js';
+import { APP_MODES } from './constants.js';
 import { sendReport, updateUserStats } from './attempt-recorder.js';
 import { completeCurrentProblem, advanceToNextProblem } from './problem-loader.js';
 import { enterAnalysisMode } from './analysis.js';
 import { fetchWrongAttemptStats } from './picked-embedding.js';
-
-const median = (values) => {
-    if (!values.length) return 0;
-    const sorted = [...values].sort((a, b) => a - b);
-    const mid = Math.floor(sorted.length / 2);
-    return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
-};
-
-// --- "Would more time help THIS user?" gate (rushing / insufficient-review overlays) ---
-// The stats-model solving/review-time coefficient (logit per minute) is biased
-// NEGATIVE by residual-difficulty confounding: a problem harder-than-its-rating
-// for this user takes longer AND fails more, so the within-user time effect soaks
-// up difficulty the model didn't capture (it controls only for MEASURED rank).
-// Quantified offline against the attempt log: the population-mean solving-time
-// coefficient is ~ -1.25 logit/min (the bias); review time shows no such bias
-// (~0). We recenter by that bias, then require the corrected estimate to
-// be positive with BENEFIT_CONFIDENCE certainty. That second step also handles
-// cold start for free: a user with little data has a wide SE, so the recentered
-// estimate sits near 50% and never clears the bar — no nagging until there's real
-// evidence this user benefits from slowing down. Captures ~11% of users at 0.80,
-// ~18% at 0.65 (solving time, client units). Raise the bar to nag fewer users.
-const BENEFIT_CONFIDENCE = 0.80;      // P(true benefit > 0) required to show the nudge
-// benefitConfidenceForVar (recenters the per-user time/review coeff by the
-// population confound) and setTimeBias now live in recall-model.js, alongside the L2
-// prior the same coefficient is shrunk toward — they must stay in lockstep.
-
 
 // `at` is the attempt's event time (ms), minted ONCE per answer in the click
 // handler and shared verbatim between the report payload (createdAt) and the
@@ -159,61 +131,6 @@ async function _handleIncorrectMoveSequence(moveIndex, x, y, variationNodes) {
         at,
     });
 
-    // Calculate overlay duration and message based on time spent
-    const timeSpent = state.accumulatedSolvingTime + (state.currentSolvingStartTime ? Date.now() - state.currentSolvingStartTime : 0);
-    let duration = 2000; // 2s default
-    let message = '';
-    let buttonText = null;
-    const statsResults = state.statsResults ? state.statsResults.results : null;
-    const statsAreAvailable = statsResults && statsResults.length > 0;
-
-    if (state.currentProblem?.isRepeat) {
-        let reviewConf = 0;
-        let medianReviewTime = 0;
-        let previousReviewTime = 0;
-        if (statsAreAvailable) {
-            const recentHistory = state.answerHistory.slice(-MODEL_INPUT_HISTORY_LENGTH);
-            const reviewTimeValues = recentHistory.map(p => p.reviewTime).filter(t => t !== undefined && t > 0);
-            medianReviewTime = median(reviewTimeValues);
-
-            // Get accumulated review time for this problem
-            const currentProblem = state.currentProblem;
-            const problemId = tsumegoIdOf(currentProblem.filename);
-            const previousAnswers = state.answerHistory.filter(ans => ans.problemId === problemId);
-            if (previousAnswers.length > 0) {
-                const lastAnswer = previousAnswers[previousAnswers.length - 1];
-                previousReviewTime = (lastAnswer.accumulatedReview || 0) + (lastAnswer.reviewTime || 0);
-            }
-
-            const reviewStat = statsResults.find(r => r.varIndex === MODEL_INDICES.REVIEW_TIME);
-            reviewConf = benefitConfidenceForVar(reviewStat, MODEL_INDICES.REVIEW_TIME);
-        }
-
-        if (reviewConf >= BENEFIT_CONFIDENCE && previousReviewTime < medianReviewTime) {
-            duration = 6000;
-            const x = Math.round(previousReviewTime / 1000);
-            message = getTerm('insufficientReviewMessage', { seconds: x, confidence: (reviewConf * 100).toFixed(0) });
-            buttonText = getTerm('iWontRushIt');
-        }
-    } else { // Careless mistake for new problems
-        let timeConf = 0;
-        let medianSolvingTime = 0;
-        if (statsAreAvailable) {
-            const recentHistory = state.answerHistory.slice(-MODEL_INPUT_HISTORY_LENGTH);
-            const timeTakenValues = recentHistory.map(p => p.timeTaken).filter(t => t !== undefined);
-            medianSolvingTime = median(timeTakenValues);
-            const timeStat = statsResults.find(r => r.varIndex === MODEL_INDICES.TIME_SOLVING);
-            timeConf = benefitConfidenceForVar(timeStat, MODEL_INDICES.TIME_SOLVING);
-        }
-
-        if (timeConf >= BENEFIT_CONFIDENCE && state.accumulatedSolvingTime < medianSolvingTime) {
-            duration = 6000; // This duration will be ignored as buttonText is set
-            const x = Math.round(timeSpent / 1000);
-            message = getTerm('rushingMessage', { seconds: x, confidence: (timeConf * 100).toFixed(0) });
-            buttonText = getTerm('iWontRushIt');
-        }
-    }
-
     // Show the red result overlay and, under its cover, transition into review:
     // completeCurrentProblem moves the failed problem into the previous slot,
     // clears currentProblem (so review-exit advances to a fresh selection and a
@@ -223,15 +140,14 @@ async function _handleIncorrectMoveSequence(moveIndex, x, y, variationNodes) {
     // work is done, so it never lifts onto a stale board; the NEXT problem is
     // deliberately NOT loaded here — redisplayCurrentProblem selects it when
     // the user leaves review (behind a grey loading fade if selection is slow).
-    await fadeOverlay(duration, async () => {
+    await fadeOverlay(2000, async () => {
         await completeCurrentProblem();
         await enterAnalysisMode();
-    }, stats, message, { background: 'rgba(139, 0, 0, 0.9)', text: 'white' }, { buttonText });
+    }, stats, null, { background: 'rgba(139, 0, 0, 0.9)', text: 'white' });
 
     // The review clock starts when the user can actually SEE the review board:
     // enterAnalysisMode stamped reviewStartTime at the under-cover paint, which
-    // would bill the overlay hold (indefinite on the button-gated rushing
-    // nudge) as review time.
+    // would bill the overlay hold as review time.
     setReviewStartTime(Date.now());
 }
 

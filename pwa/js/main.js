@@ -34,7 +34,7 @@ try {
 }
 
 import { updateAllUI, updateBoardSize, captureDetailsText, handleInstallClick, refreshNotifState, initCornerMark } from './ui.js';
-import { getRecallCandidates } from './recall-model.js';
+import { getRecallCandidates, calculateAndStoreStatsResults } from './recall-model.js';
 import { showDetailedStats } from './stats-ui.js';
 import { maybeUploadSchedule, syncRecallNotification } from './notifications.js';
 import { recordShareEvent } from './attempt-recorder.js';
@@ -503,7 +503,7 @@ function wireActionButtons() {
 // M (rating→rank) and the population constants are inlined into the bundle at
 // build time and REQUIRED: package_for_pwa ships only raw ratings, so without M
 // the client can't rank a single problem (selection, UI, recall), and the
-// population constants back the recall scheduler and the rushing/review nudges
+// population constants back the recall scheduler and the pace readings
 // with no baked fallback. Being inlined they can't fail to load at runtime —
 // the guard only trips on a malformed/empty package (a build-time error), so
 // bail loudly.
@@ -840,6 +840,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Idempotent and history-pure, so it costs one window fit and needs no version
     // stamp or migration to decide whether it applies.
     reanchorRank(getMergedAnswerHistory());
+
+    // The recall model's readouts (statsResults) are not persisted, and the
+    // front-page pace readings read them before any answer this session would
+    // retrain. One fit from local history, synchronous and history-pure.
+    calculateAndStoreStatsResults();
 
     // Fire-and-forget backfill: fills `embedding` and refreshes problemRating
     // (raw) + problemRank on stale answerHistory entries from already-deployed

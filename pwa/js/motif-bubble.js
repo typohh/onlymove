@@ -34,9 +34,10 @@ import { appMetrics, layoutMode } from './viewport.js';
 import { flaggedMotifCategories } from './weakness.js';
 import { onTrainingFocusShown } from './onboarding.js';
 import { hintAnchor } from './hint-bubble.js';
-import { explainMotif } from './motif-explain.js';
+import { explainMotif, explainPace } from './motif-explain.js';
+import { computePaceReadings, PACE_KINDS } from './pace-readings.js';
 import { computeMotifStats } from './motif-stats.js';
-import { orientReadings } from './motif-readings.js';
+import { orientReadings, isFlagged } from './motif-readings.js';
 
 const MIN_Z = MOTIF_Z;    // include a problem motif only past the shared gate
 const MAX_MOTIFS = 3;
@@ -213,6 +214,18 @@ function trainingFocusMotifs() {
                                   reading: oriented ? oriented[readingKind] : null });
         };
         scored.push({ z, text, explain });
+    }
+    // The pace readings compete for the same slots on the same z. Only the
+    // weak side is a training direction — "more time helps you less than most"
+    // is nothing to work on, the counterpart of `strong` above.
+    const pace = computePaceReadings();
+    for (const kind of PACE_KINDS) {
+        const r = pace[kind];
+        if (!isFlagged(r) || r.z > 0) continue;
+        const key = kind === 'review' ? 'trainingFocusShortReview' : 'trainingFocusRushing';
+        const z = -r.z;
+        scored.push({ z, text: getTerm(z > CONFIDENT_Z ? key : `${key}Tentative`),
+                      explain: () => explainPace({ pace: kind, reading: computePaceReadings()[kind] }) });
     }
     scored.sort((a, b) => b.z - a.z);
     return scored.slice(0, MAX_MOTIFS);

@@ -139,8 +139,8 @@ let LN_C_PRIOR;   // per-user base log-stability prior; LN_C is L2-shrunk to thi
 // population_constants.json via setTimeBias(). Two roles, both load-bearing and
 // they MUST agree: (1) it is the prior the per-user TIME_SOLVING/REVIEW_TIME
 // coefficients are L2-shrunk toward (converted to per-percentile per training
-// run, see fitUserModel), and (2) the displayed/gated "% chance more time
-// helps" recenters the fitted coefficient by it (benefitConfidence). If the
+// run, see fitUserModel), and (2) the displayed "% chance more time helps"
+// and the pace readings recenter the fitted coefficient by it (benefitConfidence). If the
 // shrinkage prior and the recentering offset disagree, an uninformative user
 // can never read 50% — anchoring both here keeps them consistent.
 let TIME_BIAS_PER_MIN;
@@ -693,6 +693,8 @@ const LAMBDA_SCALE_BY_PARAM = {
     [MODEL_INDICES.PROBLEM_DIFFICULTY]: LADDER_SPAN_AT_LAMBDA_TUNING ** 2,
 };
 const LAMBDA_SCALE = (j) => LAMBDA_SCALE_BY_PARAM[j] ?? 1;
+// The shared L2 strength (a precision, in the raw-sum units the fit works in).
+const L2_LAMBDA = 10;
 
 // Apply the retention constants from the (MANDATORY) population_constants.json;
 // population-constants.js calls this at boot before any training/scheduling, and also
@@ -733,19 +735,31 @@ export function setTimeBias({ timePerMin, reviewPerMin } = {}) {
 // coeff/se passed in are already per-MINUTE (calculateResultsAndStdErrors scales
 // them by 1/time_per_percentile_min), matching the per-minute bias.
 function benefitConfidence(stat, biasPerMin) {
-    if (!stat || !(stat.se > 0)) return 0;
-    const z = (stat.coeff - biasPerMin) / stat.se;   // bias is negative ⇒ shifts the estimate up
-    return normCdf(z);
+    const b = recenteredBenefit(stat, biasPerMin);
+    return b ? normCdf(b.coeff / b.se) : 0;
+}
+
+function recenteredBenefit(stat, biasPerMin) {
+    if (!stat || !(stat.se > 0) || !Number.isFinite(stat.coeff)) return null;
+    return { coeff: stat.coeff - biasPerMin, se: stat.se };   // bias is negative ⇒ shifts the estimate up
 }
 
 // Var-keyed wrapper: picks the population bias for this model term and returns the
 // recentered one-sided benefit confidence. Exported so the stats Time tab displays
-// the SAME corrected "% chance more time helps" the nudge gate tests against —
-// otherwise the tab would show the raw, confound-biased coeff.
+// the SAME corrected "% chance more time helps" the pace readings (pace-readings.js)
+// are built from — otherwise the tab would show the raw, confound-biased coeff.
 export function benefitConfidenceForVar(stat, varIndex) {
-    const biasPerMin = varIndex === MODEL_INDICES.REVIEW_TIME ? REVIEW_BIAS_PER_MIN : TIME_BIAS_PER_MIN;
-    return benefitConfidence(stat, biasPerMin);
+    return benefitConfidence(stat, biasForVar(varIndex));
 }
+
+// The same recentered coefficient as {coeff, se} in logit per minute, or null
+// when there is no usable stat — what the pace readings convert to ranks.
+export function benefitForVar(stat, varIndex) {
+    return recenteredBenefit(stat, biasForVar(varIndex));
+}
+
+const biasForVar = (varIndex) =>
+    varIndex === MODEL_INDICES.REVIEW_TIME ? REVIEW_BIAS_PER_MIN : TIME_BIAS_PER_MIN;
 
 // Population prior on logit-per-rank: a 1-rank skill gap shifts the log-odds
 // of a correct answer by roughly this much. Treated as a Gaussian prior whose
@@ -861,11 +875,19 @@ export function prepareTrainingData(history, validHistory) {
     const n = history.length;
     const p_low = 0.45, p_high = 0.55;
 
+    // A solve time of 0 is UNKNOWN, not instant: rows from before solve times
+    // were recorded sync in as 0. They are kept for everything else the model
+    // reads, but placed at the neutral percentile and left out of the time
+    // scale — a window of mostly zeros otherwise collapses the per-minute
+    // conversion and reads the coefficient in the wrong units.
     const timeTakenValues = history.map(p => p.timeTaken);
-    const sortedTime = [...timeTakenValues].sort((a, b) => a - b);
-    const time_per_percentile_min = (sortedTime[Math.ceil(p_high * (n - 1))] - sortedTime[Math.floor(p_low * (n - 1))]) / (60000 * (p_high - p_low));
-    
-    const percentileTime = timeTakenValues.map(t => calculatePercentile(sortedTime, t));
+    const sortedTime = timeTakenValues.filter(t => t > 0).sort((a, b) => a - b);
+    const nt = sortedTime.length;
+    const time_per_percentile_min = nt > 0
+        ? (sortedTime[Math.ceil(p_high * (nt - 1))] - sortedTime[Math.floor(p_low * (nt - 1))]) / (60000 * (p_high - p_low))
+        : 0;
+
+    const percentileTime = timeTakenValues.map(t => (t > 0 ? calculatePercentile(sortedTime, t) : 0.5));
 
     const previousReviewTimes = history.map(p => {
         if (p.isRepeat) {
@@ -962,7 +984,6 @@ function fitUserModel(trainingData, params) {
     const { y, weights, elapsedDays, isRepeatArr, n, floors,
             time_per_percentile_min, time_per_percentile_min_r } = trainingData;
     const M = MODEL_INDICES;
-    const lambda = 10; // L2 regularization parameter
 
     // Per-run L2 targets. The TIME_SOLVING/REVIEW_TIME coefficients live in
     // per-percentile units (the feature is a 0..1 percentile), but the population
@@ -977,7 +998,7 @@ function fitUserModel(trainingData, params) {
     // INTERCEPT (logit level) is the only unregularized parameter; LN_C is
     // shrunk to its population prior (LN_C_PRIOR) via L2 like the others.
     const targetFor = (j) => targets[j] || 0;
-    const precisionFor = (j) => (j === M.INTERCEPT ? 0 : LAMBDA_SCALE(j) * lambda);
+    const precisionFor = (j) => (j === M.INTERCEPT ? 0 : LAMBDA_SCALE(j) * L2_LAMBDA);
 
     // Features are independent of params, so build the design matrix once.
     const X = Array.from({ length: n }, (_, i) => featuresForTrainingRow(trainingData, i));
@@ -1146,6 +1167,13 @@ export function calculateResultsAndStdErrors(finalParams, trainingData) {
             for (const b of logitIdx) info[a][b] += va * xi[b];
         }
     }
+    // The time and review coefficients are read as POSTERIORS (the pace
+    // readings test them against the population confound they are shrunk
+    // toward), so their information carries the prior's precision too. Leaving
+    // it out pairs a shrunk estimate with an unshrunk SE, which deflates every
+    // z built from them. The other coefficients keep the likelihood-only
+    // information their consumers blend with priors of their own.
+    for (const j of [M.TIME_SOLVING, M.REVIEW_TIME]) info[j][j] += LAMBDA_SCALE(j) * L2_LAMBDA;
     for (let j = 0; j < np; j++) info[j][j] += RIDGE_GUARD;
     const varCovarMatrix = invertMatrix(info);
     const stdErrors = varCovarMatrix.map((row, j) => Math.sqrt(row[j]));
@@ -1153,8 +1181,16 @@ export function calculateResultsAndStdErrors(finalParams, trainingData) {
     const results = [];
     for (let i = 1; i < Object.keys(MODEL_INDICES).length; i++) {
         let coeff = finalParams[i], se = stdErrors[i], scaleFactor = 1;
-        if (i === MODEL_INDICES.TIME_SOLVING && time_per_percentile_min > 0) scaleFactor = 1 / time_per_percentile_min;
-        else if (i === MODEL_INDICES.REVIEW_TIME && time_per_percentile_min_r > 0) scaleFactor = 1 / time_per_percentile_min_r;
+        // The time and review coefficients are reported per MINUTE, which needs
+        // a spread of known times to convert from percentiles; without one there
+        // is no per-minute coefficient to report, and none is.
+        if (i === MODEL_INDICES.TIME_SOLVING) {
+            if (!(time_per_percentile_min > 0)) continue;
+            scaleFactor = 1 / time_per_percentile_min;
+        } else if (i === MODEL_INDICES.REVIEW_TIME) {
+            if (!(time_per_percentile_min_r > 0)) continue;
+            scaleFactor = 1 / time_per_percentile_min_r;
+        }
         // PROBLEM_DIFFICULTY is a multiplier on a_p·gap, so the effective
         // logit-per-rank is coeff·a_p. Fold a representative a_p (A_REF) into the
         // reported coeff so getLogitPerRank / the size-comparison readout keep a
@@ -1162,7 +1198,10 @@ export function calculateResultsAndStdErrors(finalParams, trainingData) {
         else if (i === MODEL_INDICES.PROBLEM_DIFFICULTY) scaleFactor = A_REF;
         results.push({ coeff: coeff * scaleFactor, se: se * Math.abs(scaleFactor), varIndex: i, scaleFactor });
     }
-    return { results, varCovarMatrix };
+    // How many of the window's rows are repeats: below a handful the review
+    // coefficient is its prior, and the pace reading declines to report it.
+    const nRepeats = isRepeatArr.filter(Boolean).length;
+    return { results, varCovarMatrix, nRepeats };
 }
 
 

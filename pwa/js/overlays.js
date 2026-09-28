@@ -227,13 +227,10 @@ function captureBoardSnapshot(boardWrapper) {
 // (e.g. correct answers), a snapshot of the current board is captured and blurred,
 // holding the old position while the new problem loads underneath, then dissolving
 // into the new board as it unblurs — giving a seamless cross-fade with no color cover.
-// With `buttonText` the overlay is additionally held until the user taps the
-// button (the min-duration gate is skipped — the button IS the dismissal);
-// the swap gate still applies, so it can never lift onto an unready board.
 // Returns a promise that resolves when the fade-out starts, i.e. when the
 // board underneath becomes visible to the user.
 let fadeGeneration = 0;
-export function fadeOverlay(duration, callback, stats = null, message = null, colors = { background: 'transparent', text: 'white' }, { buttonText = null } = {}) {
+export function fadeOverlay(duration, callback, stats = null, message = null, colors = { background: 'transparent', text: 'white' }) {
     const parent = getOverlayParent();
     const boardWrapper = getBoardWrapper(parent);
     const existing = parent.querySelectorAll('.result-overlay');
@@ -252,22 +249,8 @@ export function fadeOverlay(duration, callback, stats = null, message = null, co
     overlay.className = 'app-blocking-overlay result-overlay';
     overlay.style.backgroundColor = colors.background;
 
-    let buttonClicked = Promise.resolve();
-    if (stats || message || buttonText) {
-        const content = createOverlayContent(stats, message || '', colors.text);
-        if (buttonText) {
-            buttonClicked = new Promise((resolve) => {
-                const button = document.createElement('button');
-                button.textContent = buttonText;
-                button.className = 'result-btn';
-                button.onclick = () => {
-                    button.disabled = true;
-                    resolve();
-                };
-                content.appendChild(button);
-            });
-        }
-        overlay.appendChild(content);
+    if (stats || message) {
+        overlay.appendChild(createOverlayContent(stats, message || '', colors.text));
     }
 
     parent.appendChild(overlay);
@@ -290,9 +273,7 @@ export function fadeOverlay(duration, callback, stats = null, message = null, co
         .then(() => (callback ? callback() : undefined));
     // ...but stay up at least `duration` so the transition never flickers when
     // the load is instant (cached problem).
-    const minDisplay = buttonText
-        ? Promise.resolve()
-        : new Promise(resolve => setTimeout(resolve, duration));
+    const minDisplay = new Promise(resolve => setTimeout(resolve, duration));
 
     // Clicks stay off until the cover LIFTS, not until the swap underneath
     // has painted: the swap re-enables them (displayProblem, enterAnalysisMode),
@@ -308,7 +289,7 @@ export function fadeOverlay(duration, callback, stats = null, message = null, co
         updateAllUI();
     });
 
-    return Promise.all([relocked, minDisplay, buttonClicked]).catch(() => {}).then(() => {
+    return Promise.all([relocked, minDisplay]).catch(() => {}).then(() => {
         if (generation === fadeGeneration) {
             setAcceptClicks(true);
             updateAllUI();

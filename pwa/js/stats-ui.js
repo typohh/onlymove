@@ -120,8 +120,8 @@ export async function showDetailedStats() {
 
         // Timing observations → Time tab. Recenter by the population confounding
         // bias (benefitConfidenceForVar) so the displayed "% chance more time helps"
-        // is the SAME corrected figure the rushing/insufficient-review nudge gate
-        // tests against — not the raw, difficulty-confounded coefficient.
+        // is the SAME corrected figure the pace readings (pace-readings.js) are built
+        // from — not the raw, difficulty-confounded coefficient.
         for (const result of results) {
             const { varIndex } = result;
             let termKey;

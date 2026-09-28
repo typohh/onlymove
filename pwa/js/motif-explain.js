@@ -4,7 +4,8 @@
 // two readings says about the user on it, with the number in it. Opened from
 // the front page's Weaknesses list, from each row of the Weaknesses and
 // Tendencies panes, and from the review-mode "what this tests" list (where it
-// is the description alone — no reading is about the problem).
+// is the description alone — no reading is about the problem). explainPace
+// is the same thing for the two pace rows.
 //
 // The description is keyed by the axis's CANONICAL English name (labels.json
 // `positive`/`negative`), which is what package_for_pwa resolves a shipped tail
@@ -79,3 +80,21 @@ export function explainMotif({ component, side = 'positive', name, kind, reading
     return parts.join('\n\n');
 }
 
+/**
+ * Text for a pace hint (pace-readings.js). `pace` is 'solving' or 'review';
+ * `reading` is that pace reading, oriented like strength, or null.
+ */
+export function explainPace({ pace, reading }) {
+    const key = pace === 'review' ? 'Review' : 'Solving';
+    const parts = [getTerm(`paceDesc${key}`)];
+    const r = reading;
+    if (!r || !Number.isFinite(r.z)) {
+        parts.push(getTerm('paceExplainNoData'));
+    } else if (!isFlagged(r)) {
+        parts.push(getTerm(`paceExplain${key}Unresolved`, { ranks: fmtRanks(r.ranks) }));
+    } else {
+        parts.push(getTerm(`paceExplain${key}${r.z < 0 ? 'Weak' : 'Strong'}`, { ranks: fmtRanks(r.ranks) }));
+        if (Math.abs(r.z) <= CONFIDENT_Z) parts.push(getTerm('motifExplainTentative'));
+    }
+    return parts.join('\n\n');
+}

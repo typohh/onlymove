@@ -7,8 +7,8 @@ drifting from a one-off manual fit.
 
 Three groups of constants:
 
-1. Overlay time-benefit BIAS (logit per minute). The rushing / insufficient-review
-   overlays gate on a per-user solving/review-time coefficient that is biased
+1. Time-benefit BIAS (logit per minute). The pace readings (thinking time /
+   review time) read a per-user solving/review-time coefficient that is biased
    NEGATIVE by residual-difficulty confounding (a problem harder-than-its-rating
    for a user takes longer AND fails more). We estimate the population-mean
    coefficient — the additive bias the client recenters by — under the SAME 3PL

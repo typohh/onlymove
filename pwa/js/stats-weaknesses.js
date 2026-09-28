@@ -44,7 +44,8 @@ import { getRecallCandidates } from './recall-model.js';
 import { computeMotifStats, isFlagged, usableMotifAttempts } from './motif-stats.js';
 import { MIN_ATTEMPTS, orientReadings } from './motif-readings.js';
 import { hintAnchor } from './hint-bubble.js';
-import { explainMotif } from './motif-explain.js';
+import { explainMotif, explainPace } from './motif-explain.js';
+import { computePaceReadings, PACE_KINDS, PACE_NAME_KEYS } from './pace-readings.js';
 import { beginExampleReview } from './problem-loader.js';
 import { enterAnalysisMode } from './analysis.js';
 import { hideStatsModal, restoreStatsModal, discardStatsModal } from './stats-ui.js';
@@ -89,6 +90,11 @@ export function buildMotifPane(kind, history = state.answerHistory) {
 
     const root = document.createElement('div');
     root.className = 'stats-issues';
+    // The strength pane closes with the pace rows, whatever the motif rows did.
+    const finish = () => {
+        if (kind === 'strength') appendPaceSection(root);
+        return root;
+    };
 
     const stats = computeMotifStats(history);
     if (!stats || stats.length === 0) {
@@ -96,7 +102,7 @@ export function buildMotifPane(kind, history = state.answerHistory) {
         empty.className = 'stats-issues-empty';
         empty.textContent = getTerm('statsIssuesNotEnough', { min: MIN_ATTEMPTS, count: usableMotifAttempts(history) });
         root.appendChild(empty);
-        return root;
+        return finish();
     }
 
     const rows = [];
@@ -120,7 +126,7 @@ export function buildMotifPane(kind, history = state.answerHistory) {
         empty.className = 'stats-issues-empty';
         empty.textContent = getTerm('statsIssuesNoAxes');
         root.appendChild(empty);
-        return root;
+        return finish();
     }
 
     // Strongest evidence first, on the reading this pane shows.
@@ -136,9 +142,56 @@ export function buildMotifPane(kind, history = state.answerHistory) {
     const scale = paneScale(kind, rows);
     for (const row of rows) table.appendChild(buildMotifRow(kind, row, recallSet, history, scale));
     root.appendChild(table);
-    root.appendChild(buildIntervalNote());
+    if (kind !== 'strength') root.appendChild(buildIntervalNote());
 
-    return root;
+    return finish();
+}
+
+// The pace rows (pace-readings.js): drawn exactly like strength rows — same
+// poles, same track, same two-step colour — on a scale of their own, since
+// their unit is ranks PER MINUTE rather than ranks. Both rows always show; a
+// reading with no data is the full-width "we don't know" band. The interval
+// note closes the pane here, as it covers both tables.
+function appendPaceSection(root) {
+    const readings = computePaceReadings();
+    const title = document.createElement('div');
+    title.className = 'wk-section-title';
+    title.textContent = getTerm('statsPaceTitle');
+    root.appendChild(title);
+
+    const table = document.createElement('div');
+    table.className = 'wk-table';
+    table.appendChild(buildHeaderRow('strength'));
+    const rows = PACE_KINDS.map(pace => ({ pace, strength: readings[pace] }));
+    const scale = paneScale('strength', rows);
+    for (const row of rows) table.appendChild(buildPaceRow(row, scale));
+    root.appendChild(table);
+    root.appendChild(buildIntervalNote());
+}
+
+function buildPaceRow(row, scale) {
+    const el = document.createElement('div');
+    el.className = 'wk-row';
+    const spec = cellFor('strength', row, scale);
+    el.dataset.tone = spec ? spec.tone : 'none';
+    el.style.setProperty('--wk-weight', (spec ? spec.weight : 0).toFixed(3));
+
+    const lead = document.createElement('div');
+    lead.className = 'wk-lead';
+    const name = document.createElement('span');
+    name.className = 'wk-name motif-hint';
+    name.textContent = getTerm(PACE_NAME_KEYS[row.pace]);
+    hintAnchor(name, () => explainPace({ pace: row.pace, reading: row.strength }));
+    lead.appendChild(name);
+    const value = document.createElement('span');
+    value.className = 'wk-value';
+    value.textContent = spec
+        ? getTerm('statsPaceRanksPerMinute', { value: fmtRank(row.strength.ranks) })
+        : getTerm('statsMotifNoData');
+    lead.appendChild(value);
+    el.appendChild(lead);
+    el.appendChild(buildMetricCell(spec || EMPTY_CELL));
+    return el;
 }
 
 // Names the band's width in the pane's smallest type. Worth one line because
