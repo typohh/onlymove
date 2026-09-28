@@ -8,7 +8,7 @@ import { state, setBoard, setKifuReader, setGhostMove, getMergedAnswerHistory } 
 import { handleBoardClick as handleTsumegoClick } from './game-logic.js';
 import { handleBoardClick as handleAnalysisClick } from './analysis.js';
 import { updateBoardSize, updateCapturesUI } from './ui.js';
-import { APP_MODES, usesTapToConfirm } from './constants.js';
+import { APP_MODES } from './constants.js';
 import { COL_LETTERS, tsumegoIdOf } from './sgf.js';
 import { FLAWED_SHELL, hashSeed, flawRateForStreak } from './stone-style.js';
 import { makeBoardWearLayer, gridWear } from './board-wear.js';
@@ -19,35 +19,32 @@ const boardContainer = document.getElementById('board-container');
 
 const handleBoardClick = (x, y) => {
     if (state.appMode === APP_MODES.SOLVING || state.appMode === APP_MODES.LINKED) {
-        // Honor the click-lock here too. The desktop branch delegates to
-        // handleTsumegoClick (which guards on acceptClicks), but the mobile
-        // first-tap sets state.ghostMove directly — so without this guard a tap
+        // Honor the click-lock here too. The confirming click delegates to
+        // handleTsumegoClick (which guards on acceptClicks), but the first
+        // click sets state.ghostMove directly — so without this guard a click
         // during the locked post-solve transition (board still showing the old
         // problem) registers a ghost that then bleeds onto the next problem.
         if (!state.acceptClicks) return;
-        if (usesTapToConfirm()) {
-            if (state.ghostMove) {
-                if (state.ghostMove.x === x && state.ghostMove.y === y) {
-                    // confirm
-                    setGhostMove(null);
-                    handleTsumegoClick(x, y);
-                } else {
-                    // cancel
-                    setGhostMove(null);
-                    redraw();
-                }
+        // Two clicks to play, on every device: the first sets a ghost stone,
+        // a second on the same point confirms it, anywhere else cancels it.
+        if (state.ghostMove) {
+            if (state.ghostMove.x === x && state.ghostMove.y === y) {
+                // confirm
+                setGhostMove(null);
+                handleTsumegoClick(x, y);
             } else {
-                // first click
-                const legalNode = getLegalMoveNode(x, y);
-                if (legalNode) {
-                    setGhostMove({ x, y });
-                }
-                // Always redraw to ensure board state is correct, even if click was invalid
+                // cancel
+                setGhostMove(null);
                 redraw();
             }
         } else {
-            // desktop: single click
-            handleTsumegoClick(x, y);
+            // first click
+            const legalNode = getLegalMoveNode(x, y);
+            if (legalNode) {
+                setGhostMove({ x, y });
+            }
+            // Always redraw to ensure board state is correct, even if click was invalid
+            redraw();
         }
     } else if (state.appMode === APP_MODES.ANALYZING) {
         handleAnalysisClick(x, y);
@@ -115,8 +112,8 @@ export function initializeBoard(size) {
     updateBoardSize();
 }
 
-// Typed-coordinate entry (coord-input.js). Mirrors the desktop click path —
-// no mobile ghost-stone confirmation, since a typed coordinate is already
+// Typed-coordinate entry (coord-input.js). Plays in one step — no
+// ghost-stone confirmation, since a typed coordinate is already
 // deliberate. Returns whether a move was actually played: a click's feedback
 // is the board itself, but typing needs an explicit invalid signal.
 export function playTypedMove(x, y) {
@@ -246,7 +243,7 @@ export function redraw() {
 }
 
 export function loadSgf(sgfContent) {
-    // A new board invalidates any pending mobile two-tap ghost stone from the
+    // A new board invalidates any pending two-click ghost stone from the
     // previous problem; otherwise it survives the load and redraw() paints it
     // (colored by the new game's turn) on top of whatever stone now sits there.
     setGhostMove(null);

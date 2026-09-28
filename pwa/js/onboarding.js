@@ -21,7 +21,7 @@
 import { state, getMergedAnswerHistory } from './state.js';
 import { createBubble, placeBubble, absorbDismissTap } from './bubble.js';
 import { getTerm } from './i18n.js';
-import { APP_MODES, HISTORY_BACKFILL_DONE_KEY, usesTapToConfirm } from './constants.js';
+import { APP_MODES, HISTORY_BACKFILL_DONE_KEY } from './constants.js';
 import { waitingRecallCount } from './recall-model.js';
 import { supportsNotifications, notificationPermission, getCurrentSubscription } from './notifications.js';
 
@@ -164,13 +164,13 @@ const isVisible = (node) => {
 // on the device (resolved at render time, not module-eval).
 
 const BUBBLES = {
-    // The one bubble that describes the input itself, so it has to match the
-    // branch board.js takes: two taps to play on touch, one click on desktop.
+    // The one bubble that describes the input itself, so it has to match
+    // board.js: two clicks to play, the first setting a ghost stone.
     // Offered on a shared problem too — for a newcomer arriving through a link
     // that IS the first board.
     intro: {
         kind: 'trigger', anchor: 'board', placement: 'above',
-        text: () => (usesTapToConfirm() ? 'onbIntroTouch' : 'onbIntro'),
+        text: 'onbIntro',
         eligible: () => historyLen() <= 1,
     },
     recall: {

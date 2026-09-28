@@ -158,7 +158,7 @@ When the candidate pool is thin, or an unloaded shard sits nearer the serve rank
 
 ### 4.5. Board interaction (`js/board.js`)
 
-Wraps WGo.js for rendering, stone placement, markers, and analysis hints. Routes click events to `game-logic.js` or `analysis.js` based on `state.appMode`. Implements a "ghost stone" double-click confirmation for mobile.
+Wraps WGo.js for rendering, stone placement, markers, and analysis hints. Routes click events to `game-logic.js` or `analysis.js` based on `state.appMode`. Implements the "ghost stone" two-click confirmation: the first click marks the move, a second on the same point plays it.
 
 ### 4.6. The client-side models
 
