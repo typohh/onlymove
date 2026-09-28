@@ -96,8 +96,7 @@ function createOverlayContent(stats, message, textColor) {
         // the badge bubble changed. attempt-recorder has already decided each
         // (rankBandCrossing / serverBandCrossings) and only reports a crossing
         // that agrees with the answer — so no line can contradict the number
-        // above. The lines are named by system only when a server line is
-        // present; alone, OnlyMove's reads as it always has.
+        // above. Every line names its system, OnlyMove's included.
         const crossings = [];
         if (stats.rankChangeDirection !== 'same') {
             crossings.push({ system: 'OnlyMove', direction: stats.rankChangeDirection,
@@ -107,13 +106,12 @@ function createOverlayContent(stats, message, textColor) {
             crossings.push({ system: c.server, direction: c.direction, rank: getDescriptiveRank(c.band) });
         }
         if (crossings.length > 0) {
-            const named = crossings.some(c => c.system !== 'OnlyMove');
             const block = document.createElement('div');
             block.className = 'result-line-sm';
             for (const c of crossings) {
                 const line = document.createElement('div');
-                const change = getTerm(c.direction === 'up' ? 'rankUpTo' : 'rankDownTo', { rank: c.rank });
-                line.textContent = named ? getTerm('rankSystemLine', { system: c.system, change }) : change;
+                line.textContent = getTerm(c.direction === 'up' ? 'rankUpTo' : 'rankDownTo',
+                    { rank: c.rank, system: c.system });
                 block.appendChild(line);
             }
             container.appendChild(block);
