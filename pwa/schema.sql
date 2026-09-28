@@ -413,6 +413,30 @@ CREATE TABLE IF NOT EXISTS hidden_profiles (
     user_id    TEXT PRIMARY KEY,
     created_at TEXT NOT NULL
 );
+-- Contribution-rewards entries (the /contest page, src/contest.js). One row per
+-- (category, account); written only by the organiser's auxiliary/contest_entries.mjs,
+-- never by a Worker route. The row holds only what the account cannot supply:
+-- the date the entry went public, and for a video the link, the number of problems
+-- solved on camera, the view count and the organiser's quality score. Everything
+-- else the page shows is resolved at compute time off the account — the name
+-- (linked EGD/AGA display_name, else the alias, withheld by hidden_profiles), the
+-- federation rank (the latest EGD/AGAR heartbeat in rank_surveys) and the OnlyMove
+-- ranks (a replay of the account's novel attempts) — so an entry has no anonymity
+-- flag of its own. `reference` marks the organiser's own listed account, which is
+-- shown but takes no prize.
+CREATE TABLE IF NOT EXISTS contest_entries (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    category       TEXT NOT NULL CHECK (category IN ('strength', 'video')),
+    user_id        TEXT NOT NULL,
+    submitted_at   TEXT NOT NULL,
+    reference      INTEGER NOT NULL DEFAULT 0,
+    video_url      TEXT,
+    video_problems INTEGER,
+    views          INTEGER,
+    quality        REAL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_contest_entries_account ON contest_entries(category, user_id);
+
 -- Google sign-in: a second way back into an account CODE, never a second kind of
 -- account. Presence of a row means the Google account whose opaque subject id is
 -- `google_sub` can be used to look this account's code up again on a device that

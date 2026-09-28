@@ -13,6 +13,7 @@ import { handleLink, handleUnlink } from './handlers/link.js';
 import { handleLeaderboard } from './handlers/leaderboard-page.js';
 import { handleStatistics } from './handlers/statistics-page.js';
 import { handleTournament } from './handlers/tournament-page.js';
+import { handleContest } from './handlers/contest-page.js';
 import { handleProfileHide, handleProfile } from './handlers/profile.js';
 import { handleAlias } from './handlers/alias.js';
 import { handleGoogleSignIn, handleGoogleLink, handleGoogleUnlink } from './handlers/google.js';
@@ -84,6 +85,9 @@ const GET_ROUTES = [
   // Static FINAL-RESULTS page for the concluded 2026 tournament (baked-in
   // standings, no D1 read).
   { path: '/tournament', handler: () => handleTournament() },
+  // Contribution-rewards page (HTML): the rules and the live entry lists, from
+  // the cached contest blob (src/contest.js), recomputed on request every 12h.
+  { path: '/contest', handler: (request, env) => handleContest(env) },
   // The account's leaderboard profile: the hide flag + the linked EGD/AGA identity,
   // which is everything the Account dialog paints. Read; no limiter. no-store, set
   // in the handler.

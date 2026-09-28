@@ -34,9 +34,9 @@ export const isValidUserId = (v) => typeof v === 'string' && USER_ID_RE.test(v);
 // rather than adding a maintenance mode to the client.
 //
 // Reads are deliberately left alone, so the app keeps serving problems while
-// the surgery runs. The one writer this does not cover is the lazy
-// server_stats recompute behind GET /server-stats, which only rewrites its own
-// cache row (the cron reconciles it) and never touches the tables under surgery.
+// the surgery runs. The writers this does not cover are the lazy server_stats
+// recomputes behind GET /server-stats and GET /contest, which only rewrite their
+// own cache rows and never touch the tables under surgery.
 //
 // MAINTENANCE_MODE is a wrangler SECRET, not a [vars] entry, so the operating
 // scripts can flip it with `wrangler secret put` — a version rollout reusing the

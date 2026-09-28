@@ -1137,6 +1137,18 @@ export function monthlyPeaksFromAttempts(attempts, params) {
     return peaks;
 }
 
+// The shown (untimed) rank after each of a user's NOVEL attempts, oldest -> newest
+// (`{ p, s }` in id order), through the same window walk the monthly rebuild uses:
+// NaN before the RANK_START_MIN gate, and an attempt on a problem that has left the
+// corpus contributes nothing. The /contest page's averages and peaks read this.
+export function rankWalkFromAttempts(attempts, params) {
+    const flat = attempts.map((a) => {
+        const pp = a && typeof a.p === 'string' ? params.get(a.p) : null;
+        return pp ? flattenAttempt(pp.rating, pp.slope, pp.floor, a.s, CURVE) : null;
+    });
+    return windowRankWalk(flat, BUFFER_CAP);
+}
+
 // --- monthly history: freeze one finished month into monthly_leaderboards -------
 // The month-change cron (src/index.js). FREEZES the calendar month that just
 // ended: every row whose `best_rank_month` is that month — i.e. a user who was
