@@ -490,7 +490,26 @@ function renderPage(view) {
     .replace('{discord}', '<a href="' + DISCORD + '" target="_blank" rel="noopener">Discord</a>')
     .replace('{name}', '<strong>' + esc(DISCORD_NAME) + '</strong>');
 
-  if (!VIEW) { $('updated').textContent = t('unavailable'); return; }
+  // Every "OnlyMove" in the prose links to the app. Run once the text is in
+  // place; text already inside a link, and the table cells, are left alone.
+  function linkBrand() {
+    var nodes = [], walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      var n = walker.currentNode;
+      if (n.nodeValue.indexOf('OnlyMove') < 0) continue;
+      if (n.parentNode.closest('a, table, script, title')) continue;
+      if (!n.parentNode.closest('p, li')) continue;
+      nodes.push(n);
+    }
+    nodes.forEach(function (n) {
+      var span = document.createElement('span');
+      span.innerHTML = esc(n.nodeValue).split('OnlyMove').join('<a class="inline" href="/">OnlyMove</a>');
+      while (span.firstChild) n.parentNode.insertBefore(span.firstChild, n);
+      n.parentNode.removeChild(n);
+    });
+  }
+
+  if (!VIEW) { $('updated').textContent = t('unavailable'); linkBrand(); return; }
 
   if (VIEW.organiser) renderLead(VIEW.organiser);
 
@@ -535,6 +554,7 @@ function renderPage(view) {
         val(r.quality === null ? null : r.quality + ' / 10') + '</td><td class="n">' + val(fmtRank(r.peak)) +
         '</td><td class="n">' + val(r.problems) + '</td></tr>';
     }), 'emptyVideo');
+  linkBrand();
 })();
 </script>
 </body>
