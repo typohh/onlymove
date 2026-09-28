@@ -26,14 +26,14 @@ const STR = {
     en: {
         title: 'Contribution rewards 2026',
         intro: 'Two ways to help OnlyMove, with prizes for the best of each.',
-        first: '1st', second: '2nd',
+        first: '1st', second: '2nd', third: '3rd',
         deadline: 'Entries close 31 December 2026, 23:59 UTC.',
         daysLeft: '{n} days left.',
         closed: 'Entries are closed.',
         strengthH: 'Strong players',
         strengthLead: '[Hundreds of players are active on OnlyMove], but very few are stronger than the organiser, so the top of the rank scale rests on thin data. Verified strong players solving many problems near their best are what calibrates it.',
         strengthWho: 'Open to players with an EGF or AGA rank who are stronger than the organiser. New and existing accounts are both welcome.',
-        strengthWhoOrg: 'Open to players with an EGF or AGA rank who are stronger than the organiser, currently {egf} in EGF (GoR {gor}) and {om} on OnlyMove; both figures update with the lists below. New and existing accounts are both welcome.',
+        strengthWhoOrg: 'Open to players with an EGF or AGA rank who are stronger than the organiser, currently {egf} in EGF (GoR {gor}) and {om} on OnlyMove. New and existing accounts are both welcome.',
         criteriaH: 'Judged with roughly equal weight on',
         sCrit1: 'Your EGF or AGA rank',
         sCrit2: 'Your account\'s average OnlyMove rank over its whole history',
@@ -48,7 +48,7 @@ const STR = {
         videoWhat: 'Record yourself solving OnlyMove problems in a single session, thinking aloud and explaining how you solve each one, starting from a new account and climbing as high as you can.',
         vLang: 'Record in English, Chinese, Japanese or Korean: the four languages OnlyMove itself is available in, so viewers can follow along in the app in the language they watched.',
         vCrit1: 'Views',
-        vCrit2: 'The quality of the explanation, scored by the organiser and open to revision until the deadline',
+        vCrit2: 'The quality of the explanation, scored by the organiser',
         vCrit3: 'The highest OnlyMove rank reached during the video',
         vMin: 'A video needs at least 50 views to qualify.',
         vStep1: 'At the start of the recording, create a new account and pick an alias for it (menu → Account).',
@@ -59,7 +59,7 @@ const STR = {
         judging: 'Both categories are judged by Henry Hemming, the author of OnlyMove, on the criteria above. In both, earlier entries are slightly favoured, counted from the day they appear on the list below. Entries the organiser considers dishonest are disqualified.',
         contact: 'Send entries and questions to {name} on {discord}.',
         entriesH: 'Entries so far',
-        updated: 'Updated {ago}. The lists refresh every 12 hours.',
+        updated: 'Updated {ago}. Every figure on this page, including the organiser\'s ranks, is recalculated every 12 hours. Problem difficulties are re-estimated regularly as new attempts come in, so any account\'s OnlyMove ranks can change retroactively, averages and peaks included. View counts and quality scores are entered by the organiser and may be revised until the deadline.',
         agoJustNow: 'just now', agoMinutes: '{n} min ago', agoHours: '{n} h ago', agoDays: '{n} d ago',
         colSubmitted: 'Entered', colPlayer: 'Player', colIrl: 'EGF / AGA', colAvg: 'Average OnlyMove',
         colProblems: 'Problems', colVideo: 'Video', colViews: 'Views', colQuality: 'Quality', colPeak: 'Highest OnlyMove',
@@ -72,14 +72,14 @@ const STR = {
     zh: {
         title: '贡献奖励 2026',
         intro: '两种帮助 OnlyMove 的方式，每类中最出色者获得奖金。',
-        first: '第一名', second: '第二名',
+        first: '第一名', second: '第二名', third: '第三名',
         deadline: '截止时间：2026 年 12 月 31 日 23:59（UTC）。',
         daysLeft: '还剩 {n} 天。',
         closed: '参赛已截止。',
         strengthH: '强手棋手',
         strengthLead: 'OnlyMove 有[数百名活跃用户]，但比组织者更强的棋手寥寥无几，因此段位刻度的顶端数据很少。经过验证的强手在接近自身最佳水平时大量解题，才能校准这一段。',
         strengthWho: '面向拥有 EGF 或 AGA 段位、且棋力强于组织者的棋手。新账户和已有账户均可参加。',
-        strengthWhoOrg: '面向拥有 EGF 或 AGA 段位、且棋力强于组织者的棋手；组织者目前为 EGF {egf}（GoR {gor}），OnlyMove {om}，两项数值随下方列表一同更新。新账户和已有账户均可参加。',
+        strengthWhoOrg: '面向拥有 EGF 或 AGA 段位、且棋力强于组织者的棋手；组织者目前为 EGF {egf}（GoR {gor}），OnlyMove {om}。新账户和已有账户均可参加。',
         criteriaH: '评判时大致同等考虑',
         sCrit1: '你的 EGF 或 AGA 段位',
         sCrit2: '账户全部历史的 OnlyMove 平均段位',
@@ -94,7 +94,7 @@ const STR = {
         videoWhat: '录制你在一次连续的时段内解答 OnlyMove 题目的过程，边想边说，讲解每道题的解法；从新账户开始，尽可能攀升到更高的段位。',
         vLang: '视频可使用英语、中文、日语或韩语录制，也就是 OnlyMove 本身支持的四种语言，这样观众可以在应用中以同一种语言跟着练习。',
         vCrit1: '观看次数',
-        vCrit2: '讲解质量，由组织者评分，截止前可能调整',
+        vCrit2: '讲解质量，由组织者评分',
         vCrit3: '视频中达到的最高 OnlyMove 段位',
         vMin: '视频至少需要 50 次观看才有资格参评。',
         vStep1: '在录制开始时注册新账户，并为其选择一个别名（菜单 → 账户）。',
@@ -105,7 +105,7 @@ const STR = {
         judging: '两个类别均由 OnlyMove 作者 Henry Hemming 依据上述标准评判。两个类别中较早参加者均略有优先，以出现在下方列表中的日期为准。组织者认为不诚实的参赛将被取消资格。',
         contact: '请在 {discord} 上联系 {name}，提交参赛和咨询问题。',
         entriesH: '目前的参赛',
-        updated: '更新于 {ago}。列表每 12 小时刷新一次。',
+        updated: '更新于 {ago}。本页所有数值（包括组织者的段位）每 12 小时重新计算一次。题目难度会随新的解题记录定期重新估计，因此任何账户的 OnlyMove 段位（包括平均段位和最高段位）都可能被追溯更改。观看次数和质量评分由组织者录入，截止前可能调整。',
         agoJustNow: '刚刚', agoMinutes: '{n} 分钟前', agoHours: '{n} 小时前', agoDays: '{n} 天前',
         colSubmitted: '参加日期', colPlayer: '棋手', colIrl: 'EGF / AGA', colAvg: 'OnlyMove 平均',
         colProblems: '题目数', colVideo: '视频', colViews: '观看', colQuality: '质量', colPeak: 'OnlyMove 最高',
@@ -118,14 +118,14 @@ const STR = {
     ja: {
         title: '貢献者リワード 2026',
         intro: 'OnlyMove を手伝う 2 つの方法。それぞれ最も優れたものに賞金があります。',
-        first: '1 位', second: '2 位',
+        first: '1 位', second: '2 位', third: '3 位',
         deadline: '締め切り：2026 年 12 月 31 日 23:59（UTC）。',
         daysLeft: '残り {n} 日。',
         closed: '受付は終了しました。',
         strengthH: '強豪プレイヤー',
         strengthLead: 'OnlyMove には[数百人のアクティブユーザー]がいますが、主催者より強いプレイヤーはごくわずかで、ランクの上位はデータが薄い状態です。実力が確認された強豪が自己ベスト付近で数多く解くことが、この範囲の較正につながります。',
         strengthWho: 'EGF または AGA の段級位を持ち、主催者より強い方が対象です。新規アカウントでも既存アカウントでも参加できます。',
-        strengthWhoOrg: 'EGF または AGA の段級位を持ち、主催者より強い方が対象です。主催者は現在 EGF {egf}（GoR {gor}）、OnlyMove {om} で、どちらも下の一覧と一緒に更新されます。新規アカウントでも既存アカウントでも参加できます。',
+        strengthWhoOrg: 'EGF または AGA の段級位を持ち、主催者より強い方が対象です。主催者は現在 EGF {egf}（GoR {gor}）、OnlyMove {om} です。新規アカウントでも既存アカウントでも参加できます。',
         criteriaH: '次をほぼ同じ重みで審査します',
         sCrit1: 'EGF または AGA の段級位',
         sCrit2: 'アカウント全履歴での OnlyMove 平均ランク',
@@ -140,7 +140,7 @@ const STR = {
         videoWhat: '1 回のセッションで OnlyMove の問題を解く様子を、考えを声に出して解き方を説明しながら録画してください。新しいアカウントから始めて、できるだけ高いランクまで上がってください。',
         vLang: '動画は英語・中国語・日本語・韓国語のいずれかで録画してください。OnlyMove 自体が対応している 4 言語なので、視聴者は同じ言語のアプリで一緒に解くことができます。',
         vCrit1: '再生回数',
-        vCrit2: '解説の質（主催者が採点し、締め切りまで見直すことがあります）',
+        vCrit2: '解説の質（主催者が採点）',
         vCrit3: '動画中に到達した最高 OnlyMove ランク',
         vMin: '審査対象となるには 50 回以上の再生が必要です。',
         vStep1: '録画の最初に新しいアカウントを作り、別名を選びます（メニュー → アカウント）。',
@@ -151,7 +151,7 @@ const STR = {
         judging: '両部門とも、OnlyMove の作者 Henry Hemming が上記の基準で審査します。どちらの部門でも早い参加がやや有利で、下の一覧に掲載された日を基準とします。不正と判断した応募は失格とします。',
         contact: '応募と質問は {discord} で {name} までお送りください。',
         entriesH: 'これまでの応募',
-        updated: '更新 {ago}。一覧は 12 時間ごとに更新されます。',
+        updated: '更新 {ago}。このページのすべての数値（主催者のランクを含む）は 12 時間ごとに再計算されます。問題の難易度は新しい解答記録に基づいて定期的に再推定されるため、どのアカウントの OnlyMove ランクも（平均と最高を含め）さかのぼって変わることがあります。再生回数と質の評価は主催者が入力し、締め切りまで見直すことがあります。',
         agoJustNow: 'たった今', agoMinutes: '{n} 分前', agoHours: '{n} 時間前', agoDays: '{n} 日前',
         colSubmitted: '応募日', colPlayer: 'プレイヤー', colIrl: 'EGF / AGA', colAvg: 'OnlyMove 平均',
         colProblems: '問題数', colVideo: '動画', colViews: '再生', colQuality: '質', colPeak: 'OnlyMove 最高',
@@ -164,14 +164,14 @@ const STR = {
     ko: {
         title: '기여 보상 2026',
         intro: 'OnlyMove를 돕는 두 가지 방법, 각 부문 최고의 기여에 상금을 드립니다.',
-        first: '1위', second: '2위',
+        first: '1위', second: '2위', third: '3위',
         deadline: '마감: 2026년 12월 31일 23:59 (UTC).',
         daysLeft: '{n}일 남음.',
         closed: '참가가 마감되었습니다.',
         strengthH: '강자 부문',
         strengthLead: 'OnlyMove에는 [수백 명의 활성 사용자]가 있지만 주최자보다 강한 기사는 매우 적어서, 랭크 척도의 최상단은 데이터가 부족합니다. 실력이 검증된 강자가 자신의 최고 수준 근처에서 많은 문제를 푸는 것이 이 구간을 보정합니다.',
         strengthWho: 'EGF 또는 AGA 급수가 있고 주최자보다 강한 기사가 대상입니다. 새 계정과 기존 계정 모두 참가할 수 있습니다.',
-        strengthWhoOrg: 'EGF 또는 AGA 급수가 있고 주최자보다 강한 기사가 대상입니다. 주최자는 현재 EGF {egf}(GoR {gor}), OnlyMove {om}이며, 두 수치 모두 아래 목록과 함께 갱신됩니다. 새 계정과 기존 계정 모두 참가할 수 있습니다.',
+        strengthWhoOrg: 'EGF 또는 AGA 급수가 있고 주최자보다 강한 기사가 대상입니다. 주최자는 현재 EGF {egf}(GoR {gor}), OnlyMove {om}입니다. 새 계정과 기존 계정 모두 참가할 수 있습니다.',
         criteriaH: '다음을 대략 같은 비중으로 심사합니다',
         sCrit1: 'EGF 또는 AGA 급수',
         sCrit2: '계정 전체 기록에 걸친 OnlyMove 평균 랭크',
@@ -186,7 +186,7 @@ const STR = {
         videoWhat: '한 번의 세션에서 OnlyMove 문제를 푸는 모습을, 생각을 소리 내어 말하고 풀이를 설명하면서 녹화해 주세요. 새 계정으로 시작해 가능한 한 높은 랭크까지 올라가 보세요.',
         vLang: '영상은 영어, 중국어, 일본어, 한국어 중 하나로 녹화해 주세요. OnlyMove가 지원하는 네 가지 언어이므로 시청자가 같은 언어의 앱에서 함께 따라 풀 수 있습니다.',
         vCrit1: '조회수',
-        vCrit2: '해설의 질(주최자가 채점하며 마감 전까지 조정될 수 있음)',
+        vCrit2: '해설의 질(주최자가 채점)',
         vCrit3: '영상 중 도달한 최고 OnlyMove 랭크',
         vMin: '심사 대상이 되려면 조회수가 50회 이상이어야 합니다.',
         vStep1: '녹화를 시작할 때 새 계정을 만들고 별명을 고릅니다(메뉴 → 계정).',
@@ -197,7 +197,7 @@ const STR = {
         judging: '두 부문 모두 OnlyMove 제작자 Henry Hemming이 위 기준에 따라 심사합니다. 두 부문 모두 먼저 참가할수록 약간 유리하며, 아래 목록에 오른 날을 기준으로 합니다. 주최자가 부정하다고 판단한 참가는 실격 처리됩니다.',
         contact: '참가 신청과 문의는 {discord}에서 {name}에게 보내 주세요.',
         entriesH: '지금까지의 참가',
-        updated: '{ago} 업데이트. 목록은 12시간마다 갱신됩니다.',
+        updated: '{ago} 업데이트. 이 페이지의 모든 수치(주최자의 랭크 포함)는 12시간마다 다시 계산됩니다. 문제 난이도는 새로운 풀이 기록에 따라 정기적으로 다시 추정되므로, 어느 계정의 OnlyMove 랭크든(평균과 최고 포함) 소급하여 바뀔 수 있습니다. 조회수와 질 점수는 주최자가 입력하며 마감 전까지 조정될 수 있습니다.',
         agoJustNow: '방금 전', agoMinutes: '{n}분 전', agoHours: '{n}시간 전', agoDays: '{n}일 전',
         colSubmitted: '참가일', colPlayer: '기사', colIrl: 'EGF / AGA', colAvg: 'OnlyMove 평균',
         colProblems: '문제 수', colVideo: '영상', colViews: '조회수', colQuality: '질', colPeak: 'OnlyMove 최고',
@@ -412,7 +412,7 @@ function renderPage(view) {
 
 <section>
   <h2 id="entriesH"></h2>
-  <p class="muted" id="updated"></p>
+  <p id="updated"></p>
   <h3>${stone('black', 18)}<span id="strengthH2"></span></h3>
   <div class="tbl" id="strengthList"></div>
   <h3>${stone('white', 18)}<span id="videoH2"></span></h3>
@@ -468,7 +468,7 @@ function renderPage(view) {
   set('strengthH2', 'strengthH'); set('videoH2', 'videoH');
   set('sCritH', 'criteriaH'); set('vCritH', 'criteriaH');
   set('sHowH', 'howH'); set('vHowH', 'howH');
-  var amounts = esc(t('first')) + ' <b>100 €</b>&emsp;' + esc(t('second')) + ' <b>50 €</b>';
+  var amounts = esc(t('first')) + ' <b>100 €</b>&emsp;' + esc(t('second')) + ' <b>50 €</b>&emsp;' + esc(t('third')) + ' <b>25 €</b>';
   $('pSa').innerHTML = amounts; $('pVa').innerHTML = amounts;
   var days = Math.ceil((DEADLINE - Date.now()) / 86400000);
   $('daysLeft').textContent = days > 0 ? t('daysLeft', { n: days }) : t('closed');
