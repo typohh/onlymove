@@ -1492,9 +1492,12 @@ input, textarea, [contenteditable],
     box-shadow: var(--shadow-card);
     padding: calc(2 * var(--u)) var(--stats-card-pad-x);
     border-radius: var(--radius-lg);
-    max-width: var(--stats-card-max-w);
+    /* One width for every tab, not the widest line of the pane on show: sized
+       to content, each chart took whatever width its text happened to reach,
+       so the charts differed from tab to tab and the card jumped on every
+       switch. */
+    width: min(620px, var(--stats-card-max-w));
     max-height: var(--stats-card-max-h);
-    min-width: min(420px, var(--stats-card-max-w));
     display: flex;
     flex-direction: column;
     gap: calc(1.5 * var(--u));

@@ -18,7 +18,7 @@ import { state, setStatsResults, setModelParams, getMergedAnswerHistory, getAnsw
 import { PRIOR_MEAN } from '../shared/rank-window.js';
 import { MODEL_INPUT_HISTORY_LENGTH, RECALL_CANDIDATE_HISTORY_LENGTH } from './constants.js';
 import { tsumegoIdOf } from './sgf.js';
-import { sigmoid, normCdf, invertMatrix } from './math-utils.js';
+import { sigmoid, invertMatrix } from './math-utils.js';
 import { clearKappa, clampFloor, clearSpan } from './irt.js';
 import { ratingPerRank } from './rank-decomposition.js';
 import { newtonBlockStep } from './optimizer.js';
@@ -139,10 +139,10 @@ let LN_C_PRIOR;   // per-user base log-stability prior; LN_C is L2-shrunk to thi
 // population_constants.json via setTimeBias(). Two roles, both load-bearing and
 // they MUST agree: (1) it is the prior the per-user TIME_SOLVING/REVIEW_TIME
 // coefficients are L2-shrunk toward (converted to per-percentile per training
-// run, see fitUserModel), and (2) the displayed "% chance more time helps"
-// and the pace readings recenter the fitted coefficient by it (benefitConfidence). If the
-// shrinkage prior and the recentering offset disagree, an uninformative user
-// can never read 50% — anchoring both here keeps them consistent.
+// run, see fitUserModel), and (2) the pace readings recenter the fitted
+// coefficient by it (benefitForVar). If the shrinkage prior and the recentering
+// offset disagree, an uninformative user can never read neutral — anchoring both
+// here keeps them consistent.
 let TIME_BIAS_PER_MIN;
 let REVIEW_BIAS_PER_MIN;
 // Training-time lnS guard (wider than the scheduling clamp) — prevents exp()
@@ -721,7 +721,7 @@ export function applyRetentionConstants({ kappa, z0, growth, ln_c_prior, first_s
 // backend's fitted bias verbatim (the fitter owns its sign/magnitude; the
 // frontend does not second-guess it). population-constants.js calls this at boot
 // before any training; the per-user time coefficients are L2-shrunk toward it
-// (see fitUserModel) and the confidence readout recenters by it.
+// (see fitUserModel) and the pace readings recenter by it.
 export function setTimeBias({ timePerMin, reviewPerMin } = {}) {
     if (!Number.isFinite(timePerMin)) throw new Error(`population constants: bad time_bias_per_min ${timePerMin}`);
     if (!Number.isFinite(reviewPerMin)) throw new Error(`population constants: bad review_bias_per_min ${reviewPerMin}`);
@@ -729,31 +729,16 @@ export function setTimeBias({ timePerMin, reviewPerMin } = {}) {
     REVIEW_BIAS_PER_MIN = reviewPerMin;
 }
 
-// One-sided confidence that the bias-corrected coefficient is positive (in
-// [0,1]), or 0 when the stat is missing/degenerate. SIGNED test (not |coeff|/se):
-// after recentering by the population confound the sign carries the meaning. The
-// coeff/se passed in are already per-MINUTE (calculateResultsAndStdErrors scales
-// them by 1/time_per_percentile_min), matching the per-minute bias.
-function benefitConfidence(stat, biasPerMin) {
-    const b = recenteredBenefit(stat, biasPerMin);
-    return b ? normCdf(b.coeff / b.se) : 0;
-}
-
 function recenteredBenefit(stat, biasPerMin) {
     if (!stat || !(stat.se > 0) || !Number.isFinite(stat.coeff)) return null;
     return { coeff: stat.coeff - biasPerMin, se: stat.se };   // bias is negative ⇒ shifts the estimate up
 }
 
-// Var-keyed wrapper: picks the population bias for this model term and returns the
-// recentered one-sided benefit confidence. Exported so the stats Time tab displays
-// the SAME corrected "% chance more time helps" the pace readings (pace-readings.js)
-// are built from — otherwise the tab would show the raw, confound-biased coeff.
-export function benefitConfidenceForVar(stat, varIndex) {
-    return benefitConfidence(stat, biasForVar(varIndex));
-}
-
-// The same recentered coefficient as {coeff, se} in logit per minute, or null
-// when there is no usable stat — what the pace readings convert to ranks.
+// The bias-recentered coefficient as {coeff, se} in logit per minute, or null
+// when there is no usable stat — what the pace readings convert to ranks. After
+// recentering the SIGN carries the meaning. The coeff/se passed in are already
+// per-MINUTE (calculateResultsAndStdErrors scales them by
+// 1/time_per_percentile_min), matching the per-minute bias.
 export function benefitForVar(stat, varIndex) {
     return recenteredBenefit(stat, biasForVar(varIndex));
 }

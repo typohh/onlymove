@@ -33,8 +33,6 @@ import {
     freshFailureReviewHours,
     recentFailureWindowHours,
     averageRepeatRank,
-    benefitConfidenceForVar,
-    MODEL_INDICES,
 } from './recall-model.js';
 
 // If the browser silently evicted history-tail rows, tell the user how many are
@@ -94,7 +92,7 @@ export async function showDetailedStats() {
     await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
     try {
         // The recall model (modelParams) and its derived statsResults drive only
-        // the timing-probability text and the freshly-failed window summary; they
+        // the pace readings and the freshly-failed window summary; they
         // need a trained model + attempts. When they're missing (a brand-new
         // device with few/no attempts) we skip those blocks and still render
         // whatever panes have data: every chart builder returns null below its
@@ -110,29 +108,11 @@ export async function showDetailedStats() {
             }
         }
 
-        const { results = [], varCovarMatrix } = state.statsResults || {};
+        const { varCovarMatrix } = state.statsResults || {};
         const finalParams = state.modelParams;
-        // Timing probabilities ride with the Time chart, the rank decomposition
-        // rides with the Rank chart, and only the review-queue counts stay on
-        // the Activity pane.
-        let timingText = '';
+        // The rank decomposition rides with the Rank chart, and only the
+        // review-queue counts stay on the Activity pane.
         let resultText = '';
-
-        // Timing observations → Time tab. Recenter by the population confounding
-        // bias (benefitConfidenceForVar) so the displayed "% chance more time helps"
-        // is the SAME corrected figure the pace readings (pace-readings.js) are built
-        // from — not the raw, difficulty-confounded coefficient.
-        for (const result of results) {
-            const { varIndex } = result;
-            let termKey;
-            if (varIndex === MODEL_INDICES.TIME_SOLVING) termKey = 'statsSolvingTimeNatural';
-            else if (varIndex === MODEL_INDICES.REVIEW_TIME) termKey = 'statsReviewTimeNatural';
-
-            if (termKey) {
-                const conf = benefitConfidenceForVar(result, varIndex) * 100;
-                timingText += getTerm(termKey, { percent_change: conf.toFixed(0) }) + '\n';
-            }
-        }
 
         // Block 2: Activity text. The "freshly-failed problem comes back in ~X h"
         // figure is the retention window-open delay (NEG_LN_080·S·24) for a
@@ -217,8 +197,8 @@ export async function showDetailedStats() {
         // under the "constructing charts" overlay shown above — so the modal
         // opens fully-ready and every tab switch is instant. The overlay
         // explains the build delay, which is why no in-modal lazy-load / spinner
-        // / pre-warm is needed. The timing probabilities and rank
-        // decomposition text ride with their charts.
+        // / pre-warm is needed. The rank decomposition text rides with its
+        // chart.
         // computeRankDecomposition is the heavy part of this pane; the chart and
         // the summary text both need it, so compute it ONCE here and pass it to
         // both (null = too little data; both handle it).
@@ -235,10 +215,10 @@ export async function showDetailedStats() {
                 buildRankSummaryText(merged, rankDecomp),
                 build && build.readout);
         };
-        // The pace rows close the Time pane: they read the same time
-        // coefficients the timing text does, on a track of their own.
+        // The pace rows close the Time pane and are its only text: the bars
+        // carry what a sentence per coefficient used to.
         const makeTimePane = () => {
-            const pane = combineChartWithText(buildTimeUsageChart(merged), timingText);
+            const pane = combineChartWithText(buildTimeUsageChart(merged), '');
             const pace = buildPaceSection();
             if (!pane) return pace;
             pane.append(pace);
@@ -251,8 +231,8 @@ export async function showDetailedStats() {
         showStatsModal([
             { label: getTerm('statsTabWeaknesses'), content: weaknessPane },
             { label: getTerm('statsTabTendencies'), content: tendencyPane },
-            { label: getTerm('statsTabRank'), content: makeRankPane(), make: makeRankPane },
             { label: getTerm('statsTabTime'), content: makeTimePane(), make: makeTimePane },
+            { label: getTerm('statsTabRank'), content: makeRankPane(), make: makeRankPane },
             { label: getTerm('statsTabActivity'), content: activityPane, make: makeActivityPane },
         ]);
 
@@ -265,8 +245,8 @@ export async function showDetailedStats() {
     }
 }
 
-// A tab pane that pairs a chart with its explanatory text (timing
-// probabilities for Time, the rank decomposition for Rank). Either piece may
+// A tab pane that pairs a chart with its explanatory text (the rank
+// decomposition for Rank, the review-queue counts for Activity). Either piece may
 // be missing: returns null only when nothing is there, so an
 // empty tab is dropped by showStatsModal. `lead` is an optional reactive
 // element that heads the text section — the Rank pane's current-rank readout
