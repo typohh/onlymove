@@ -31,7 +31,7 @@ const STR = {
         daysLeft: '{n} days left.',
         closed: 'Entries are closed.',
         strengthH: 'Strong players',
-        strengthLead: '[Hundreds of players are active on OnlyMove], but very few are stronger than the organiser, so the top of the rank scale rests on thin data. Verified strong players solving many problems near their best are what calibrates it.',
+        strengthLead: 'Hundreds of players are [active] on OnlyMove, but very few are stronger than the organiser, so the top of the rank scale rests on thin data. Verified strong players solving many problems near their best are what calibrates it.',
         strengthWho: 'Open to players with an EGF or AGA rank who are stronger than the organiser. New and existing accounts are both welcome.',
         strengthWhoOrg: 'Open to players with an EGF or AGA rank who are stronger than the organiser, currently {egf} in EGF (GoR {gor}) and {om} on OnlyMove. New and existing accounts are both welcome.',
         criteriaH: 'Judged with roughly equal weight on',
@@ -54,7 +54,7 @@ const STR = {
         vStep1: 'At the start of the recording, create a new account and pick an alias for it (menu → Account).',
         vStep2: 'Solve in one session, thinking aloud and explaining each problem.',
         vStep3: 'Publish the video and send the organiser the link, the alias, and how many problems you solved in it.',
-        vLink: 'With your agreement, the organiser may link your video from the app for players of the matching strength.',
+        vLink: 'If you want, the organiser can link your video from the app for players of the matching strength. Mention it in your submission.',
         judgingH: 'Judging',
         judging: 'Both categories are judged by Henry Hemming, the author of OnlyMove, on the criteria above. In both, earlier entries are slightly favoured, counted from the day they appear on the list below. Entries the organiser considers dishonest are disqualified.',
         contact: 'Send entries and questions to {name} on {discord}.',
@@ -77,7 +77,7 @@ const STR = {
         daysLeft: '还剩 {n} 天。',
         closed: '参赛已截止。',
         strengthH: '强手棋手',
-        strengthLead: 'OnlyMove 有[数百名活跃用户]，但比组织者更强的棋手寥寥无几，因此段位刻度的顶端数据很少。经过验证的强手在接近自身最佳水平时大量解题，才能校准这一段。',
+        strengthLead: 'OnlyMove 有数百名[活跃]用户，但比组织者更强的棋手寥寥无几，因此段位刻度的顶端数据很少。经过验证的强手在接近自身最佳水平时大量解题，才能校准这一段。',
         strengthWho: '面向拥有 EGF 或 AGA 段位、且棋力强于组织者的棋手。新账户和已有账户均可参加。',
         strengthWhoOrg: '面向拥有 EGF 或 AGA 段位、且棋力强于组织者的棋手；组织者目前为 EGF {egf}（GoR {gor}），OnlyMove {om}。新账户和已有账户均可参加。',
         criteriaH: '评判时大致同等考虑',
@@ -100,7 +100,7 @@ const STR = {
         vStep1: '在录制开始时注册新账户，并为其选择一个别名（菜单 → 账户）。',
         vStep2: '在一次连续的时段内解题，边想边说，讲解每道题。',
         vStep3: '发布视频，并将链接、别名以及视频中解答的题目数量发送给组织者。',
-        vLink: '经你同意，组织者可能会在应用中向相应棋力的棋手推荐你的视频。',
+        vLink: '如果你愿意，组织者可以在应用中向相应棋力的棋手推荐你的视频。请在提交时说明。',
         judgingH: '评判',
         judging: '两个类别均由 OnlyMove 作者 Henry Hemming 依据上述标准评判。两个类别中较早参加者均略有优先，以出现在下方列表中的日期为准。组织者认为不诚实的参赛将被取消资格。',
         contact: '请在 {discord} 上联系 {name}，提交参赛和咨询问题。',
@@ -123,7 +123,7 @@ const STR = {
         daysLeft: '残り {n} 日。',
         closed: '受付は終了しました。',
         strengthH: '強豪プレイヤー',
-        strengthLead: 'OnlyMove には[数百人のアクティブユーザー]がいますが、主催者より強いプレイヤーはごくわずかで、ランクの上位はデータが薄い状態です。実力が確認された強豪が自己ベスト付近で数多く解くことが、この範囲の較正につながります。',
+        strengthLead: 'OnlyMove には数百人の[アクティブ]ユーザーがいますが、主催者より強いプレイヤーはごくわずかで、ランクの上位はデータが薄い状態です。実力が確認された強豪が自己ベスト付近で数多く解くことが、この範囲の較正につながります。',
         strengthWho: 'EGF または AGA の段級位を持ち、主催者より強い方が対象です。新規アカウントでも既存アカウントでも参加できます。',
         strengthWhoOrg: 'EGF または AGA の段級位を持ち、主催者より強い方が対象です。主催者は現在 EGF {egf}（GoR {gor}）、OnlyMove {om} です。新規アカウントでも既存アカウントでも参加できます。',
         criteriaH: '次をほぼ同じ重みで審査します',
@@ -146,7 +146,7 @@ const STR = {
         vStep1: '録画の最初に新しいアカウントを作り、別名を選びます（メニュー → アカウント）。',
         vStep2: '1 回のセッションで、考えを声に出し、各問題を説明しながら解きます。',
         vStep3: '動画を公開し、リンク、別名、動画内で解いた問題数を主催者に送ります。',
-        vLink: '了承をいただければ、該当する棋力のプレイヤー向けにアプリから動画を紹介することがあります。',
+        vLink: '希望すれば、該当する棋力のプレイヤー向けにアプリから動画を紹介できます。応募の際にお知らせください。',
         judgingH: '審査',
         judging: '両部門とも、OnlyMove の作者 Henry Hemming が上記の基準で審査します。どちらの部門でも早い参加がやや有利で、下の一覧に掲載された日を基準とします。不正と判断した応募は失格とします。',
         contact: '応募と質問は {discord} で {name} までお送りください。',
@@ -169,7 +169,7 @@ const STR = {
         daysLeft: '{n}일 남음.',
         closed: '참가가 마감되었습니다.',
         strengthH: '강자 부문',
-        strengthLead: 'OnlyMove에는 [수백 명의 활성 사용자]가 있지만 주최자보다 강한 기사는 매우 적어서, 랭크 척도의 최상단은 데이터가 부족합니다. 실력이 검증된 강자가 자신의 최고 수준 근처에서 많은 문제를 푸는 것이 이 구간을 보정합니다.',
+        strengthLead: 'OnlyMove에는 수백 명의 [활성] 사용자가 있지만 주최자보다 강한 기사는 매우 적어서, 랭크 척도의 최상단은 데이터가 부족합니다. 실력이 검증된 강자가 자신의 최고 수준 근처에서 많은 문제를 푸는 것이 이 구간을 보정합니다.',
         strengthWho: 'EGF 또는 AGA 급수가 있고 주최자보다 강한 기사가 대상입니다. 새 계정과 기존 계정 모두 참가할 수 있습니다.',
         strengthWhoOrg: 'EGF 또는 AGA 급수가 있고 주최자보다 강한 기사가 대상입니다. 주최자는 현재 EGF {egf}(GoR {gor}), OnlyMove {om}입니다. 새 계정과 기존 계정 모두 참가할 수 있습니다.',
         criteriaH: '다음을 대략 같은 비중으로 심사합니다',
@@ -192,7 +192,7 @@ const STR = {
         vStep1: '녹화를 시작할 때 새 계정을 만들고 별명을 고릅니다(메뉴 → 계정).',
         vStep2: '한 번의 세션에서 생각을 소리 내어 말하고 각 문제를 설명하며 풉니다.',
         vStep3: '영상을 공개하고 링크, 별명, 영상에서 푼 문제 수를 주최자에게 보냅니다.',
-        vLink: '동의해 주시면 해당 기력의 기사들을 위해 앱에서 영상을 소개할 수 있습니다.',
+        vLink: '원하시면 해당 기력의 기사들을 위해 앱에서 영상을 소개할 수 있습니다. 참가 신청 시 알려 주세요.',
         judgingH: '심사',
         judging: '두 부문 모두 OnlyMove 제작자 Henry Hemming이 위 기준에 따라 심사합니다. 두 부문 모두 먼저 참가할수록 약간 유리하며, 아래 목록에 오른 날을 기준으로 합니다. 주최자가 부정하다고 판단한 참가는 실격 처리됩니다.',
         contact: '참가 신청과 문의는 {discord}에서 {name}에게 보내 주세요.',
@@ -349,6 +349,7 @@ function renderPage(view) {
   .tbl th, .tbl td { white-space: nowrap; }
   .tbl th.n, .tbl td.n { text-align: right; }
   .tbl td.pl { width: 99%; }
+  .note { margin-top: 1.4rem; }
   .empty { color: var(--ink-muted); padding: .9rem 1rem; border: 1px dashed var(--hairline); border-radius: 10px; margin: .3rem 0 0; }
 
   @media (max-width: 560px) {
@@ -412,11 +413,11 @@ function renderPage(view) {
 
 <section>
   <h2 id="entriesH"></h2>
-  <p id="updated"></p>
   <h3>${stone('black', 18)}<span id="strengthH2"></span></h3>
   <div class="tbl" id="strengthList"></div>
   <h3>${stone('white', 18)}<span id="videoH2"></span></h3>
   <div class="tbl" id="videoList"></div>
+  <p class="muted note" id="updated"></p>
 </section>
 <script>
 (function () {
