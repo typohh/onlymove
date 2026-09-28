@@ -32,8 +32,8 @@ const STR = {
         closed: 'Entries are closed.',
         strengthH: 'Strong players',
         strengthLead: 'Hundreds of players are [active] on OnlyMove, but very few are stronger than the organiser, so the top of the rank scale rests on thin data. Verified strong players solving many problems near their best are what calibrates it.',
-        strengthWho: 'Open to players with an EGF or AGA rank who are stronger than the organiser. New and existing accounts are both welcome.',
-        strengthWhoOrg: 'Open to players with an EGF or AGA rank who are stronger than the organiser, currently {egf} in EGF (GoR {gor}) and {om} on OnlyMove. New and existing accounts are both welcome.',
+        strengthLeadOrg: 'Hundreds of players are [active] on OnlyMove, but very few are stronger than the organiser, currently {egf} in EGF (GoR {gor}) and {om} on OnlyMove, so the top of the rank scale rests on thin data. Verified strong players solving many problems near their best are what calibrates it.',
+        strengthWho: 'Open to players who are stronger than the organiser. You need an EGF or AGA rank so that your strength can be verified. New and existing accounts are both welcome.',
         criteriaH: 'Judged with roughly equal weight on',
         sCrit1: 'Your EGF or AGA rank',
         sCrit2: 'Your account\'s average OnlyMove rank over its whole history',
@@ -54,12 +54,12 @@ const STR = {
         vStep1: 'At the start of the recording, create a new account and pick an alias for it (menu → Account).',
         vStep2: 'Solve in one session, thinking aloud and explaining each problem.',
         vStep3: 'Publish the video and send the organiser the link, the alias, and how many problems you solved in it.',
-        vLink: 'If you want, the organiser can link your video from the app for players of the matching strength. Mention it in your submission.',
+        vLink: 'If you want, the organiser can link your video from the app for an appropriate strength audience. Mention it in your submission.',
         judgingH: 'Judging',
         judging: 'Both categories are judged by Henry Hemming, the author of OnlyMove, on the criteria above. In both, earlier entries are slightly favoured, counted from the day they appear on the list below. Entries the organiser considers dishonest are disqualified.',
         contact: 'Send entries and questions to {name} on {discord}.',
         entriesH: 'Entries so far',
-        updated: 'Updated {ago}. Every figure on this page, including the organiser\'s ranks, is recalculated every 12 hours. Problem difficulties are re-estimated regularly as new attempts come in, so any account\'s OnlyMove ranks can change retroactively, averages and peaks included. View counts and quality scores are entered by the organiser and may be revised until the deadline.',
+        updated: 'Updated {ago}. Every figure on this page, including the organiser\'s ranks, is updated every 12 hours. Problem difficulties are re-estimated regularly as new attempts come in, so any account\'s OnlyMove ranks can change retroactively, averages and peaks included. View counts and quality scores are entered by the organiser and may be revised until the deadline.',
         agoJustNow: 'just now', agoMinutes: '{n} min ago', agoHours: '{n} h ago', agoDays: '{n} d ago',
         colSubmitted: 'Entered', colPlayer: 'Player', colIrl: 'EGF / AGA', colAvg: 'Average OnlyMove',
         colProblems: 'Problems', colVideo: 'Video', colViews: 'Views', colQuality: 'Quality', colPeak: 'Highest OnlyMove',
@@ -78,8 +78,8 @@ const STR = {
         closed: '参赛已截止。',
         strengthH: '强手棋手',
         strengthLead: 'OnlyMove 有数百名[活跃]用户，但比组织者更强的棋手寥寥无几，因此段位刻度的顶端数据很少。经过验证的强手在接近自身最佳水平时大量解题，才能校准这一段。',
-        strengthWho: '面向拥有 EGF 或 AGA 段位、且棋力强于组织者的棋手。新账户和已有账户均可参加。',
-        strengthWhoOrg: '面向拥有 EGF 或 AGA 段位、且棋力强于组织者的棋手；组织者目前为 EGF {egf}（GoR {gor}），OnlyMove {om}。新账户和已有账户均可参加。',
+        strengthLeadOrg: 'OnlyMove 有数百名[活跃]用户，但比组织者（目前 EGF {egf}，GoR {gor}；OnlyMove {om}）更强的棋手寥寥无几，因此段位刻度的顶端数据很少。经过验证的强手在接近自身最佳水平时大量解题，才能校准这一段。',
+        strengthWho: '面向棋力强于组织者的棋手。你需要拥有 EGF 或 AGA 段位，以便核实棋力。新账户和已有账户均可参加。',
         criteriaH: '评判时大致同等考虑',
         sCrit1: '你的 EGF 或 AGA 段位',
         sCrit2: '账户全部历史的 OnlyMove 平均段位',
@@ -100,12 +100,12 @@ const STR = {
         vStep1: '在录制开始时注册新账户，并为其选择一个别名（菜单 → 账户）。',
         vStep2: '在一次连续的时段内解题，边想边说，讲解每道题。',
         vStep3: '发布视频，并将链接、别名以及视频中解答的题目数量发送给组织者。',
-        vLink: '如果你愿意，组织者可以在应用中向相应棋力的棋手推荐你的视频。请在提交时说明。',
+        vLink: '如果你愿意，组织者可以在应用中向棋力合适的观众推荐你的视频。请在提交时说明。',
         judgingH: '评判',
         judging: '两个类别均由 OnlyMove 作者 Henry Hemming 依据上述标准评判。两个类别中较早参加者均略有优先，以出现在下方列表中的日期为准。组织者认为不诚实的参赛将被取消资格。',
         contact: '请在 {discord} 上联系 {name}，提交参赛和咨询问题。',
         entriesH: '目前的参赛',
-        updated: '更新于 {ago}。本页所有数值（包括组织者的段位）每 12 小时重新计算一次。题目难度会随新的解题记录定期重新估计，因此任何账户的 OnlyMove 段位（包括平均段位和最高段位）都可能被追溯更改。观看次数和质量评分由组织者录入，截止前可能调整。',
+        updated: '更新于 {ago}。本页所有数值（包括组织者的段位）每 12 小时更新一次。题目难度会随新的解题记录定期重新估计，因此任何账户的 OnlyMove 段位（包括平均段位和最高段位）都可能被追溯更改。观看次数和质量评分由组织者录入，截止前可能调整。',
         agoJustNow: '刚刚', agoMinutes: '{n} 分钟前', agoHours: '{n} 小时前', agoDays: '{n} 天前',
         colSubmitted: '参加日期', colPlayer: '棋手', colIrl: 'EGF / AGA', colAvg: 'OnlyMove 平均',
         colProblems: '题目数', colVideo: '视频', colViews: '观看', colQuality: '质量', colPeak: 'OnlyMove 最高',
@@ -124,8 +124,8 @@ const STR = {
         closed: '受付は終了しました。',
         strengthH: '強豪プレイヤー',
         strengthLead: 'OnlyMove には数百人の[アクティブ]ユーザーがいますが、主催者より強いプレイヤーはごくわずかで、ランクの上位はデータが薄い状態です。実力が確認された強豪が自己ベスト付近で数多く解くことが、この範囲の較正につながります。',
-        strengthWho: 'EGF または AGA の段級位を持ち、主催者より強い方が対象です。新規アカウントでも既存アカウントでも参加できます。',
-        strengthWhoOrg: 'EGF または AGA の段級位を持ち、主催者より強い方が対象です。主催者は現在 EGF {egf}（GoR {gor}）、OnlyMove {om} です。新規アカウントでも既存アカウントでも参加できます。',
+        strengthLeadOrg: 'OnlyMove には数百人の[アクティブ]ユーザーがいますが、主催者（現在 EGF {egf}、GoR {gor}、OnlyMove {om}）より強いプレイヤーはごくわずかで、ランクの上位はデータが薄い状態です。実力が確認された強豪が自己ベスト付近で数多く解くことが、この範囲の較正につながります。',
+        strengthWho: '主催者より強い方が対象です。棋力を確認できるよう、EGF または AGA の段級位が必要です。新規アカウントでも既存アカウントでも参加できます。',
         criteriaH: '次をほぼ同じ重みで審査します',
         sCrit1: 'EGF または AGA の段級位',
         sCrit2: 'アカウント全履歴での OnlyMove 平均ランク',
@@ -146,12 +146,12 @@ const STR = {
         vStep1: '録画の最初に新しいアカウントを作り、別名を選びます（メニュー → アカウント）。',
         vStep2: '1 回のセッションで、考えを声に出し、各問題を説明しながら解きます。',
         vStep3: '動画を公開し、リンク、別名、動画内で解いた問題数を主催者に送ります。',
-        vLink: '希望すれば、該当する棋力のプレイヤー向けにアプリから動画を紹介できます。応募の際にお知らせください。',
+        vLink: '希望すれば、棋力の合う視聴者向けにアプリから動画を紹介できます。応募の際にお知らせください。',
         judgingH: '審査',
         judging: '両部門とも、OnlyMove の作者 Henry Hemming が上記の基準で審査します。どちらの部門でも早い参加がやや有利で、下の一覧に掲載された日を基準とします。不正と判断した応募は失格とします。',
         contact: '応募と質問は {discord} で {name} までお送りください。',
         entriesH: 'これまでの応募',
-        updated: '更新 {ago}。このページのすべての数値（主催者のランクを含む）は 12 時間ごとに再計算されます。問題の難易度は新しい解答記録に基づいて定期的に再推定されるため、どのアカウントの OnlyMove ランクも（平均と最高を含め）さかのぼって変わることがあります。再生回数と質の評価は主催者が入力し、締め切りまで見直すことがあります。',
+        updated: '更新 {ago}。このページのすべての数値（主催者のランクを含む）は 12 時間ごとに更新されます。問題の難易度は新しい解答記録に基づいて定期的に再推定されるため、どのアカウントの OnlyMove ランクも（平均と最高を含め）さかのぼって変わることがあります。再生回数と質の評価は主催者が入力し、締め切りまで見直すことがあります。',
         agoJustNow: 'たった今', agoMinutes: '{n} 分前', agoHours: '{n} 時間前', agoDays: '{n} 日前',
         colSubmitted: '応募日', colPlayer: 'プレイヤー', colIrl: 'EGF / AGA', colAvg: 'OnlyMove 平均',
         colProblems: '問題数', colVideo: '動画', colViews: '再生', colQuality: '質', colPeak: 'OnlyMove 最高',
@@ -170,8 +170,8 @@ const STR = {
         closed: '참가가 마감되었습니다.',
         strengthH: '강자 부문',
         strengthLead: 'OnlyMove에는 수백 명의 [활성] 사용자가 있지만 주최자보다 강한 기사는 매우 적어서, 랭크 척도의 최상단은 데이터가 부족합니다. 실력이 검증된 강자가 자신의 최고 수준 근처에서 많은 문제를 푸는 것이 이 구간을 보정합니다.',
-        strengthWho: 'EGF 또는 AGA 급수가 있고 주최자보다 강한 기사가 대상입니다. 새 계정과 기존 계정 모두 참가할 수 있습니다.',
-        strengthWhoOrg: 'EGF 또는 AGA 급수가 있고 주최자보다 강한 기사가 대상입니다. 주최자는 현재 EGF {egf}(GoR {gor}), OnlyMove {om}입니다. 새 계정과 기존 계정 모두 참가할 수 있습니다.',
+        strengthLeadOrg: 'OnlyMove에는 수백 명의 [활성] 사용자가 있지만 주최자(현재 EGF {egf}, GoR {gor}, OnlyMove {om})보다 강한 기사는 매우 적어서, 랭크 척도의 최상단은 데이터가 부족합니다. 실력이 검증된 강자가 자신의 최고 수준 근처에서 많은 문제를 푸는 것이 이 구간을 보정합니다.',
+        strengthWho: '주최자보다 강한 기사가 대상입니다. 기력을 확인할 수 있도록 EGF 또는 AGA 급수가 있어야 합니다. 새 계정과 기존 계정 모두 참가할 수 있습니다.',
         criteriaH: '다음을 대략 같은 비중으로 심사합니다',
         sCrit1: 'EGF 또는 AGA 급수',
         sCrit2: '계정 전체 기록에 걸친 OnlyMove 평균 랭크',
@@ -192,12 +192,12 @@ const STR = {
         vStep1: '녹화를 시작할 때 새 계정을 만들고 별명을 고릅니다(메뉴 → 계정).',
         vStep2: '한 번의 세션에서 생각을 소리 내어 말하고 각 문제를 설명하며 풉니다.',
         vStep3: '영상을 공개하고 링크, 별명, 영상에서 푼 문제 수를 주최자에게 보냅니다.',
-        vLink: '원하시면 해당 기력의 기사들을 위해 앱에서 영상을 소개할 수 있습니다. 참가 신청 시 알려 주세요.',
+        vLink: '원하시면 기력이 맞는 시청자들을 위해 앱에서 영상을 소개할 수 있습니다. 참가 신청 시 알려 주세요.',
         judgingH: '심사',
         judging: '두 부문 모두 OnlyMove 제작자 Henry Hemming이 위 기준에 따라 심사합니다. 두 부문 모두 먼저 참가할수록 약간 유리하며, 아래 목록에 오른 날을 기준으로 합니다. 주최자가 부정하다고 판단한 참가는 실격 처리됩니다.',
         contact: '참가 신청과 문의는 {discord}에서 {name}에게 보내 주세요.',
         entriesH: '지금까지의 참가',
-        updated: '{ago} 업데이트. 이 페이지의 모든 수치(주최자의 랭크 포함)는 12시간마다 다시 계산됩니다. 문제 난이도는 새로운 풀이 기록에 따라 정기적으로 다시 추정되므로, 어느 계정의 OnlyMove 랭크든(평균과 최고 포함) 소급하여 바뀔 수 있습니다. 조회수와 질 점수는 주최자가 입력하며 마감 전까지 조정될 수 있습니다.',
+        updated: '{ago} 업데이트. 이 페이지의 모든 수치(주최자의 랭크 포함)는 12시간마다 갱신됩니다. 문제 난이도는 새로운 풀이 기록에 따라 정기적으로 다시 추정되므로, 어느 계정의 OnlyMove 랭크든(평균과 최고 포함) 소급하여 바뀔 수 있습니다. 조회수와 질 점수는 주최자가 입력하며 마감 전까지 조정될 수 있습니다.',
         agoJustNow: '방금 전', agoMinutes: '{n}분 전', agoHours: '{n}시간 전', agoDays: '{n}일 전',
         colSubmitted: '참가일', colPlayer: '기사', colIrl: 'EGF / AGA', colAvg: 'OnlyMove 평균',
         colProblems: '문제 수', colVideo: '영상', colViews: '조회수', colQuality: '질', colPeak: 'OnlyMove 최고',
@@ -473,23 +473,26 @@ function renderPage(view) {
   $('pSa').innerHTML = amounts; $('pVa').innerHTML = amounts;
   var days = Math.ceil((DEADLINE - Date.now()) / 86400000);
   $('daysLeft').textContent = days > 0 ? t('daysLeft', { n: days }) : t('closed');
-  // The lead's bracketed phrase links to the community statistics.
-  $('strengthLead').innerHTML = esc(t('strengthLead'))
-    .replace(/\\[(.+?)\\]/, '<a class="inline" href="/statistics">$1</a>');
+  // The lead: its bracketed word links to the community statistics, and once the
+  // data is in it names the organiser's current ranks where the organiser is
+  // first mentioned.
+  function renderLead(o) {
+    var html = esc(t(o ? 'strengthLeadOrg' : 'strengthLead'))
+      .replace(/\\[(.+?)\\]/, '<a class="inline" href="/statistics">$1</a>');
+    if (o) html = html
+      .replace('{egf}', '<strong>' + esc(fmtRank(o.egf)) + '</strong>')
+      .replace('{gor}', esc(o.gor === null ? '—' : String(o.gor)))
+      .replace('{om}', '<strong>' + esc(fmtRank(o.om)) + '</strong>');
+    $('strengthLead').innerHTML = html;
+  }
+  renderLead(null);
   $('contact').innerHTML = esc(t('contact'))
     .replace('{discord}', '<a href="' + DISCORD + '" target="_blank" rel="noopener">Discord</a>')
     .replace('{name}', '<strong>' + esc(DISCORD_NAME) + '</strong>');
 
   if (!VIEW) { $('updated').textContent = t('unavailable'); return; }
 
-  // The organiser's current ranks, inlined into the entry criterion.
-  if (VIEW.organiser) {
-    var o = VIEW.organiser;
-    $('strengthWho').innerHTML = esc(t('strengthWhoOrg'))
-      .replace('{egf}', '<strong>' + esc(fmtRank(o.egf)) + '</strong>')
-      .replace('{gor}', esc(o.gor === null ? '—' : String(o.gor)))
-      .replace('{om}', '<strong>' + esc(fmtRank(o.om)) + '</strong>');
-  }
+  if (VIEW.organiser) renderLead(VIEW.organiser);
 
   function ago(iso) {
     var ms = Date.now() - Date.parse(iso);
