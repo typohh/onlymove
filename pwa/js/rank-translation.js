@@ -59,6 +59,26 @@ export function internalRankToServerRank(rank, server) {
 }
 
 /**
+ * A shown rank as it reads on every server: `rank` time-adjusted for the solving
+ * speed in `history`, then translated through each coupling. The same per-server
+ * value the badge bubble labels, so the result overlay's server crossings
+ * (attempt-recorder) name exactly the rows whose label in that bubble changed.
+ * Servers with no usable curve are absent.
+ */
+export function serverRanksFor(rank, history) {
+    const out = {};
+    if (!Number.isFinite(rank)) return out;
+    const deltaRating = timeAdjustDeltaRating(history);
+    const adjValue = deltaRating !== null ? rankAfterRatingDelta(rank, deltaRating) : rank;
+    const adjRank = Number.isFinite(adjValue) ? adjValue : rank;
+    for (const server of RANK_TRANSLATION_SERVERS) {
+        const v = internalRankToServerRank(adjRank, server);
+        if (Number.isFinite(v)) out[server] = v;
+    }
+    return out;
+}
+
+/**
  * The bubble body for the rank badge: one row per ranking system, OnlyMove
  * first. Returns null wherever the badge is not the user's own rank — analysis
  * and view mode show a problem's rank or nothing — which the hint anchor reads
@@ -86,9 +106,7 @@ export function rankTranslationContent() {
     // ranks reflect timed play, so a slow solver's untimed rank overstates their
     // timed strength. Same single-point correction the Rank-chart server views use
     // (whole-history median solve time → rating delta → mapped via M).
-    const deltaRating = timeAdjustDeltaRating(history);
-    const adjValue = deltaRating !== null ? rankAfterRatingDelta(rankValue, deltaRating) : rankValue;
-    const adjRank = Number.isFinite(adjValue) ? adjValue : rankValue;
+    const serverRanks = serverRanksFor(rankValue, history);
 
     const frag = document.createDocumentFragment();
 
@@ -135,10 +153,7 @@ export function rankTranslationContent() {
     // Then each server: the time-adjusted rank translated through its coupling to
     // a continuous server scalar, labels ladder-clamped.
     const serverLabel = band => rankToLabel(clampRankBand(band));
-    for (const server of RANK_TRANSLATION_SERVERS) {
-        const v = internalRankToServerRank(adjRank, server);
-        if (Number.isFinite(v)) addRow(server, v, serverLabel);
-    }
+    for (const [server, v] of Object.entries(serverRanks)) addRow(server, v, serverLabel);
     frag.appendChild(grid);
     return frag;
 }

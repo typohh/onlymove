@@ -92,16 +92,31 @@ function createOverlayContent(stats, message, textColor) {
         rankChangeElement.textContent = getTerm('rankChangeFormat', { change: formattedChange });
         container.appendChild(rankChangeElement);
 
-        // The band-crossing line. attempt-recorder's rankBandCrossing has already
-        // decided it, and only reports a crossing that agrees with the answer — so
-        // this line can never contradict the number above it.
+        // The band-crossing lines: OnlyMove's, then every server whose label in
+        // the badge bubble changed. attempt-recorder has already decided each
+        // (rankBandCrossing / serverBandCrossings) and only reports a crossing
+        // that agrees with the answer — so no line can contradict the number
+        // above. The lines are named by system only when a server line is
+        // present; alone, OnlyMove's reads as it always has.
+        const crossings = [];
         if (stats.rankChangeDirection !== 'same') {
-            const rankChangeMessageElement = document.createElement('div');
-            rankChangeMessageElement.className = 'result-line-sm';
-            const newRank = getDescriptiveRank(state.displayRank);
-            const term = stats.rankChangeDirection === 'up' ? 'rankUpTo' : 'rankDownTo';
-            rankChangeMessageElement.textContent = getTerm(term, { rank: newRank });
-            container.appendChild(rankChangeMessageElement);
+            crossings.push({ system: 'OnlyMove', direction: stats.rankChangeDirection,
+                rank: getDescriptiveRank(state.displayRank) });
+        }
+        for (const c of stats.serverRankCrossings || []) {
+            crossings.push({ system: c.server, direction: c.direction, rank: getDescriptiveRank(c.band) });
+        }
+        if (crossings.length > 0) {
+            const named = crossings.some(c => c.system !== 'OnlyMove');
+            const block = document.createElement('div');
+            block.className = 'result-line-sm';
+            for (const c of crossings) {
+                const line = document.createElement('div');
+                const change = getTerm(c.direction === 'up' ? 'rankUpTo' : 'rankDownTo', { rank: c.rank });
+                line.textContent = named ? getTerm('rankSystemLine', { system: c.system, change }) : change;
+                block.appendChild(line);
+            }
+            container.appendChild(block);
         }
     }
 

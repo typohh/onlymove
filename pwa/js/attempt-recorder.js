@@ -12,7 +12,8 @@ import { tsumegoIdOf } from './sgf.js';
 import { quantizeEmbedding } from './math-utils.js';
 import { motifDataIsCurrent, storedVersionMatches, RATINGS_VERSION } from './data-version.js';
 import { RECALL_CANDIDATE_HISTORY_LENGTH, RATINGS_VERSION_KEY, RANK_CURVE_VERSION_KEY } from './constants.js';
-import { rankBand } from '../shared/rank-math.js';
+import { rankBand, clampRankBand } from '../shared/rank-math.js';
+import { serverRanksFor } from './rank-translation.js';
 import { calculateAndStoreStatsResults, recallImpact, MIN_RECALL_INTERVAL_MS } from './recall-model.js';
 import { syncRecallNotification } from './notifications.js';
 import { recordReportAck, rebaseUnackedEntryDate, checkSyncSignal } from './account-sync.js';
@@ -199,6 +200,27 @@ function rankBandCrossing(oldRank, isCorrect) {
     return crossing === (isCorrect ? 'up' : 'down') ? crossing : 'same';
 }
 
+// The same test per server, over the badge bubble's server rows: each server's
+// label before this attempt against after it. Bands are CLAMPED to the real ladder
+// first, because the bubble labels a clamped band — past 9d the label cannot
+// change, so neither may a line claiming it did. Both snapshots carry their own
+// history's time adjustment (the bubble would have shown each), and a crossing
+// that disagrees with the answer is dropped, as for OnlyMove. In rank_map order.
+function serverBandCrossings(oldServerRanks, newServerRanks, isCorrect) {
+    const wanted = isCorrect ? 'up' : 'down';
+    const crossings = [];
+    for (const [server, newValue] of Object.entries(newServerRanks)) {
+        const oldValue = oldServerRanks[server];
+        if (!Number.isFinite(oldValue)) continue;
+        const oldBand = clampRankBand(rankBand(oldValue));
+        const newBand = clampRankBand(rankBand(newValue));
+        if (newBand === oldBand) continue;
+        const direction = newBand > oldBand ? 'up' : 'down';
+        if (direction === wanted) crossings.push({ server, direction, band: newBand });
+    }
+    return crossings;
+}
+
 // Match (by problemId + creation date) the just-recorded answer entry and
 // fold the wrong-attempt embedding data into it after the network fetch
 // resolves: the picked-move vector and the availability-null masses
@@ -348,6 +370,10 @@ export async function updateUserStats(isCorrect, {
         answer.pickedEmbedding = quantizeEmbedding(pickedEmbedding);
     }
 
+    // The server ranks the badge bubble would show right now, before this answer
+    // enters the history (it moves the time adjustment as well as the rank).
+    const oldServerRanks = serverRanksFor(state.displayRank, getMergedAnswerHistory());
+
     updateAnswerHistory([...state.answerHistory, answer]);
 
     // Defer-patch from the in-flight fetch. Never blocks the caller — if the
@@ -379,6 +405,8 @@ export async function updateUserStats(isCorrect, {
     syncRecallNotification();
 
     const rankChangeDirection = rankBandCrossing(oldRank, isCorrect);
+    const serverRankCrossings = serverBandCrossings(
+        oldServerRanks, serverRanksFor(state.displayRank, getMergedAnswerHistory()), isCorrect);
 
     // For a recall (repeat) attempt the rank barely moves (rank is fit on
     // first-time attempts only). Instead the overlay shows how recording this
@@ -421,5 +449,5 @@ export async function updateUserStats(isCorrect, {
     // writes would be pure D1 churn. It's uploaded on load, on a ~30-min heartbeat,
     // and when the tab is hidden (see main.js / notifications.uploadSchedule).
 
-    return { rankChange: state.displayRank - oldRank, rankChangeDirection, isCorrect, recallImpactPromise };
+    return { rankChange: state.displayRank - oldRank, rankChangeDirection, serverRankCrossings, isCorrect, recallImpactPromise };
 }
