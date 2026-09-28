@@ -31,11 +31,9 @@ const STR = {
         daysLeft: '{n} days left.',
         closed: 'Entries are closed.',
         strengthH: 'Strong players',
-        strengthLead: 'Hundreds of players are active on OnlyMove, but very few are stronger than the organiser, so the top of the rank scale rests on thin data. Verified strong players solving many problems near their best are what calibrates it.',
+        strengthLead: '[Hundreds of players are active on OnlyMove], but very few are stronger than the organiser, so the top of the rank scale rests on thin data. Verified strong players solving many problems near their best are what calibrates it.',
         strengthWho: 'Open to players with an EGF or AGA rank who are stronger than the organiser. New and existing accounts are both welcome.',
-        barH: 'Stronger than the organiser',
-        barEgf: 'EGF', barOm: 'OnlyMove',
-        barNote: 'The organiser\'s current ranks, updated with the lists below.',
+        strengthWhoOrg: 'Open to players with an EGF or AGA rank who are stronger than the organiser, currently {egf} in EGF (GoR {gor}) and {om} on OnlyMove; both figures update with the lists below. New and existing accounts are both welcome.',
         criteriaH: 'Judged with roughly equal weight on',
         sCrit1: 'Your EGF or AGA rank',
         sCrit2: 'Your account\'s average OnlyMove rank over its whole history',
@@ -47,7 +45,8 @@ const STR = {
         sAnon: 'To stay anonymous here, hide your profile in the same Account dialog. You are listed as Anonymous, and your rank is still shown.',
         videoH: 'Videos',
         videoLead: 'Videos introduce OnlyMove to new players and show how a strong player actually reads a problem.',
-        videoWhat: 'Record yourself solving OnlyMove problems in a single session, thinking aloud and explaining how you solve each one, starting from a new account and climbing as high as you can. English, Chinese, Japanese or Korean.',
+        videoWhat: 'Record yourself solving OnlyMove problems in a single session, thinking aloud and explaining how you solve each one, starting from a new account and climbing as high as you can.',
+        vLang: 'Record in English, Chinese, Japanese or Korean: the four languages OnlyMove itself is available in, so viewers can follow along in the app in the language they watched.',
         vCrit1: 'Views',
         vCrit2: 'The quality of the explanation, scored by the organiser and open to revision until the deadline',
         vCrit3: 'The highest OnlyMove rank reached during the video',
@@ -78,11 +77,9 @@ const STR = {
         daysLeft: '还剩 {n} 天。',
         closed: '参赛已截止。',
         strengthH: '强手棋手',
-        strengthLead: 'OnlyMove 有数百名活跃用户，但比组织者更强的棋手寥寥无几，因此段位刻度的顶端数据很少。经过验证的强手在接近自身最佳水平时大量解题，才能校准这一段。',
+        strengthLead: 'OnlyMove 有[数百名活跃用户]，但比组织者更强的棋手寥寥无几，因此段位刻度的顶端数据很少。经过验证的强手在接近自身最佳水平时大量解题，才能校准这一段。',
         strengthWho: '面向拥有 EGF 或 AGA 段位、且棋力强于组织者的棋手。新账户和已有账户均可参加。',
-        barH: '强于组织者',
-        barEgf: 'EGF', barOm: 'OnlyMove',
-        barNote: '组织者当前的段位，随下方列表一同更新。',
+        strengthWhoOrg: '面向拥有 EGF 或 AGA 段位、且棋力强于组织者的棋手；组织者目前为 EGF {egf}（GoR {gor}），OnlyMove {om}，两项数值随下方列表一同更新。新账户和已有账户均可参加。',
         criteriaH: '评判时大致同等考虑',
         sCrit1: '你的 EGF 或 AGA 段位',
         sCrit2: '账户全部历史的 OnlyMove 平均段位',
@@ -94,7 +91,8 @@ const STR = {
         sAnon: '如希望在此匿名，可在同一账户对话框中隐藏个人资料。你将以“匿名”列出，段位仍会显示。',
         videoH: '视频',
         videoLead: '视频能向新棋手介绍 OnlyMove，并展示强手如何真正地计算一道题。',
-        videoWhat: '录制你在一次连续的时段内解答 OnlyMove 题目的过程，边想边说，讲解每道题的解法；从新账户开始，尽可能攀升到更高的段位。可使用英语、中文、日语或韩语。',
+        videoWhat: '录制你在一次连续的时段内解答 OnlyMove 题目的过程，边想边说，讲解每道题的解法；从新账户开始，尽可能攀升到更高的段位。',
+        vLang: '视频可使用英语、中文、日语或韩语录制，也就是 OnlyMove 本身支持的四种语言，这样观众可以在应用中以同一种语言跟着练习。',
         vCrit1: '观看次数',
         vCrit2: '讲解质量，由组织者评分，截止前可能调整',
         vCrit3: '视频中达到的最高 OnlyMove 段位',
@@ -125,11 +123,9 @@ const STR = {
         daysLeft: '残り {n} 日。',
         closed: '受付は終了しました。',
         strengthH: '強豪プレイヤー',
-        strengthLead: 'OnlyMove には数百人のアクティブユーザーがいますが、主催者より強いプレイヤーはごくわずかで、ランクの上位はデータが薄い状態です。実力が確認された強豪が自己ベスト付近で数多く解くことが、この範囲の較正につながります。',
+        strengthLead: 'OnlyMove には[数百人のアクティブユーザー]がいますが、主催者より強いプレイヤーはごくわずかで、ランクの上位はデータが薄い状態です。実力が確認された強豪が自己ベスト付近で数多く解くことが、この範囲の較正につながります。',
         strengthWho: 'EGF または AGA の段級位を持ち、主催者より強い方が対象です。新規アカウントでも既存アカウントでも参加できます。',
-        barH: '主催者より強いこと',
-        barEgf: 'EGF', barOm: 'OnlyMove',
-        barNote: '主催者の現在のランク。下の一覧と一緒に更新されます。',
+        strengthWhoOrg: 'EGF または AGA の段級位を持ち、主催者より強い方が対象です。主催者は現在 EGF {egf}（GoR {gor}）、OnlyMove {om} で、どちらも下の一覧と一緒に更新されます。新規アカウントでも既存アカウントでも参加できます。',
         criteriaH: '次をほぼ同じ重みで審査します',
         sCrit1: 'EGF または AGA の段級位',
         sCrit2: 'アカウント全履歴での OnlyMove 平均ランク',
@@ -141,7 +137,8 @@ const STR = {
         sAnon: 'ここで匿名にしたい場合は、同じアカウント画面でプロフィールを非公開にしてください。「匿名」として掲載され、段級位は表示されます。',
         videoH: '動画',
         videoLead: '動画は OnlyMove を新しいプレイヤーに紹介し、強い人が実際にどう問題を読むのかを伝えます。',
-        videoWhat: '1 回のセッションで OnlyMove の問題を解く様子を、考えを声に出して解き方を説明しながら録画してください。新しいアカウントから始めて、できるだけ高いランクまで上がってください。英語・中国語・日本語・韓国語のいずれでも構いません。',
+        videoWhat: '1 回のセッションで OnlyMove の問題を解く様子を、考えを声に出して解き方を説明しながら録画してください。新しいアカウントから始めて、できるだけ高いランクまで上がってください。',
+        vLang: '動画は英語・中国語・日本語・韓国語のいずれかで録画してください。OnlyMove 自体が対応している 4 言語なので、視聴者は同じ言語のアプリで一緒に解くことができます。',
         vCrit1: '再生回数',
         vCrit2: '解説の質（主催者が採点し、締め切りまで見直すことがあります）',
         vCrit3: '動画中に到達した最高 OnlyMove ランク',
@@ -172,11 +169,9 @@ const STR = {
         daysLeft: '{n}일 남음.',
         closed: '참가가 마감되었습니다.',
         strengthH: '강자 부문',
-        strengthLead: 'OnlyMove에는 수백 명의 활성 사용자가 있지만 주최자보다 강한 기사는 매우 적어서, 랭크 척도의 최상단은 데이터가 부족합니다. 실력이 검증된 강자가 자신의 최고 수준 근처에서 많은 문제를 푸는 것이 이 구간을 보정합니다.',
+        strengthLead: 'OnlyMove에는 [수백 명의 활성 사용자]가 있지만 주최자보다 강한 기사는 매우 적어서, 랭크 척도의 최상단은 데이터가 부족합니다. 실력이 검증된 강자가 자신의 최고 수준 근처에서 많은 문제를 푸는 것이 이 구간을 보정합니다.',
         strengthWho: 'EGF 또는 AGA 급수가 있고 주최자보다 강한 기사가 대상입니다. 새 계정과 기존 계정 모두 참가할 수 있습니다.',
-        barH: '주최자보다 강할 것',
-        barEgf: 'EGF', barOm: 'OnlyMove',
-        barNote: '주최자의 현재 랭크이며, 아래 목록과 함께 갱신됩니다.',
+        strengthWhoOrg: 'EGF 또는 AGA 급수가 있고 주최자보다 강한 기사가 대상입니다. 주최자는 현재 EGF {egf}(GoR {gor}), OnlyMove {om}이며, 두 수치 모두 아래 목록과 함께 갱신됩니다. 새 계정과 기존 계정 모두 참가할 수 있습니다.',
         criteriaH: '다음을 대략 같은 비중으로 심사합니다',
         sCrit1: 'EGF 또는 AGA 급수',
         sCrit2: '계정 전체 기록에 걸친 OnlyMove 평균 랭크',
@@ -188,7 +183,8 @@ const STR = {
         sAnon: '여기서 익명으로 남고 싶다면 같은 계정 화면에서 프로필을 숨기세요. "익명"으로 표시되며 급수는 그대로 표시됩니다.',
         videoH: '영상 부문',
         videoLead: '영상은 새로운 기사들에게 OnlyMove를 소개하고, 강자가 실제로 문제를 어떻게 읽는지 보여 줍니다.',
-        videoWhat: '한 번의 세션에서 OnlyMove 문제를 푸는 모습을, 생각을 소리 내어 말하고 풀이를 설명하면서 녹화해 주세요. 새 계정으로 시작해 가능한 한 높은 랭크까지 올라가 보세요. 영어, 중국어, 일본어, 한국어 중 어느 언어든 좋습니다.',
+        videoWhat: '한 번의 세션에서 OnlyMove 문제를 푸는 모습을, 생각을 소리 내어 말하고 풀이를 설명하면서 녹화해 주세요. 새 계정으로 시작해 가능한 한 높은 랭크까지 올라가 보세요.',
+        vLang: '영상은 영어, 중국어, 일본어, 한국어 중 하나로 녹화해 주세요. OnlyMove가 지원하는 네 가지 언어이므로 시청자가 같은 언어의 앱에서 함께 따라 풀 수 있습니다.',
         vCrit1: '조회수',
         vCrit2: '해설의 질(주최자가 채점하며 마감 전까지 조정될 수 있음)',
         vCrit3: '영상 중 도달한 최고 OnlyMove 랭크',
@@ -291,7 +287,7 @@ function renderPage(view) {
     --serif: 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, 'Noto Serif', serif;
   }
   body { padding-top: 0; }
-  h1, h2, .bar-fig { font-family: var(--serif); }
+  h1, h2 { font-family: var(--serif); }
   h2 { font-size: 1.55rem; font-weight: 600; display: flex; align-items: center; gap: .6rem; }
   h3 { font-size: 1rem; font-weight: 600; margin: 1.6rem 0 .5rem; display: flex; align-items: center; gap: .5rem; }
   .stone { flex: none; filter: drop-shadow(0 1px 1.5px rgba(0,0,0,.45)); }
@@ -324,29 +320,15 @@ function renderPage(view) {
   .deadline { margin: 0; }
   .deadline strong { font-weight: 600; }
 
-  /* the bar to beat, set on board wood */
-  .bar {
-    position: relative; overflow: hidden; margin: 1.6rem 0; padding: 1.3rem 1.4rem 1.1rem;
-    border-radius: 6px; background: var(--kaya); color: var(--kaya-ink);
-    box-shadow: inset 0 0 0 1px rgba(0,0,0,.12), 0 6px 18px rgba(0,0,0,.25);
-  }
-  .bar::before {
-    content: ''; position: absolute; inset: 0; pointer-events: none;
-    background-image: linear-gradient(var(--kaya-line) 1px, transparent 1px),
-                      linear-gradient(90deg, var(--kaya-line) 1px, transparent 1px);
-    background-size: 28px 28px; background-position: 13px 13px; opacity: .55;
-  }
-  .bar > * { position: relative; }
-  .bar h3 { margin: 0 0 .7rem; color: var(--kaya-ink); }
-  .bar-figs { display: flex; flex-wrap: wrap; gap: .6rem 2.6rem; }
-  .bar-fig { font-size: clamp(2.2rem, 7vw, 3rem); font-weight: 600; line-height: 1; }
-  .bar-fig small { display: block; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: .9rem; font-weight: 600; margin-top: .45rem; opacity: .75; }
-  .bar-note { margin: .9rem 0 0; font-size: .88rem; opacity: .8; }
-
-  /* criteria: three items of equal weight, drawn as three equal columns */
+  /* criteria: three items of equal weight, as three equal cells of board wood
+     divided by board lines */
   ul.criteria { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; margin: .4rem 0 .6rem; padding: 0;
-                background: var(--hairline); border: 1px solid var(--hairline); border-radius: 10px; overflow: hidden; }
-  ul.criteria li { list-style: none; margin: 0; padding: .85rem .9rem; background: var(--canvas); font-size: .95rem; line-height: 1.45; }
+                background: var(--kaya-line); border-radius: 6px; overflow: hidden;
+                box-shadow: inset 0 0 0 1px rgba(0,0,0,.12), 0 4px 14px rgba(0,0,0,.22); }
+  ul.criteria li { list-style: none; margin: 0; padding: .95rem 1rem; background: var(--kaya); color: var(--kaya-ink);
+                   font-size: .97rem; font-weight: 500; line-height: 1.45; }
+  a.inline { color: inherit; text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: .18em; }
+  a.inline:hover { color: var(--accent-hi); }
 
   /* how to enter: a real sequence, so numbered */
   ol.steps { counter-reset: step; list-style: none; padding: 0; margin: .4rem 0 .8rem; }
@@ -374,7 +356,7 @@ function renderPage(view) {
     .hero { padding-top: 2.2rem; }
   }
   @media (prefers-color-scheme: light) {
-    .bar { box-shadow: inset 0 0 0 1px rgba(0,0,0,.12), 0 4px 12px rgba(0,0,0,.12); }
+    ul.criteria { box-shadow: inset 0 0 0 1px rgba(0,0,0,.12), 0 3px 10px rgba(0,0,0,.10); }
   }
 </style>
 </head>
@@ -400,14 +382,6 @@ function renderPage(view) {
   <h2>${stone('black', 26)}<span id="strengthH"></span></h2>
   <p class="lead" id="strengthLead"></p>
   <p id="strengthWho"></p>
-  <div class="bar" id="bar" hidden>
-    <h3 id="barH"></h3>
-    <div class="bar-figs">
-      <div class="bar-fig"><span id="barEgfV"></span><small id="barEgfL"></small></div>
-      <div class="bar-fig"><span id="barOmV"></span><small id="barOmL"></small></div>
-    </div>
-    <p class="bar-note" id="barNote"></p>
-  </div>
   <h3 id="sCritH"></h3>
   <ul class="criteria"><li id="sCrit1"></li><li id="sCrit2"></li><li id="sCrit3"></li></ul>
   <h3 id="sHowH"></h3>
@@ -419,6 +393,7 @@ function renderPage(view) {
   <h2>${stone('white', 26)}<span id="videoH"></span></h2>
   <p class="lead" id="videoLead"></p>
   <p id="videoWhat"></p>
+  <p id="vLang"></p>
   <h3 id="vCritH"></h3>
   <ul class="criteria"><li id="vCrit1"></li><li id="vCrit2"></li><li id="vCrit3"></li></ul>
   <p id="vMin"></p>
@@ -484,9 +459,9 @@ function renderPage(view) {
     return t(m[2] === 'd' ? 'dan' : m[2] === 'k' ? 'kyu' : 'pro', { n: m[1] });
   }
 
-  ['intro', 'deadline', 'strengthH', 'strengthLead', 'strengthWho', 'barH', 'barNote',
+  ['intro', 'deadline', 'strengthH', 'strengthWho',
    'sCrit1', 'sCrit2', 'sCrit3', 'sStep1', 'sStep2', 'sStep3', 'sAnon', 'videoH', 'videoLead',
-   'videoWhat', 'vCrit1', 'vCrit2', 'vCrit3', 'vMin', 'vStep1', 'vStep2', 'vStep3', 'vLink',
+   'videoWhat', 'vLang', 'vCrit1', 'vCrit2', 'vCrit3', 'vMin', 'vStep1', 'vStep2', 'vStep3', 'vLink',
    'judgingH', 'judging', 'entriesH'].forEach(function (k) { set(k); });
   set('h1', 'title');
   set('pS', 'strengthH'); set('pV', 'videoH');
@@ -497,18 +472,22 @@ function renderPage(view) {
   $('pSa').innerHTML = amounts; $('pVa').innerHTML = amounts;
   var days = Math.ceil((DEADLINE - Date.now()) / 86400000);
   $('daysLeft').textContent = days > 0 ? t('daysLeft', { n: days }) : t('closed');
+  // The lead's bracketed phrase links to the community statistics.
+  $('strengthLead').innerHTML = esc(t('strengthLead'))
+    .replace(/\\[(.+?)\\]/, '<a class="inline" href="/statistics">$1</a>');
   $('contact').innerHTML = esc(t('contact'))
     .replace('{discord}', '<a href="' + DISCORD + '" target="_blank" rel="noopener">Discord</a>')
     .replace('{name}', '<strong>' + esc(DISCORD_NAME) + '</strong>');
 
   if (!VIEW) { $('updated').textContent = t('unavailable'); return; }
 
+  // The organiser's current ranks, inlined into the entry criterion.
   if (VIEW.organiser) {
-    $('barEgfV').textContent = fmtRank(VIEW.organiser.egf);
-    $('barEgfL').textContent = t('barEgf') + (VIEW.organiser.gor ? ', GoR ' + VIEW.organiser.gor : '');
-    $('barOmV').textContent = fmtRank(VIEW.organiser.om);
-    $('barOmL').textContent = t('barOm');
-    $('bar').hidden = false;
+    var o = VIEW.organiser;
+    $('strengthWho').innerHTML = esc(t('strengthWhoOrg'))
+      .replace('{egf}', '<strong>' + esc(fmtRank(o.egf)) + '</strong>')
+      .replace('{gor}', esc(o.gor === null ? '—' : String(o.gor)))
+      .replace('{om}', '<strong>' + esc(fmtRank(o.om)) + '</strong>');
   }
 
   function ago(iso) {
