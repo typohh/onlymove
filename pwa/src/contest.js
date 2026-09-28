@@ -22,16 +22,22 @@
 //              over the WHOLE history past the rank-start gate, plus the count of
 //              in-corpus novel attempts. Video: the peak over the first
 //              `video_problems` novel attempts — the ones solved on camera.
+//
+// The organiser is not an entry. The minimum criterion is "stronger than the
+// organiser", so the blob carries the organiser's CURRENT figures for the page to
+// print beside it: the EGF rank off the latest 'EGD' GoR heartbeat of the account
+// linked to ORGANISER_EGD_PIN, and that account's current shown OnlyMove rank.
 
 import { APP_VERSION } from './version.js';
 import {
     getProblemParams, rankWalkFromAttempts, resolveRowCountry, declaredJsonSql,
-    shortRankLabel, gorToRank, agaRatingToRank,
+    shortRankLabel, gorToRank, agaRatingToRank, buildRowStateFromReports,
 } from './leaderboard.js';
 import { rankToLabel } from '../shared/rank-math.js';
 
 const CONTEST_KEY = 'contest';
 export const CONTEST_MAX_AGE_MS = 12 * 3600 * 1000;
+const ORGANISER_EGD_PIN = '16025130';
 
 let computeInFlight = null;
 function computeContestOnce(env) {
@@ -71,9 +77,33 @@ function federationGrade(declaredJson) {
     return null;
 }
 
+// The organiser's current EGF rank (continuous, from the GoR) and current shown
+// OnlyMove rank — the same computation as the organiser's leaderboard row, run
+// here because an idle row is pruned. Null fields when the account or its
+// heartbeat is missing; the page then prints the criterion without them.
+async function organiserFigures(env, params) {
+    const x = await env.DB.prepare(
+        `SELECT o.user_id, ${declaredJsonSql('o.user_id')} AS declared
+           FROM external_ids o WHERE o.egd_pin = ?1`
+    ).bind(ORGANISER_EGD_PIN).first();
+    if (!x) return { gor: null, egfRank: null, onlymoveRank: null };
+    let gor = null;
+    try {
+        const d = (JSON.parse(x.declared || '[]') || []).find((e) => e && e.server === 'EGD');
+        const v = d ? parseInt(d.rank, 10) : NaN;
+        if (Number.isFinite(v) && v > 0) gor = v;
+    } catch { gor = null; }
+    const { rank } = await buildRowStateFromReports(env, x.user_id, params);
+    return {
+        gor,
+        egfRank: gor === null ? null : gorToRank(gor),
+        onlymoveRank: Number.isFinite(rank) ? rank : null,
+    };
+}
+
 async function computeContest(env) {
     const res = await env.DB.prepare(
-        `SELECT e.id, e.category, e.user_id, e.submitted_at, e.reference, e.video_url,
+        `SELECT e.id, e.category, e.user_id, e.submitted_at, e.video_url,
                 e.video_problems, e.views, e.quality,
                 x.display_name, x.country_code, a.adjective, a.color, a.animal,
                 (h.user_id IS NOT NULL) AS hidden,
@@ -85,7 +115,7 @@ async function computeContest(env) {
           ORDER BY e.submitted_at, e.id`
     ).all();
     const rows = (res && res.results) || [];
-    const params = rows.length ? await getProblemParams(env) : null;
+    const params = await getProblemParams(env);
 
     const strength = [], video = [];
     for (const r of rows) {
@@ -99,7 +129,6 @@ async function computeContest(env) {
             ? { adjective: r.adjective, color: r.color, animal: r.animal } : null;
         const base = {
             submittedAt: r.submitted_at,
-            reference: !!r.reference,
             name: hidden ? null : (r.display_name || null),
             alias: hidden ? null : alias,
             country: hidden ? null
@@ -128,7 +157,10 @@ async function computeContest(env) {
         }
     }
 
-    const data = { version: APP_VERSION, computedAt: new Date().toISOString(), strength, video };
+    const data = {
+        version: APP_VERSION, computedAt: new Date().toISOString(),
+        organiser: await organiserFigures(env, params), strength, video,
+    };
     await env.DB.prepare(
         `INSERT INTO server_stats (key, data, computed_at) VALUES (?1, ?2, ?3)
          ON CONFLICT(key) DO UPDATE SET data = excluded.data, computed_at = excluded.computed_at`

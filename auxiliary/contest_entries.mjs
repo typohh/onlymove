@@ -17,7 +17,7 @@
 //   node auxiliary/contest_entries.mjs list                                   --remote
 //   node auxiliary/contest_entries.mjs add-strength --egd 12345678            --remote
 //   node auxiliary/contest_entries.mjs add-strength --aga 12345               --remote
-//   node auxiliary/contest_entries.mjs add-strength --name "Henry Hemming" --reference --remote
+//   node auxiliary/contest_entries.mjs add-strength --name "Jane Doe"         --remote
 //   node auxiliary/contest_entries.mjs add-video --alias "Brave Crimson Fox" \
 //        --url https://youtu.be/... --problems 60 [--views 120] [--quality 7.5] --remote
 //   node auxiliary/contest_entries.mjs set --id 3 [--views N] [--quality Q] [--problems N] [--url U] [--date YYYY-MM-DD] --remote
@@ -42,7 +42,7 @@ for (let i = 1; i < argv.length; i++) {
     const a = argv[i];
     if (!a.startsWith('--')) die(`unexpected argument: ${a}`);
     const key = a.slice(2);
-    if (['remote', 'local', 'reference'].includes(key)) opts[key] = true;
+    if (['remote', 'local'].includes(key)) opts[key] = true;
     else {
         if (i + 1 >= argv.length) die(`${a} needs a value`);
         opts[key] = argv[++i];
@@ -132,8 +132,8 @@ function resolveVideoAccount() {
 }
 
 function insert(category, userId, fields) {
-    const cols = ['category', 'user_id', 'submitted_at', 'reference'];
-    const vals = [sq(category), sq(userId), sq(dateArg() || new Date().toISOString()), opts.reference ? 1 : 0];
+    const cols = ['category', 'user_id', 'submitted_at'];
+    const vals = [sq(category), sq(userId), sq(dateArg() || new Date().toISOString())];
     for (const [k, v] of Object.entries(fields)) {
         if (v === undefined) continue;
         cols.push(k);
@@ -146,7 +146,7 @@ function insert(category, userId, fields) {
 }
 
 function list() {
-    const rows = d1(`SELECT e.id, e.category, e.submitted_at, e.reference, e.video_url, e.video_problems,
+    const rows = d1(`SELECT e.id, e.category, e.submitted_at, e.video_url, e.video_problems,
                             e.views, e.quality, x.display_name, x.egd_pin, x.aga_id,
                             a.adjective || ' ' || a.color || ' ' || a.animal AS alias,
                             (h.user_id IS NOT NULL) AS hidden
@@ -162,7 +162,6 @@ function list() {
             : (r.alias || '(no name, no alias)');
         const bits = [`#${r.id}`, r.category.padEnd(8), r.submitted_at.slice(0, 10), who];
         if (r.hidden) bits.push('[hidden]');
-        if (r.reference) bits.push('[reference]');
         if (r.category === 'video') {
             bits.push(r.video_url || '(no url)', `problems=${r.video_problems ?? '—'}`,
                       `views=${r.views ?? '—'}`, `quality=${r.quality ?? '—'}`);

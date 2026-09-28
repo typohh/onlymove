@@ -10,7 +10,6 @@ CREATE TABLE IF NOT EXISTS contest_entries (
     category       TEXT NOT NULL CHECK (category IN ('strength', 'video')),
     user_id        TEXT NOT NULL,
     submitted_at   TEXT NOT NULL,
-    reference      INTEGER NOT NULL DEFAULT 0,
     video_url      TEXT,
     video_problems INTEGER,
     views          INTEGER,

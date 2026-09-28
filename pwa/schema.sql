@@ -422,14 +422,14 @@ CREATE TABLE IF NOT EXISTS hidden_profiles (
 -- (linked EGD/AGA display_name, else the alias, withheld by hidden_profiles), the
 -- federation rank (the latest EGD/AGAR heartbeat in rank_surveys) and the OnlyMove
 -- ranks (a replay of the account's novel attempts) — so an entry has no anonymity
--- flag of its own. `reference` marks the organiser's own listed account, which is
--- shown but takes no prize.
+-- flag of its own. The organiser is not an entry: the page shows the organiser's
+-- current figures beside the entry criteria, off the account linked to
+-- ORGANISER_EGD_PIN (src/contest.js).
 CREATE TABLE IF NOT EXISTS contest_entries (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     category       TEXT NOT NULL CHECK (category IN ('strength', 'video')),
     user_id        TEXT NOT NULL,
     submitted_at   TEXT NOT NULL,
-    reference      INTEGER NOT NULL DEFAULT 0,
     video_url      TEXT,
     video_problems INTEGER,
     views          INTEGER,
