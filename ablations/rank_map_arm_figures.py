@@ -139,10 +139,7 @@ def _anchor_rows(ratings_dir, sql_path, sqlite_path):
     surveys = load_rank_surveys(sql_path)
     require(surveys is not None and not surveys.empty,
             f"no rank_surveys rows in {sql_path} — run pipeline.fetch_database")
-    # Declarations alone: the arms are compared on the residual against DECLARATIONS,
-    # and a verified anchor on the federation's own ladder would favour the arm that
-    # pins that ladder as the latent.
-    surveys = mapping.observation_frame(surveys, use_verified=False)
+    surveys = mapping.observation_frame(surveys)
     require(len(surveys) > 0, "no declarations carry a parseable rank")
 
     ratings, slopes, floors = {}, {}, {}
@@ -224,9 +221,9 @@ def _band_error(arm, rows, band, band_by=None):
     a, alpha, ys, _, server_fits = arm
     maps = _couplings(server_fits)
     err, wts = [], []
-    for i, (server, R, g, T, w, *_) in enumerate(rows):
-        if server not in maps:
-            continue
+    for i, (server, R, g, T, w, v) in enumerate(rows):
+        if server not in maps or v is not None:
+            continue                # scored against declarations; a verified anchor is not one
         pos = float(interp_extrap_vec(np.array([R]), a, ys)[0]) if band_by is None \
             else float(band_by[i])
         if not (band[0] <= pos < band[1]):
