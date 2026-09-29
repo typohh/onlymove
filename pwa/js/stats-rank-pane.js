@@ -7,7 +7,7 @@
 
 import { state } from './state.js';
 import { getTerm } from './i18n.js';
-import { evaluateOnGrid, rankAfterRatingDelta, windowRankSeries, estimateWindowRank, windowMedianSolveMinutesSeries } from './rank-decomposition.js';
+import { evaluateAt, rankAfterRatingDelta, windowRankSeries, estimateWindowRank, windowMedianSolveMinutesSeries } from './rank-decomposition.js';
 import { getPopulationConstants, TIME_ADJUST_MIN_TIMED } from './population-constants.js';
 import { RANK_TRANSLATION_SERVERS, internalRankToServerRank } from './rank-translation.js';
 import { rankToLabel, rankProgress } from '../shared/rank-math.js';
@@ -77,14 +77,10 @@ export function buildRatingHistoryChart(history = state.answerHistory, decomp) {
         .map(a => ({ date: a.date, rankValue: a.problemRank, correct: !!a.correct }));
     if (entries.length < 2) return null;
 
-    // Two-kernel rank decomposition: see rank-decomposition.js. We evaluate the
-    // skill smoother Ŝ(t), its measurement SE seS(t), and the time-varying
-    // performance swing σ_M(t) on a regular t-grid, so line and bands shape
-    // correctly across gaps. The skill line + inner band are read via
-    // evaluateOnGrid, which interpolates S/seS from the decomp's precomputed
-    // wideGrid (the 30-day kernel is locally linear over the grid spacing) rather
-    // than re-running the wide MLE at each of the 300 points; σ_M(t) is still an
-    // exact per-point estimate.
+    // Rank decomposition: see rank-decomposition.js. We evaluate the skill
+    // smoother Ŝ(t), its posterior SD seS(t), and the time-varying performance
+    // swing σ_M(t) on a regular t-grid, so line and bands shape correctly across
+    // gaps. Every value is exact at its grid time (evaluateAt).
     const t0 = entries[0].date;
     const t1 = entries[entries.length - 1].date;
     const tSpan = Math.max(1, t1 - t0);
@@ -104,7 +100,7 @@ export function buildRatingHistoryChart(history = state.answerHistory, decomp) {
     if (decomp) {
         for (let i = 0; i < GRID_POINTS; i++) {
             const t = Math.round(t0 + tSpan * (i / (GRID_POINTS - 1)));
-            const e = evaluateOnGrid(decomp, t);
+            const e = evaluateAt(decomp, t);
             if (e) gridEvals.push({ t, S: e.S, seS: e.seS, sigmaUp: e.sigmaUp, sigmaDown: e.sigmaDown });
         }
     }

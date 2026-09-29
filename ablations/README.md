@@ -9,7 +9,7 @@ Contract for a script in this directory:
 - **Self-describing output**: the printed table carries its own column meanings; a reader should not need the script to interpret the numbers.
 - **Kept current**: when a refit or format change invalidates a figure a doc quotes from here, re-run the script and update the doc in the same pass.
 
-**Import direction.** `pipeline/` and `utils/` never import from here, so this directory is a leaf on production, and nothing in `auxiliary/` imports from here either. ONE edge crosses the other way: `eval_rank_endpoint_bias` imports the Rank-tab replica from `auxiliary.recreate_rank_graph` rather than restating the pooled 4PL. Anything a script here shares with a script there belongs in `utils/rating/` instead — the M curve, the couplings and the time dock are in `ratings_io`, the client-mirror solve-time window in `rank_surveys`.
+**Import direction.** `pipeline/` and `utils/` never import from here, so this directory is a leaf on production, and nothing in `auxiliary/` imports from here either, nor anything here from `auxiliary/`. Anything a script here shares with a script there belongs in `utils/rating/` instead — the M curve, the couplings and the time dock are in `ratings_io`, the client-mirror solve-time window in `rank_surveys`.
 
 ## Figures the documents quote
 
@@ -51,7 +51,7 @@ Producers: **`corpus_figures.py`** (the published index, `pwa/lookup.txt`, whole
 
 ## The client's estimators
 
-- **`eval_rank_endpoint_bias.py`** — picks `SLOPE_PRIOR_SD` for the Rank-tab graph's local-linear boundary fix and measures how much right-edge lag it removes, scored against an interior two-sided kernel that has no boundary lag of its own. Imports the replica from `auxiliary.recreate_rank_graph`.
+- **`skill_drift_fit.py`** — fits the Rank tab's career skill smoother (`pwa/js/skill-smoother.js`): the skill drift variance per day and the per-session form SD, by population maximum likelihood of every first-time attempt's outcome given the same player's earlier attempts. Runs the shipped smoother under node (`skill_drift_fit.mjs`), and fits the walk with and without the form term so the table shows what that term does to the drift. Re-run after a `fetch_database` or a curve refit and carry the values into the module's constants.
 - **`eval_recall_model.py`** — validates the shipped retention model against the attempt log: per-rung realized retention against the window ceiling, within-user contrasts, delivery. Produces every figure in `docs/methodology.md` §2.8's closing subsection; `recall_figures` reads its returned statistics into the ledger, so a refresh is one ledger run.
 
 ## The activation encoder

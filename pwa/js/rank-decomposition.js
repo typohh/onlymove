@@ -1,7 +1,9 @@
 // js/rank-decomposition.js
 //
-// Two-kernel rank decomposition, fully continuous (no time bucketing):
-//   S(t)    — slow "skill": a wide-kernel pooled logistic (τ_S ≈ 1 month).
+// Career rank decomposition, fully continuous (no time bucketing):
+//   S(t)    — slow "skill": the state-space smoother of skill-smoother.js (a
+//             random walk read through per-session form, smoothed over the whole
+//             history).
 //   σ_M(t)  — fast "form" swing: the genuine session-to-session performance
 //             variance, separated from measurement noise.
 //
@@ -17,11 +19,12 @@
 // 4d still reads as a 4d. Then:
 //
 //   1. Per attempt: x (internal rank) and its own slope, from its size's curve.
-//   2. S(t) = wide-kernel (τ_S) pooled logistic over x at the 80% target — your
-//      internal rank over time, evaluated exactly at any t. seS(t) is its
-//      measurement SE (how precisely we know skill — shrinks with data).
+//   2. S(t) = the posterior mean of skill at t given the whole history, at the
+//      80% target — your internal rank over time, evaluated exactly at any t.
+//      seS(t) is its posterior SD: it shrinks with data and grows across gaps by
+//      the drift the gap allows.
 //   3. A narrow kernel (τ_M, ~session scale) tracks form+skill; the residual
-//      r(t) = S_narrow(t) − S_wide(t) ~ N(0, σ_M² + v) carries the session swing
+//      r(t) = S_narrow(t) − S(t) ~ N(0, σ_M² + v) carries the session swing
 //      PLUS the narrow estimator's own noise v. The time-varying performance
 //      variance σ_M²(t) is a variance-components ML over a τ_V window (NOT
 //      method-of-moments r²−v: v is wildly heteroscedastic — all-correct/all-
@@ -54,14 +57,14 @@ import { state, updateUserRank, updateServeRank, updateDisplayRank, updateRankSe
 import { interpExtrap } from '../shared/rank-math.js';
 import { estimateWindowRankFromFlat, windowMLE, displayRankFor, WIN_CAP, applyM, flattenAttempt, seFloorAt, weightedMedianOverWindow } from '../shared/rank-window.js';
 import { sigmoid, gaussianWeight as gaussianWeightUntruncated, lowerBound } from './math-utils.js';
-import { clearKappa, clearSpan, anchorInfo } from './irt.js';
+import { clearSpan, anchorInfo } from './irt.js';
+import { smoothSkill, SESSION_GAP_MS } from './skill-smoother.js';
 // Baked at build time from the pipeline's output (pwa/tsumegos/rating_to_rank.json).
 import RATING_RANK_MAP from '../tsumegos/rating_to_rank.json';
 
 const HOUR_MS = 3600 * 1000;
 const DAY_MS = 24 * HOUR_MS;
 
-const TAU_S_MS = 30 * DAY_MS;               // skill (slow): ~1-month kernel
 const TAU_M_MS = 4 * HOUR_MS;               // form (fast): ~session kernel
 const TAU_V_MS = 10 * DAY_MS;               // σ_M(t) variance-smoothing window
 const KERNEL_TRUNC_SIGMA = 4;
@@ -89,42 +92,15 @@ const X_CLAMP_LO = -34.5;
 const X_CLAMP_HI = 25.5;
 
 const MIN_ATTEMPTS = 20;        // below this, no decomposition
-const WIDE_GRID_POINTS = 120;   // coarse skill grid for residual interpolation
-const SUPPORT_EFFN = 10;        // effective-N floor for "supported" skill range
-
-// The wide (30-day) skill grid is a kernel-weighted MLE; a career with tens of
-// attempts a day is enormously oversampled for a month-scale kernel, so the fit is
-// run on frequency-weighted BINS instead of raw attempts. The binning is 2-D — a
-// TIME slice (WIDE_TIME_BINS equal-count contiguous ranges — dense stretches get
-// finer slices, all far shorter than the 30-day kernel) crossed with an x (rank)
-// bucket of width WIDE_X_BIN. Binning by x too is load-bearing: attempts scatter
-// ±2–3 ranks even between neighbours (problems are served across a band), so a
-// pure time-bin's mean-x would lose real curvature and BIAS the logistic (Jensen);
-// a narrow x-bucket keeps each cell near-constant in x, so its (mean x, success
-// rate, count) is an unbiased binomial sufficient statistic. The count rides as
-// poolLogistic's FREQUENCY weight `f` (not a magnitude weight), preserving BOTH the
-// point estimate and its measurement SE. Validated: skill-line deviation ≤ ~0.05
-// rank vs the unthinned fit on real dense histories. The narrow/session fits and
-// the exact evaluateAt run on the FULL attempts (f = 1) — only the wide grid bins.
-const WIDE_TIME_BINS = 200;    // equal-count time slices fed to the thinned wide fit
-const WIDE_X_BIN = 0.33;       // internal-rank width of each x-bucket within a slice
 
 // σ_M is session-to-session variance: it needs several INDEPENDENT sessions in
 // the τ_V window to estimate reliably. With few, a local window's estimate is
 // noise (or one isolated session blows the band into a spike). So the local
 // estimate is shrunk toward the global one by effective session count (empirical
 // Bayes): sparse windows fall back to the whole-history swing, dense windows keep
-// their local value. SESSION_CORR_MS de-duplicates within-session near-copies.
-const SESSION_CORR_MS = TAU_M_MS * Math.SQRT2;  // within-session correlation length
+// their local value. Sessions are split at SESSION_GAP_MS (skill-smoother.js), the
+// same boundary at which the skill smoother redraws its form offset.
 const SIGMA_PRIOR_SESSIONS = 8;  // shrinkage prior strength, in effective sessions
-// A gap larger than this ends a session (starts a new one). Set near the within-
-// session correlation length (SESSION_CORR_MS ≈ 5.66h) so the hard clustering
-// matches the smooth Gaussian down-weighting the old per-attempt multiplicity
-// applied — attempts closer than this were counted as ~the same sitting, farther
-// as independent sessions — but rounded to 6h, an even divisor of the day (≤4
-// sittings/day) rather than the √2 coincidence. Validated a wash vs 5.66h on real
-// heavy histories (session counts and σ_M band within noise of each other).
-const SESSION_GAP_MS = 6 * HOUR_MS;
 
 // ---------------------------------------------------------------------------
 // M: rating → rank map (pwa/tsumegos/rating_to_rank.json), per board size.
@@ -231,71 +207,25 @@ function gaussianWeight(dtOverTau) {
     return gaussianWeightUntruncated(dtOverTau);
 }
 
-// Weak prior on the local time-slope used by the LOCAL-LINEAR wide kernel (in
-// ability units per kernel width τ). It ridge-shrinks the fitted drift toward 0
-// so a thin or one-sided (boundary) window degrades gracefully back to the
-// local-constant estimate instead of extrapolating a noisy slope — the standard
-// penalized-local-linear boundary fix. As SLOPE_PRIOR_SD → 0 the linear fit
-// collapses to local-constant (point AND sandwich SE); larger = more boundary
-// de-biasing at the cost of more boundary variance.
-//
-// Validated on real histories (ablations/eval_rank_endpoint_bias.py — interior
-// held-out lag test, 10 users): today's local-constant endpoint LAGS the lag-free
-// two-sided reference by ~1.2 stones on TRENDING stretches; this is a genuine
-// bias/variance dial (no sharp knee). SD=2.0 removes ~40% of that lag (−1.16 →
-// −0.67) for a ~20% band widening and keeps boundary over-extrapolation on thin
-// histories in check; 1.5 is more conservative, 2.5 more aggressive. (RMS-vs-
-// reference is flat across SD because the reference is itself noise-dominated, so
-// it cancels the bias signal — the signed trending lag is the metric that selects.)
-//
-// IMPORTANT — this is a SMOOTHING BANDWIDTH, not a drift prior. The measured
-// population SD of real 30-day skill drift is only ~0.6 stones/30d (robust ~0.23);
-// 2.0 is deliberately ~3× looser because the ridge fights the boundary slope's
-// MEASUREMENT noise, not real trend rates. Do NOT "derive it from the population"
-// and set it to ~0.6 — that over-shrinks the slope and silently RE-INTRODUCES the
-// lag (≈10% removed vs ≈40% here). If anything, ~0.6 is a FLOOR (never regularize
-// tighter than people actually trend), never the value. See the design note in
-// docs / the project memory before changing this.
-const SLOPE_PRIOR_SD = 2.0;                  // ranks per τ_S (bandwidth, not a drift prior)
-const SLOPE_PRIOR_INFO = 1 / (SLOPE_PRIOR_SD * SLOPE_PRIOR_SD);
-
-// Kernel-weighted pooled 3PL MLE for the internal-rank skill R at time t0:
-// P(correct)=c_j+(1−c_j)·σ(slope_j·(R−x_j)+κ_j), where each attempt j carries its own
-// slope (logit per internal rank), guessing floor c_j (problemFloor) and κ_j=κ(c_j)
-// (so P=80% at R==x_j) — all set in flattenAttempts. Returns { R, se, effN, drift };
-// attempts MUST be sorted by t.
-//
-// `linear` selects the time model:
-//   false (default) — LOCAL-CONSTANT in time: ability is one scalar R over the
-//     whole kernel window. Correct for the narrow form kernel (a session can't
-//     support a trend), but at the RIGHT edge (now) a symmetric kernel sees only
-//     past data, so the estimate is a backward-weighted average that trails a
-//     trending user by ~0.8·τ — the boundary lag.
-//   true — LOCAL-LINEAR in time: fit R(t)=a+b·u, u=(t−t0)/τ, and report a (the
-//     level AT t0); the drift b is ridge-shrunk toward 0 (SLOPE_PRIOR_INFO). The
-//     intercept of a local-linear fit has O(h²) boundary bias (vs O(h) for
-//     local-constant), so the lag cancels. `drift` (b) is returned for free.
-function poolLogistic(attempts, t0, tau, linear = false) {
+// Kernel-weighted pooled 4PL MLE for the internal-rank skill R at time t0 — the
+// narrow (session-scale) fit behind the form residuals:
+// P(correct)=c_j+(1−c_j−LAPSE)·σ(slope_j·(R−x_j)+κ_j), where each attempt j carries
+// its own slope (logit per internal rank), guessing floor c_j (problemFloor) and
+// κ_j=κ(c_j) (so P=80% at R==x_j) — all set in flattenAttempts. Local-constant in
+// time: a session cannot support a trend. Returns { R, se }; attempts MUST be
+// sorted by t.
+function poolLogistic(attempts, t0, tau) {
     const win = KERNEL_TRUNC_SIGMA * tau;
     const lo = lowerBound(attempts, t0 - win, a => a.t);
     const hi = lowerBound(attempts, t0 + win + 1, a => a.t);
-    if (hi <= lo) return { R: NaN, se: Infinity, effN: 0, drift: 0 };
+    if (hi <= lo) return { R: NaN, se: Infinity };
 
-    // `f` is an optional per-attempt FREQUENCY weight (this row stands for f real
-    // attempts — used by the thinned wide grid). It enters linearly everywhere
-    // (Σf·w, Σf·w², score, Fisher info, sandwich meat Σf·w²·v), so a thinned+
-    // reweighted fit reproduces the unthinned point estimate AND its SE. Absent ⇒ 1.
-    let sumW = 0, sumW2 = 0, sumWx = 0;
+    let sumW = 0, sumWx = 0;
     for (let j = lo; j < hi; j++) {
         const w = gaussianWeight((attempts[j].t - t0) / tau);
-        if (w <= 0) continue;
-        const fw = (attempts[j].f || 1) * w;
-        sumW += fw; sumW2 += fw * w; sumWx += fw * attempts[j].x;
+        sumW += w; sumWx += w * attempts[j].x;
     }
-    if (sumW <= 0) return { R: NaN, se: Infinity, effN: 0, drift: 0 };
-    const effN = (sumW * sumW) / sumW2;
-
-    if (linear) return poolLinear(attempts, t0, tau, lo, hi, sumWx / sumW, effN);
+    if (sumW <= 0) return { R: NaN, se: Infinity };
 
     let R = sumWx / sumW;
 
@@ -309,14 +239,13 @@ function poolLogistic(attempts, t0, tau, linear = false) {
         for (let j = lo; j < hi; j++) {
             const w = gaussianWeight((attempts[j].t - t0) / tau);
             if (w <= 0) continue;
-            const fw = (attempts[j].f || 1) * w;
             const slope = attempts[j].slope, c = attempts[j].floor, span = clearSpan(c);
             const praw = sigmoid(slope * (R - attempts[j].x) + attempts[j].kappa);
             let p = c + span * praw;
             if (p < 1e-9) p = 1e-9; else if (p > 1 - 1e-9) p = 1 - 1e-9;
             const g = span * slope * praw * (1 - praw);   // dP/dR
-            score += fw * (attempts[j].correct - p) * g / (p * (1 - p));
-            info += fw * g * g / (p * (1 - p));
+            score += w * (attempts[j].correct - p) * g / (p * (1 - p));
+            info += w * g * g / (p * (1 - p));
         }
         if (info < 1e-9) break;
         let step = score / info;
@@ -326,88 +255,21 @@ function poolLogistic(attempts, t0, tau, linear = false) {
         if (Math.abs(step) < 1e-6) break;
     }
 
-    // Sandwich SE: Var ≈ Σ f·w²·v / (Σ f·w·v)², v = (dP/dR)²/(P(1−P)) (4PL Fisher info).
+    // Sandwich SE: Var ≈ Σ w²·v / (Σ w·v)², v = (dP/dR)²/(P(1−P)) (4PL Fisher info).
     let A = 0, B = 0;
     for (let j = lo; j < hi; j++) {
         const w = gaussianWeight((attempts[j].t - t0) / tau);
         if (w <= 0) continue;
-        const fw = (attempts[j].f || 1) * w;
         const slope = attempts[j].slope, c = attempts[j].floor, span = clearSpan(c);
         const praw = sigmoid(slope * (R - attempts[j].x) + attempts[j].kappa);
         let p = c + span * praw;
         if (p < 1e-9) p = 1e-9; else if (p > 1 - 1e-9) p = 1 - 1e-9;
         const g = span * slope * praw * (1 - praw);
         const v = g * g / (p * (1 - p));
-        A += fw * v; B += fw * w * v;
+        A += w * v; B += w * w * v;
     }
     const se = A > 0 ? Math.sqrt(B) / A : Infinity;
-    return { R, se, effN, drift: 0 };
-}
-
-// Local-LINEAR-in-time wide-kernel fit (see poolLogistic's `linear` doc). Fits
-// R(t)=a+b·u over the same kernel window, u=(t−t0)/τ, reports the intercept a and
-// drift b. The drift carries a weak ridge (SLOPE_PRIOR_INFO) so a thin/one-sided
-// window can't extrapolate noise; as that prior tightens the whole thing collapses
-// to the local-constant estimate (point AND SE), so SLOPE_PRIOR_SD is a clean
-// "how much boundary de-biasing" knob. SE(a) is the 2×2 robust (sandwich) SE
-// Cov=B⁻¹·M·B⁻¹, the exact generalization of the scalar sandwich the local-
-// constant path uses — kernel weights aren't true probabilities, so the naive
-// model-info SE would mis-scale; in the tight-prior limit this reproduces √B/A.
-function poolLinear(attempts, t0, tau, lo, hi, x0, effN) {
-    let a = x0, b = 0;
-    for (let it = 0; it < 25; it++) {
-        let Sa = 0, Sb = -SLOPE_PRIOR_INFO * b;
-        let Iaa = 0, Iab = 0, Ibb = SLOPE_PRIOR_INFO;
-        for (let j = lo; j < hi; j++) {
-            const u = (attempts[j].t - t0) / tau;
-            const w = gaussianWeight(u);
-            if (w <= 0) continue;
-            const fw = (attempts[j].f || 1) * w;
-            const slope = attempts[j].slope, c = attempts[j].floor, span = clearSpan(c);
-            const praw = sigmoid(slope * (a + b * u - attempts[j].x) + attempts[j].kappa);
-            let p = c + span * praw;
-            if (p < 1e-9) p = 1e-9; else if (p > 1 - 1e-9) p = 1 - 1e-9;
-            const g = span * slope * praw * (1 - praw);     // dP/dR
-            const wv = fw * g * g / (p * (1 - p));          // weighted Fisher info
-            const sc = fw * (attempts[j].correct - p) * g / (p * (1 - p));
-            Sa += sc;  Sb += sc * u;
-            Iaa += wv; Iab += wv * u; Ibb += wv * u * u;
-        }
-        const det = Iaa * Ibb - Iab * Iab;
-        if (Math.abs(det) < 1e-12) break;
-        let da = (Ibb * Sa - Iab * Sb) / det;
-        let db = (Iaa * Sb - Iab * Sa) / det;
-        if (da > 2) da = 2; else if (da < -2) da = -2;
-        if (db > 2) db = 2; else if (db < -2) db = -2;
-        a += da; b += db;
-        if (a < X_CLAMP_LO) a = X_CLAMP_LO; else if (a > X_CLAMP_HI) a = X_CLAMP_HI;
-        if (Math.abs(da) < 1e-6 && Math.abs(db) < 1e-6) break;
-    }
-    // 2×2 sandwich SE of the intercept: bread B = Σ f·w·v·JJᵀ + ridge, meat
-    // M = Σ f·w²·v·JJᵀ (J=[1,u]); Cov₀₀ = (B_bb²·M_aa − 2 B_ab B_bb M_ab + B_ab² M_bb)/detB².
-    let Baa = 0, Bab = 0, Bbb = SLOPE_PRIOR_INFO, Maa = 0, Mab = 0, Mbb = 0;
-    for (let j = lo; j < hi; j++) {
-        const u = (attempts[j].t - t0) / tau;
-        const w = gaussianWeight(u);
-        if (w <= 0) continue;
-        const fw = (attempts[j].f || 1) * w;
-        const slope = attempts[j].slope, c = attempts[j].floor, span = clearSpan(c);
-        const praw = sigmoid(slope * (a + b * u - attempts[j].x) + attempts[j].kappa);
-        let p = c + span * praw;
-        if (p < 1e-9) p = 1e-9; else if (p > 1 - 1e-9) p = 1 - 1e-9;
-        const g = span * slope * praw * (1 - praw);
-        const v = g * g / (p * (1 - p));
-        const wv = fw * v, w2v = fw * w * v;
-        Baa += wv;  Bab += wv * u;  Bbb += wv * u * u;
-        Maa += w2v; Mab += w2v * u; Mbb += w2v * u * u;
-    }
-    const detB = Baa * Bbb - Bab * Bab;
-    let se = Infinity;
-    if (detB > 0) {
-        const cov00 = (Bbb * Bbb * Maa - 2 * Bab * Bbb * Mab + Bab * Bab * Mbb) / (detB * detB);
-        se = cov00 > 0 ? Math.sqrt(cov00) : Infinity;
-    }
-    return { R: a, se, effN, drift: b };
+    return { R, se };
 }
 
 // Flatten answerHistory to sorted [{t, x, slope, correct}] in INTERNAL-RANK
@@ -565,78 +427,9 @@ export function windowMedianSolveMinutesSeries(decomp, times, minTimed) {
     return out;
 }
 
-// Coarse, regularly-spaced evaluation of the wide (skill) kernel. Used only to
-// interpolate the wide track when forming form residuals; the rendered skill
-// line evaluates the kernel exactly (see evaluateAt). The 30-day kernel is
-// locally linear over the grid spacing, so interpolation here is exact to well
-// under a rank.
-function buildWideGrid(attempts, points) {
-    const t0 = attempts[0].t;
-    const t1 = attempts[attempts.length - 1].t;
-    const span = Math.max(1, t1 - t0);
-    const grid = [];
-    for (let i = 0; i < points; i++) {
-        const t = t0 + span * (i / (points - 1));
-        const w = poolLogistic(attempts, t, TAU_S_MS, true);   // local-linear wide skill
-        grid.push({ t, R: w.R, se: w.se, effN: w.effN });
-    }
-    return grid;
-}
-
-// Thin a time-sorted attempt array to frequency-weighted 2-D (time × x) BINS for
-// the wide-grid fit (see WIDE_TIME_BINS / WIDE_X_BIN). Each cell aggregates its
-// members to their MEAN (t, x, slope, floor) with a FRACTIONAL success rate
-// `correct` and `f` = the cell count — the exact binomial sufficient statistic for
-// a logistic bin, so poolLogistic's f·(correct − p) = successes − f·p and
-// f·g²/(P(1−P)) reproduce the cell's full score and Fisher information. The x-bin
-// keeps each cell near-constant in x (no Jensen bias from averaging scattered x);
-// the ×f frequency weight keeps the SE faithful. Returns the array unchanged
-// (f defaults to 1) when there aren't enough attempts for binning to help.
-function thinForWide(attempts) {
-    const N = attempts.length;
-    if (N <= WIDE_TIME_BINS * 4) return attempts;
-    const out = [];
-    for (let k = 0; k < WIDE_TIME_BINS; k++) {
-        const lo = Math.floor(k * N / WIDE_TIME_BINS);
-        const hi = Math.floor((k + 1) * N / WIDE_TIME_BINS);
-        if (hi <= lo) continue;
-        const cells = new Map();   // x-bucket index → running sums
-        for (let j = lo; j < hi; j++) {
-            const a = attempts[j];
-            const xb = Math.round(a.x / WIDE_X_BIN);
-            let c = cells.get(xb);
-            if (!c) { c = { st: 0, sx: 0, ss: 0, sfl: 0, sc: 0, n: 0 }; cells.set(xb, c); }
-            c.st += a.t; c.sx += a.x; c.ss += a.slope; c.sfl += a.floor; c.sc += a.correct; c.n++;
-        }
-        for (const c of cells.values()) {
-            const floor = c.sfl / c.n;
-            out.push({
-                t: c.st / c.n, x: c.sx / c.n, slope: c.ss / c.n, floor,
-                correct: c.sc / c.n,          // fractional success rate over the cell
-                kappa: clearKappa(floor),     // recomputed from the mean floor
-                f: c.n,
-            });
-        }
-    }
-    out.sort((p, q) => p.t - q.t);   // cells from adjacent slices interleave slightly
-    return out;
-}
-
-// Linear interpolation of a precomputed ascending grid on field `key`.
-function interpGrid(grid, t, key) {
-    const n = grid.length;
-    if (t <= grid[0].t) return grid[0][key];
-    if (t >= grid[n - 1].t) return grid[n - 1][key];
-    let a = 0, b = n - 1;
-    while (b - a > 1) { const m = (a + b) >> 1; if (grid[m].t <= t) a = m; else b = m; }
-    const span = grid[b].t - grid[a].t;
-    const u = span > 0 ? (t - grid[a].t) / span : 0;
-    return grid[a][key] + (grid[b][key] - grid[a][key]) * u;
-}
-
 // Form residuals — ONE per SESSION (a contiguous run of attempts with < SESSION_
 // GAP_MS between neighbours), not one per attempt. r = narrow-kernel skill −
-// wide-kernel skill (internal-rank space) evaluated at the session's centre; v is
+// smoothed skill (internal-rank space) evaluated at the session's centre; v is
 // the narrow estimator's measurement variance there. The sign of r is kept (`up`)
 // so the swing can be fit separately above (r ≥ 0, good days) and below (r < 0,
 // bad days) long-term skill.
@@ -651,7 +444,7 @@ function interpGrid(grid, t, key) {
 // more PRECISELY (its narrow fit pools more attempts ⇒ smaller v ⇒ larger ML
 // weight 1/(σ_M²+v)²), which is the right way for size to matter — not as extra
 // session mass. Attempts arrive time-sorted, so sessions are a single linear pass.
-function buildResidualTrack(attempts, wideGrid) {
+function buildResidualTrack(attempts, skill) {
     const resid = [];
     let s = 0;
     while (s < attempts.length) {
@@ -665,10 +458,8 @@ function buildResidualTrack(attempts, wideGrid) {
         s = e;
         const nj = poolLogistic(attempts, tc, TAU_M_MS);
         if (!Number.isFinite(nj.R)) continue;
-        const Rw = interpGrid(wideGrid, tc, 'R');
-        if (!Number.isFinite(Rw)) continue;
-        const r = nj.R - Rw;
-        resid.push({ t: tc, r2: r * r, up: r >= 0, v: nj.se * nj.se, w: nj.effN, m: 1 });
+        const r = nj.R - skill.at(tc).S;
+        resid.push({ t: tc, r2: r * r, up: r >= 0, v: nj.se * nj.se, m: 1 });
     }
     return resid;
 }
@@ -774,40 +565,22 @@ function globalPerformanceSigma(resid) {
 }
 
 // Core decomposition from an already-flattened, time-sorted attempt array — the
-// heavy lifting (wide skill grid, form residuals, global swing, summary).
+// heavy lifting (skill smoother, form residuals, global swing, summary).
 // Returns null below MIN_ATTEMPTS.
 function decompose(attempts) {
     if (attempts.length < MIN_ATTEMPTS) return null;
 
-    // Coarse wide track (for residual interpolation AND the chart's dense skill
-    // line) + per-attempt form residuals. The decomp carries enough to evaluate
-    // S, seS and σ_M(t) continuously at any t: the wide kernel exactly via
-    // evaluateAt, or interpolated from wideGrid via evaluateOnGrid (the dense
-    // render path — the 30-day kernel is locally linear over the grid spacing, so
-    // interpolating S/seS matches the exact fit to well under a rank while sparing
-    // the per-point re-fit). wideGrid is kept on the decomp for that path.
-    const wideGrid = buildWideGrid(thinForWide(attempts), WIDE_GRID_POINTS);
-    const resid = buildResidualTrack(attempts, wideGrid);
+    // The skill smoother is fitted once over the whole history and evaluated
+    // exactly at any t (skill-smoother.js); the form residuals are read against it.
+    const skill = smoothSkill(attempts);
+    const resid = buildResidualTrack(attempts, skill);
 
     // Global σ_M (point + 95% upper bound) — also the shrinkage target the
     // time-varying band pulls toward, so it must be on the decomp before any
     // evaluateAt call. Already in internal-rank units (the working coordinate).
     const gp = globalPerformanceSigma(resid);
-    const decomp = { attempts, resid, wideGrid, sigma2Up: gp.sigma2Up, sigma2Down: gp.sigma2Down };
-
-    // Current skill reads the last "supported" grid point — the latest with
-    // ≥ SUPPORT_EFFN effective pooled attempts (and a finite estimate).
-    let lastT = null;
-    for (const g of wideGrid) {
-        if (g.effN >= SUPPORT_EFFN && Number.isFinite(g.R)) lastT = g.t;
-    }
-    if (lastT === null) lastT = wideGrid[wideGrid.length - 1].t;
-
-    const cur = evaluateAt(decomp, lastT);
-
+    const decomp = { attempts, skill, resid, sigma2Up: gp.sigma2Up, sigma2Down: gp.sigma2Down };
     decomp.summary = {
-        currentSkill: cur && Number.isFinite(cur.S) ? cur.S : null,
-        currentSkillSE: cur ? cur.seS : Infinity,
         sigmaM: Math.sqrt(gp.sigma2),         // pooled swing — drives detection test
         sigmaMUpper: Math.sqrt(gp.upper2),
         sigmaUp: Math.sqrt(gp.sigma2Up),      // good-day overperformance (ranks)
@@ -821,10 +594,10 @@ function decompose(attempts) {
 //
 // Far-from-rank attempts carry systematic bias (a strong user's lucky above-rank
 // clears over-credit skill; the guessing floor inflates far-below clears), but the
-// 4PL MLE in poolLogistic absorbs that WITHIN the estimate, so no pre-filter is
-// needed: the per-problem guessing floor c discounts far-below clears (P→c there,
-// so a clear is weak evidence of skill) and the LAPSE upper asymptote caps the
-// score of a far-above slip (P(1−P)→LAPSE·(1−LAPSE) while the gradient →0).
+// 4PL likelihood absorbs that WITHIN the estimate, so no pre-filter is needed: the
+// per-problem guessing floor c discounts far-below clears (P→c there, so a clear is
+// weak evidence of skill) and the LAPSE upper asymptote caps the score of a
+// far-above slip (P(1−P)→LAPSE·(1−LAPSE) while the gradient →0).
 export function computeRankDecomposition(answerHistory) {
     // flattenAttempts maps each attempt through its own size's M, so a merged
     // 9x9+13x13 history pools on the internal-rank axis. Attempts whose size curve
@@ -834,50 +607,17 @@ export function computeRankDecomposition(answerHistory) {
     return decompose(all);
 }
 
-// Continuous evaluation at arbitrary t (no buckets). The wide kernel is
-// evaluated exactly here, so the rendered skill line and inner band are exact;
-// σ_M(t) comes from the local performance-variance estimate. The working
-// coordinate IS the internal rank, so S/seS/σ_M need no remap. Returns null if
-// t has no support.
+// Continuous evaluation at arbitrary t (no buckets): skill and its posterior SD
+// from the smoother, σ_M(t) from the local performance-variance estimate. The
+// working coordinate IS the internal rank, so S/seS/σ_M need no remap.
 export function evaluateAt(decomp, t) {
     if (!decomp) return null;
-    const { attempts, resid } = decomp;
-    const sk = poolLogistic(attempts, t, TAU_S_MS, true);    // exact local-linear wide skill
-    if (!Number.isFinite(sk.R)) return null;
-    const pv = localPerformanceVar(resid, t, decomp.sigma2Up || 0, decomp.sigma2Down || 0);
+    const { S, se } = decomp.skill.at(t);
+    const pv = localPerformanceVar(decomp.resid, t, decomp.sigma2Up || 0, decomp.sigma2Down || 0);
     return {
-        S: sk.R,                      // skill, internal rank
-        seS: sk.se,                   // measurement SE, rank units
+        S,                                // skill, internal rank
+        seS: se,                          // posterior SD of skill, rank units
         sigmaUp: Math.sqrt(pv.varUp),     // good-day swing above S, rank units
         sigmaDown: Math.sqrt(pv.varDown), // bad-day swing below S, rank units
-        effNS: sk.effN,
-    };
-}
-
-// Dense-render evaluation: same result shape as evaluateAt, but S and its
-// measurement SE seS are INTERPOLATED from the precomputed wideGrid instead of
-// re-running the wide-kernel local-linear MLE at t. The wide (30-day) kernel is
-// locally linear over the grid spacing — the exact property buildResidualTrack
-// already relies on — so the interpolated skill line and inner band match the
-// exact fit to well under a rank, while the per-point wide MLE (by far the
-// costliest part of the chart on dense histories) is skipped entirely. Only the
-// directional performance swing (localPerformanceVar) is still computed per point.
-// Falls back to the exact evaluateAt when the grid is absent (older decomp shape).
-// Used by the Rank chart's 300-point grid; the exact evaluateAt stays for the
-// single "current skill" readout, where precision matters and cost is trivial.
-export function evaluateOnGrid(decomp, t) {
-    if (!decomp) return null;
-    const { wideGrid, resid } = decomp;
-    if (!wideGrid || wideGrid.length < 2) return evaluateAt(decomp, t);
-    const S = interpGrid(wideGrid, t, 'R');
-    if (!Number.isFinite(S)) return null;
-    const seS = interpGrid(wideGrid, t, 'se');
-    const pv = localPerformanceVar(resid, t, decomp.sigma2Up || 0, decomp.sigma2Down || 0);
-    return {
-        S,                                // skill, internal rank (interpolated)
-        seS,                              // measurement SE, rank units (interpolated)
-        sigmaUp: Math.sqrt(pv.varUp),     // good-day swing above S, rank units
-        sigmaDown: Math.sqrt(pv.varDown), // bad-day swing below S, rank units
-        effNS: NaN,                       // not used by the chart render path
     };
 }
