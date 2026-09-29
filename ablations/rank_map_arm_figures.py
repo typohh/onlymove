@@ -126,7 +126,7 @@ CURVE_MATCH_TOL = 1e-6
 
 
 # --- the anchor rows -------------------------------------------------------
-def _anchor_rows(ratings_dir, sql_path, sqlite_path, use_verified=True):
+def _anchor_rows(ratings_dir, sql_path, sqlite_path):
     """`map_rating_to_rank`'s anchor rows, rebuilt so an arm can be fitted on a
     subset of them. Every quantity is computed by the production step's own
     helpers — this restates its assembly order and nothing else — and the
@@ -139,7 +139,7 @@ def _anchor_rows(ratings_dir, sql_path, sqlite_path, use_verified=True):
     surveys = load_rank_surveys(sql_path)
     require(surveys is not None and not surveys.empty,
             f"no rank_surveys rows in {sql_path} — run pipeline.fetch_database")
-    surveys = mapping.observation_frame(surveys, use_verified=use_verified)
+    surveys = mapping.observation_frame(surveys)
     require(len(surveys) > 0, "no declarations carry a parseable rank")
 
     ratings, slopes, floors = {}, {}, {}
@@ -262,16 +262,15 @@ def _likelihood_bar(server_fits, eps):
 
 
 def measure():
-    # The reproduction below is on the PRODUCTION anchors, verified ratings included —
-    # the only rows the published curve was fitted on. The arms are compared on
-    # DECLARATIONS ALONE: the claim is about the residual against declarations, and a
-    # verified anchor on the federation's own ladder would favour the arm that pins
-    # that ladder as the latent by construction.
-    prod_decls, prod_keys, _ = _anchor_rows(RATINGS_DIR, SQL_PATH_DEFAULT, DB_SQLITE)
-    _, prod, _, prod_dropped = _screen_and_refit(
-        prod_decls, prod_keys, "production anchors (reproduction check)")
-    a_ship, ys = prod[0], prod[2]
-    require(prod_dropped, "the screen removed nothing on the production anchors")
+    decls, keys, users = _anchor_rows(RATINGS_DIR, SQL_PATH_DEFAULT, DB_SQLITE)
+    print(f"anchor rows: {len(decls)} from {len(set(keys))} declarations "
+          f"by {len(users)} users")
+
+    first, shipped, ship_kept, dropped = _screen_and_refit(
+        decls, keys, "every server a free coupling (production)")
+    a_unscreened, alpha_unscreened, ys = first[0], first[1], first[2]
+    a_ship, alpha_ship = shipped[0], shipped[1]
+    require(dropped, "the screen removed nothing — there is no arm to compare")
 
     # The reproduction is only evidence if it IS the shipped mapping.
     xs_pub, ys_pub = load_rating_rank_curve(RATINGS_DIR)
@@ -287,21 +286,11 @@ def measure():
             f"pipeline.map_rating_to_rank")
     published_cut = load_declaration_exclusions(RATINGS_DIR)
     reproduced = {(uid[:8], server, band) for uid, server, band in
-                  (d["key"] for d in prod_dropped)}
+                  (d["key"] for d in dropped)}
     require(reproduced == published_cut,
             f"the screen reproduced here removes {len(reproduced)} declarations and "
             f"the published exclusion list holds {len(published_cut)}; they differ on "
             f"{sorted(reproduced ^ published_cut)}")
-
-    decls, keys, users = _anchor_rows(RATINGS_DIR, SQL_PATH_DEFAULT, DB_SQLITE,
-                                      use_verified=False)
-    print(f"anchor rows: {len(decls)} from {len(set(keys))} declarations "
-          f"by {len(users)} users")
-    first, shipped, ship_kept, dropped = _screen_and_refit(
-        decls, keys, "every server a free coupling (declarations only)")
-    a_unscreened, alpha_unscreened = first[0], first[1]
-    a_ship, alpha_ship = shipped[0], shipped[1]
-    require(dropped, "the screen removed nothing — there is no arm to compare")
 
     # --- what the screen moves ---
     curve_shift = float(np.max(np.abs(a_ship - a_unscreened)))
