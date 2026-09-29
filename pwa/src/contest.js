@@ -23,9 +23,9 @@
 //              in-corpus novel attempts. Video: the peak over the first
 //              `video_problems` novel attempts — the ones solved on camera.
 //
-// The organiser is not an entry. The minimum criterion is "stronger than the
-// organiser", so the blob carries the organiser's CURRENT figures for the page to
-// print beside it: the EGF rank off the latest 'EGD' GoR heartbeat of the account
+// The organiser is not an entry. There is no strength requirement, but the page
+// notes how few players are stronger, so the blob carries the organiser's CURRENT
+// figures for the page to print beside that: the EGF rank off the latest 'EGD' GoR heartbeat of the account
 // linked to ORGANISER_EGD_PIN, and that account's current shown OnlyMove rank.
 
 import { APP_VERSION } from './version.js';

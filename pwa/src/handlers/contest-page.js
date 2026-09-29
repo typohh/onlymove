@@ -33,7 +33,7 @@ const STR = {
         strengthH: 'Strong players',
         strengthLead: 'Hundreds of players are [active] on OnlyMove, but very few are stronger than the organiser, so the top of the rank scale rests on thin data. Verified strong players solving many problems near their best are what calibrates it.',
         strengthLeadOrg: 'Hundreds of players are [active] on OnlyMove, but very few are stronger than the organiser, currently {egf} in EGF (GoR {gor}) and {om} on OnlyMove, so the top of the rank scale rests on thin data. Verified strong players solving many problems near their best are what calibrates it.',
-        strengthWho: 'Open to players who are stronger than the organiser. You need an EGF or AGA rank so that your strength can be verified. New and existing accounts are both welcome.',
+        strengthWho: 'Open to any player with an EGF or AGA rank, so that your strength can be verified. New and existing accounts are both welcome.',
         criteriaH: 'Judged with roughly equal weight on',
         sCrit1: 'Your EGF or AGA rank',
         sCrit2: 'Your account\'s average OnlyMove rank over its whole history',
@@ -50,7 +50,6 @@ const STR = {
         vCrit1: 'Views',
         vCrit2: 'The quality of the explanation, scored by the organiser',
         vCrit3: 'The highest OnlyMove rank reached during the video',
-        vMin: 'A video needs at least 50 views to qualify.',
         vStep1: 'At the start of the recording, create a new account and pick an alias for it (menu → Account).',
         vStep2: 'Solve in one session, thinking aloud and explaining each problem.',
         vStep3: 'Publish the video and send the organiser the link, the alias, and how many problems you solved in it.',
@@ -79,7 +78,7 @@ const STR = {
         strengthH: '强手棋手',
         strengthLead: 'OnlyMove 有数百名[活跃]用户，但比组织者更强的棋手寥寥无几，因此段位刻度的顶端数据很少。经过验证的强手在接近自身最佳水平时大量解题，才能校准这一段。',
         strengthLeadOrg: 'OnlyMove 有数百名[活跃]用户，但比组织者（目前 EGF {egf}，GoR {gor}；OnlyMove {om}）更强的棋手寥寥无几，因此段位刻度的顶端数据很少。经过验证的强手在接近自身最佳水平时大量解题，才能校准这一段。',
-        strengthWho: '面向棋力强于组织者的棋手。你需要拥有 EGF 或 AGA 段位，以便核实棋力。新账户和已有账户均可参加。',
+        strengthWho: '面向所有拥有 EGF 或 AGA 段位的棋手，以便核实棋力。新账户和已有账户均可参加。',
         criteriaH: '评判时大致同等考虑',
         sCrit1: '你的 EGF 或 AGA 段位',
         sCrit2: '账户全部历史的 OnlyMove 平均段位',
@@ -96,7 +95,6 @@ const STR = {
         vCrit1: '观看次数',
         vCrit2: '讲解质量，由组织者评分',
         vCrit3: '视频中达到的最高 OnlyMove 段位',
-        vMin: '视频至少需要 50 次观看才有资格参评。',
         vStep1: '在录制开始时注册新账户，并为其选择一个别名（菜单 → 账户）。',
         vStep2: '在一次连续的时段内解题，边想边说，讲解每道题。',
         vStep3: '发布视频，并将链接、别名以及视频中解答的题目数量发送给组织者。',
@@ -125,7 +123,7 @@ const STR = {
         strengthH: '強豪プレイヤー',
         strengthLead: 'OnlyMove には数百人の[アクティブ]ユーザーがいますが、主催者より強いプレイヤーはごくわずかで、ランクの上位はデータが薄い状態です。実力が確認された強豪が自己ベスト付近で数多く解くことが、この範囲の較正につながります。',
         strengthLeadOrg: 'OnlyMove には数百人の[アクティブ]ユーザーがいますが、主催者（現在 EGF {egf}、GoR {gor}、OnlyMove {om}）より強いプレイヤーはごくわずかで、ランクの上位はデータが薄い状態です。実力が確認された強豪が自己ベスト付近で数多く解くことが、この範囲の較正につながります。',
-        strengthWho: '主催者より強い方が対象です。棋力を確認できるよう、EGF または AGA の段級位が必要です。新規アカウントでも既存アカウントでも参加できます。',
+        strengthWho: '棋力を確認できるよう、EGF または AGA の段級位をお持ちの方なら、どなたでも参加できます。新規アカウントでも既存アカウントでも参加できます。',
         criteriaH: '次をほぼ同じ重みで審査します',
         sCrit1: 'EGF または AGA の段級位',
         sCrit2: 'アカウント全履歴での OnlyMove 平均ランク',
@@ -142,7 +140,6 @@ const STR = {
         vCrit1: '再生回数',
         vCrit2: '解説の質（主催者が採点）',
         vCrit3: '動画中に到達した最高 OnlyMove ランク',
-        vMin: '審査対象となるには 50 回以上の再生が必要です。',
         vStep1: '録画の最初に新しいアカウントを作り、別名を選びます（メニュー → アカウント）。',
         vStep2: '1 回のセッションで、考えを声に出し、各問題を説明しながら解きます。',
         vStep3: '動画を公開し、リンク、別名、動画内で解いた問題数を主催者に送ります。',
@@ -171,7 +168,7 @@ const STR = {
         strengthH: '강자 부문',
         strengthLead: 'OnlyMove에는 수백 명의 [활성] 사용자가 있지만 주최자보다 강한 기사는 매우 적어서, 랭크 척도의 최상단은 데이터가 부족합니다. 실력이 검증된 강자가 자신의 최고 수준 근처에서 많은 문제를 푸는 것이 이 구간을 보정합니다.',
         strengthLeadOrg: 'OnlyMove에는 수백 명의 [활성] 사용자가 있지만 주최자(현재 EGF {egf}, GoR {gor}, OnlyMove {om})보다 강한 기사는 매우 적어서, 랭크 척도의 최상단은 데이터가 부족합니다. 실력이 검증된 강자가 자신의 최고 수준 근처에서 많은 문제를 푸는 것이 이 구간을 보정합니다.',
-        strengthWho: '주최자보다 강한 기사가 대상입니다. 기력을 확인할 수 있도록 EGF 또는 AGA 급수가 있어야 합니다. 새 계정과 기존 계정 모두 참가할 수 있습니다.',
+        strengthWho: '기력을 확인할 수 있도록 EGF 또는 AGA 급수가 있는 기사라면 누구나 참가할 수 있습니다. 새 계정과 기존 계정 모두 참가할 수 있습니다.',
         criteriaH: '다음을 대략 같은 비중으로 심사합니다',
         sCrit1: 'EGF 또는 AGA 급수',
         sCrit2: '계정 전체 기록에 걸친 OnlyMove 평균 랭크',
@@ -188,7 +185,6 @@ const STR = {
         vCrit1: '조회수',
         vCrit2: '해설의 질(주최자가 채점)',
         vCrit3: '영상 중 도달한 최고 OnlyMove 랭크',
-        vMin: '심사 대상이 되려면 조회수가 50회 이상이어야 합니다.',
         vStep1: '녹화를 시작할 때 새 계정을 만들고 별명을 고릅니다(메뉴 → 계정).',
         vStep2: '한 번의 세션에서 생각을 소리 내어 말하고 각 문제를 설명하며 풉니다.',
         vStep3: '영상을 공개하고 링크, 별명, 영상에서 푼 문제 수를 주최자에게 보냅니다.',
@@ -397,7 +393,6 @@ function renderPage(view) {
   <p id="vLang"></p>
   <h3 id="vCritH"></h3>
   <ul class="criteria"><li id="vCrit1"></li><li id="vCrit2"></li><li id="vCrit3"></li></ul>
-  <p id="vMin"></p>
   <h3 id="vHowH"></h3>
   <ol class="steps"><li id="vStep1"></li><li id="vStep2"></li><li id="vStep3"></li></ol>
   <p class="muted" id="vLink"></p>
@@ -462,7 +457,7 @@ function renderPage(view) {
 
   ['intro', 'deadline', 'strengthH', 'strengthWho',
    'sCrit1', 'sCrit2', 'sCrit3', 'sStep1', 'sStep2', 'sStep3', 'sAnon', 'videoH', 'videoLead',
-   'videoWhat', 'vLang', 'vCrit1', 'vCrit2', 'vCrit3', 'vMin', 'vStep1', 'vStep2', 'vStep3', 'vLink',
+   'videoWhat', 'vLang', 'vCrit1', 'vCrit2', 'vCrit3', 'vStep1', 'vStep2', 'vStep3', 'vLink',
    'judgingH', 'judging', 'entriesH'].forEach(function (k) { set(k); });
   set('h1', 'title');
   set('pS', 'strengthH'); set('pV', 'videoH');
