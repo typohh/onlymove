@@ -50,7 +50,7 @@ Always invoke pipeline modules through the venv's Python so PYTHONPATH resolves 
 ./.venv/bin/python3 -m pipeline.train_mirt                # single-stage rating + K skill axes in ONE fit → ratings/ + axes/{per_problem.csv,axes.npz}
 ./.venv/bin/python3 -m pipeline.write_mirt_per_cell       # per-legal-cell axis vectors → axes/per_cell/<size>/<tid>.npz. Resumable
 ./.venv/bin/python3 -m pipeline.map_rating_to_rank        # → ratings/{rating_to_rank.json, rank_map.json}. Backend; package_for_pwa publishes it
-./.venv/bin/python3 -m pipeline.fit_population_constants  # → ratings/population_constants.json (retention, time bias, rank prior). Backend
+./.venv/bin/python3 -m pipeline.fit_population_constants  # → ratings/population_constants.json (retention, time bias, rank prior, career skill smoother). Backend
 ./.venv/bin/python3 -m pipeline.package_for_pwa           # SINGLE writer of pwa/tsumegos/. Change-detects per size; --force to override
 ```
 

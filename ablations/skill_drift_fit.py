@@ -1,19 +1,25 @@
 #!/usr/bin/env python3
-"""Fit the Rank tab's skill smoother constants on the attempt log.
+"""What each term of the Rank tab's career skill smoother is worth.
 
 The career skill track (`pwa/js/skill-smoother.js`) models skill as a random walk
-in calendar time with a per-session form offset. Its two constants —
-SKILL_DRIFT_VAR_PER_DAY (how fast skill wanders) and FORM_SD (how far one sitting
-sits from it) — are population maximum-likelihood estimates: the summed log
-probability of every first-time attempt's outcome given the same player's attempts
-before it, over every player in the local DB.
+in calendar time whose step variance saturates at a cap, read through a per-session
+form offset. Its constants are fitted by `pipeline.fit_population_constants`; this
+ablation is the evidence for the model's SHAPE. It fits three nested arms by
+population maximum likelihood — the summed log probability of every first-time
+attempt's outcome given the same player's attempts before it:
+
+    walk            the random walk alone
+    walk + form     with the per-session form offset
+    walk+form+cap   with the step variance saturating at a fitted cap
+
+and prints each arm's constants and log-likelihood, and the shipped constants'
+log-likelihood beside them. Without the form term the drift absorbs the
+session-to-session swing; without the cap a single drift rate has to serve both
+active play and long absences, which pull it in opposite directions.
 
 The objective is computed by `ablations/skill_drift_fit.mjs`, which runs the
 shipped smoother and the shipped flattenAttempt unmodified under node; this module
-joins the attempt log to the shipped per-problem triple (`problem_params.bin`) and
-prints the fit. Two arms are fitted — the walk alone, and the walk with the form
-offset — so the table shows what the form term is worth and how far the drift
-moves without it.
+joins the attempt log to the shipped per-problem triple (`problem_params.bin`).
 
     ./.venv/bin/python3 -m ablations.skill_drift_fit
 """
@@ -99,17 +105,19 @@ def main():
     n = r["nAttempts"]
     print(f"first-time attempts: {n_rows} in the log, {dropped} on problems no longer "
           f"published, {n} scored over {r['nUsers']} players")
-    print("\nmean log loss is per attempt, in nats (lower is better)\n")
-    print(f"{'arm':<22}{'drift var/day':>15}{'drift SD/30d':>14}{'form SD':>10}{'mean log loss':>16}")
-    for name, a in (("walk only", r["noForm"]), ("walk + session form", r["form"])):
-        sd30 = (a["driftVarPerDay"] * 30) ** 0.5
-        form = f"{a['formSd']:.3f}" if name != "walk only" else "—"
-        print(f"{name:<22}{a['driftVarPerDay']:>15.5f}{sd30:>14.3f}{form:>10}{-a['logLik'] / n:>16.5f}")
-    print(f"\ndrift profile at form SD {r['form']['formSd']:.3f}:")
-    print(f"{'drift var/day':>15}{'drift SD/30d':>14}{'mean log loss':>16}")
-    for p in r["profile"]:
-        print(f"{p['driftVarPerDay']:>15.5f}{(p['driftVarPerDay'] * 30) ** 0.5:>14.3f}"
-              f"{-p['logLik'] / n:>16.5f}")
+    print("\nmean log loss is per attempt, in nats (lower is better); log-lik gain is "
+          "the arm's total over the walk alone\n")
+    print(f"{'arm':<16}{'drift SD/30d':>13}{'cap SD':>8}{'form SD':>9}{'mean log loss':>15}{'log-lik gain':>14}")
+    base = r["arms"]["walk"]["logLik"]
+    fmt = lambda v: f"{v ** 0.5:.3f}" if v is not None else "—"
+    for name, key in (("walk", "walk"), ("walk + form", "walkForm"), ("walk+form+cap", "walkFormCap")):
+        a = r["arms"][key]
+        form = f"{a['formSd']:.3f}" if a["formSd"] is not None else "—"
+        print(f"{name:<16}{(a['driftVarPerDay'] * 30) ** 0.5:>13.3f}{fmt(a['gapVarCap']):>8}{form:>9}"
+              f"{-a['logLik'] / n:>15.5f}{a['logLik'] - base:>14.1f}")
+    sp = r["shippedParams"]
+    print(f"{'shipped':<16}{(sp['driftVarPerDay'] * 30) ** 0.5:>13.3f}{sp['gapVarCap'] ** 0.5:>8.3f}"
+          f"{sp['formSd']:>9.3f}{-r['shipped'] / n:>15.5f}{r['shipped'] - base:>14.1f}")
 
 
 if __name__ == "__main__":

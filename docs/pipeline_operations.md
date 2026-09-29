@@ -97,7 +97,9 @@ Production-clean: no experiment flags. The experiment surface is `auxiliary/map_
 
 ### `fit_population_constants`
 
-Reads the fitted response-curve parameters and the attempt log; writes `ratings/population_constants.json` — the retention and time-bias constants plus the rank prior. The time adjustment is **read through** from `rating_to_rank.json`, not fitted here.
+Reads the fitted response-curve parameters and the attempt log; writes `ratings/population_constants.json` — the retention and time-bias constants, the rank prior, and the career skill smoother's drift, gap cap and form SD. The time adjustment is **read through** from `rating_to_rank.json`, not fitted here.
+
+**The skill smoother is fitted through a Python mirror of the client's filter** (`utils/rating/skill_smoother.py` ↔ `pwa/js/skill-smoother.js`, held together by `tests/test_js_twins_skill_smoother.py`), started from the rank prior fitted earlier in the same run, so a change to either half of the filter means running the twins. It is the slowest part of the step — a few minutes of Nelder–Mead over the whole attempt log — and, like the rank prior, has no default: the client refuses to load without the block.
 
 It fits **no** per-axis quantity and reads nothing from `axes/` at all, so an axis refit that changes K does not require re-running it. It fits **no motif constant at all** — the motif readings are computed client-side against the user's own neutral point, so there is no population centre to fit, ship or validate.
 

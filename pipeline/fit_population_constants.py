@@ -36,6 +36,13 @@ Three groups of constants:
    unknown hidden reviews, so only post-cutoff chains give trustworthy gaps/r).
    Z0 = logit(0.7) is a fixed reference (LN_C is the base stability at p=0.7).
 
+4. CAREER SKILL SMOOTHER constants (pwa/js/skill-smoother.js, the Rank tab's
+   skill line): the skill drift variance per day, the cap that variance saturates
+   at across one long step, and the per-session form SD. Maximum likelihood of
+   every first-time attempt's outcome given the same player's earlier attempts,
+   through the Python mirror of the client's filter (utils/rating/skill_smoother.py),
+   started from the rank prior fitted in the same run. Mandatory, no fallback.
+
 All constants are board-INDEPENDENT (the cold-solve scale and the embedding axes
 are shared across sizes), so a single JSON serves both boards.
 
@@ -76,6 +83,7 @@ from utils.rating.fit_rank_curves import (  # noqa: E402
 )
 from utils.rating.ratings_io import load_rating_rank_curve, load_size_value_maps  # noqa: E402
 from utils.rating import se_floor  # noqa: E402
+from utils.rating import skill_smoother  # noqa: E402
 from utils.constants import ALL_BOARD_SIZES  # noqa: E402
 
 # --- Constants matching the client (pwa/js/model.js, rank-decomposition.js) ---
@@ -355,6 +363,35 @@ def fit_rank_prior(by_user, params, apply_m, lapse, ratings_dir, curves):
             f"p10/p50/p90 {qs[0]:+.1f}/{qs[1]:+.1f}/{qs[2]:+.1f}, "
             f"{grid.size} grid points")
     return prior, info
+
+
+# ---------------------------------------------------------------------------
+# Career skill smoother (the Rank tab's skill line)
+# ---------------------------------------------------------------------------
+def build_skill_population(by_user, params, curves, lapse):
+    """Every user's first-time attempts on a rated problem, flattened into internal-
+    rank space exactly as the client's flattenAttempts does (each through its own
+    size's curve) and time-ordered. A retired problem's attempts drop out, as they do
+    on the client."""
+    users = []
+    for urows in by_user.values():
+        att = []
+        for r in urows:
+            key = (r["size"], r["problem"])
+            if r["is_repeat"] or key not in params:
+                continue
+            rating, slope, floor = params[key]
+            cv = curves[str(r["size"])]
+            x, sl, fl = skill_smoother.flatten_attempt(rating, slope, floor,
+                                                       (cv["ratings"], cv["ranks"]))
+            t = datetime.fromisoformat(r["created_at"].replace("Z", "+00:00"))
+            att.append((t.timestamp() * 1000.0, x, sl, fl, 1.0 if r["success"] else 0.0))
+        if not att:
+            continue
+        att.sort(key=lambda a: a[0])
+        users.append({k: [a[i] for a in att]
+                      for i, k in enumerate(("t", "x", "slope", "floor", "correct"))})
+    return skill_smoother.Population(users, lapse)
 
 
 # ---------------------------------------------------------------------------
@@ -773,6 +810,20 @@ def main():
             f"prior. Not shipping without it.")
     out["rank_prior"] = rp
     print(f"  {rp_info}")
+
+    # --- Career skill smoother (the Rank tab's skill line) ---
+    # Mandatory and with no fallback: the client's smoother reads all three.
+    print("Fitting career skill smoother (drift, gap cap, form) ...")
+    pop = build_skill_population(by_user, params, _curves, out["fat_finger_rate"])
+    sm, sm_ll, sm_nfev = skill_smoother.fit(pop, rp["mean"], rp["sd"])
+    out["skill_smoother"] = {k: float(f"{v:.4g}") for k, v in sm.items()}
+    out["skill_smoother"]["n_users"] = pop.n_users
+    out["skill_smoother"]["n_attempts"] = pop.n_attempts
+    print(f"  drift {sm['drift_var_per_day']:.4f} rank²/day "
+          f"(SD {math.sqrt(30 * sm['drift_var_per_day']):.2f}/30d), "
+          f"gap cap {sm['gap_var_cap']:.3f} rank² (SD {math.sqrt(sm['gap_var_cap']):.2f}), "
+          f"form SD {sm['form_sd']:.3f}; mean log loss {-sm_ll / pop.n_attempts:.5f} "
+          f"over {pop.n_attempts} attempts / {pop.n_users} users ({sm_nfev} evaluations)")
 
     # --- Retention constants ---
     print("Building retention events from clean post-cutoff chains ...")

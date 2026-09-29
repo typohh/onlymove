@@ -1,12 +1,13 @@
 // ablations/skill_drift_fit.mjs
 //
-// The measurement half of `ablations/skill_drift_fit.py`: fits the Rank tab's
-// skill smoother constants (SKILL_DRIFT_VAR_PER_DAY, FORM_SD in
-// pwa/js/skill-smoother.js) by population maximum likelihood — the summed log
-// probability of every first-time attempt's outcome given that player's attempts
-// before it. Runs the SHIPPED smoother and flattenAttempt unmodified (JSON imports
-// through json_module_loader.mjs), so the objective is exactly what the client
-// computes.
+// The measurement half of `ablations/skill_drift_fit.py`: what each term of the
+// Rank tab's skill smoother (pwa/js/skill-smoother.js) is worth, by population
+// maximum likelihood — the summed log probability of every first-time attempt's
+// outcome given that player's attempts before it — for the walk alone, the walk
+// with the per-session form offset, and both with the cap on a step's variance.
+// Runs the SHIPPED smoother and flattenAttempt unmodified (JSON imports through
+// json_module_loader.mjs), so the objective is exactly what the client computes;
+// the shipped constants themselves come from pipeline.fit_population_constants.
 //
 // Usage:  node ablations/skill_drift_fit.mjs <payload.json>
 // The payload holds { pwa_root, users: [[t_ms, rating, slope, floor, correct, size], …] }
@@ -45,10 +46,9 @@ const total = (params) => {
     for (const u of users) s += skillLogLik(u, params);
     return s;
 };
-const withParams = (logQ, logF) => ({ ...DEFAULT_PARAMS, driftVarPerDay: Math.exp(logQ), formSd: Math.exp(logF) });
 
-// Golden-section search on one log-parameter, the other held.
-function golden(f, lo, hi, tol = 0.01) {
+// Golden-section search on one log-parameter, the others held.
+function golden(f, lo, hi, tol = 0.02) {
     const g = (Math.sqrt(5) - 1) / 2;
     let a = lo, b = hi, c = b - g * (b - a), d = a + g * (b - a);
     let fc = f(c), fd = f(d);
@@ -59,23 +59,23 @@ function golden(f, lo, hi, tol = 0.01) {
     return (a + b) / 2;
 }
 
-// Coordinate ascent over (log drift variance, log form SD). The no-form arm pins
-// the form SD at a negligible value, so the two arms differ in that term alone.
-const NO_FORM = Math.log(1e-3);
-function fit(withForm) {
-    let lq = Math.log(0.01), lf = withForm ? Math.log(0.5) : NO_FORM;
+// Three nested arms, each fitted by coordinate ascent over the logs of its free
+// parameters. An arm without a term pins it where it has no effect: a negligible
+// form SD, a cap far beyond any step's variance.
+const NO_FORM = Math.log(1e-3), NO_CAP = Math.log(1e9);
+const RANGES = { q: [Math.log(1e-5), Math.log(1)], c: [Math.log(0.05), Math.log(50)], f: [Math.log(0.02), Math.log(3)] };
+function fit(free) {
+    const v = { q: Math.log(0.04), c: free.includes('c') ? Math.log(1) : NO_CAP, f: free.includes('f') ? Math.log(1) : NO_FORM };
+    const P = () => ({ ...DEFAULT_PARAMS, driftVarPerDay: Math.exp(v.q), gapVarCap: Math.exp(v.c), formSd: Math.exp(v.f) });
     for (let round = 0; round < 4; round++) {
-        lq = golden(x => total(withParams(x, lf)), Math.log(1e-5), Math.log(1));
-        if (withForm) lf = golden(x => total(withParams(lq, x)), Math.log(0.02), Math.log(3));
+        for (const k of free) {
+            v[k] = golden(x => { const o = v[k]; v[k] = x; const r = total(P()); v[k] = o; return r; }, ...RANGES[k]);
+        }
     }
-    return { driftVarPerDay: Math.exp(lq), formSd: Math.exp(lf), logLik: total(withParams(lq, lf)) };
+    return { driftVarPerDay: Math.exp(v.q), gapVarCap: free.includes('c') ? Math.exp(v.c) : null,
+             formSd: free.includes('f') ? Math.exp(v.f) : null, logLik: total(P()) };
 }
 
-const noForm = fit(false);
-const form = fit(true);
-// A profile over the drift at the fitted form SD, for the printed table.
-const profile = [];
-for (const q of [1e-4, 3e-4, 1e-3, 3e-3, 1e-2, 3e-2, 1e-1]) {
-    profile.push({ driftVarPerDay: q, logLik: total(withParams(Math.log(q), Math.log(form.formSd))) });
-}
-process.stdout.write(JSON.stringify({ nUsers: users.length, nAttempts, noForm, form, profile }));
+const arms = { walk: fit(['q']), walkForm: fit(['q', 'f']), walkFormCap: fit(['q', 'f', 'c']) };
+const shipped = total(DEFAULT_PARAMS);
+process.stdout.write(JSON.stringify({ nUsers: users.length, nAttempts, arms, shipped, shippedParams: DEFAULT_PARAMS }));

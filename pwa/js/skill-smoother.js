@@ -5,32 +5,42 @@
 // is one noisy 4PL reading of it, taken through a per-SESSION form offset that is
 // drawn fresh at each session start and held for the session:
 //
-//   S(t') = S(t) + N(0, SKILL_DRIFT_VAR_PER_DAY · days(t' − t))
-//   F     ~ N(0, FORM_SD²), redrawn when a gap of SESSION_GAP_MS or more opens a session
+//   S(t') = S(t) + N(0, C·(1 − exp(−q·days(t' − t) / C)))   q = drift, C = gap cap
+//   F     ~ N(0, formSd²), redrawn when a gap of SESSION_GAP_MS or more opens a session
 //   P(correct_j) = c_j + (1 − c_j − LAPSE)·σ(slope_j·(S + F − x_j) + κ_j)
 //
-// The form offset is what keeps the drift honest: without it a good or a bad
-// sitting can only be explained as skill moving, so the fitted drift absorbs the
-// session-to-session swing and the skill line follows every session.
+// The step variance is q·days for a short step and saturates at C for a long one:
+// skill changes through play, while an absence adds a bounded one-off uncertainty
+// rather than one that grows with its length. The form offset is what keeps the
+// drift honest: without it a good or a bad sitting can only be explained as skill
+// moving, so the fitted drift absorbs the session-to-session swing and the skill
+// line follows every session.
 //
 // The answer is the posterior of S at any time t given the WHOLE history (a
 // Laplace filter forward, Rauch–Tung–Striebel backward). What that buys over a
 // fixed-width kernel is that the amount of history behind an estimate follows the
 // data: dense play leans on recent attempts, sparse play on a longer stretch, and
-// across a gap the uncertainty grows with the drift the gap allows while both
-// sides of it still pin the level. A short return session after a long absence is
-// read against the level before it, never fitted on its own.
+// across a gap the uncertainty grows by what the gap allows while both sides of it
+// still pin the level. A short return session after a long absence is read
+// against the level before it, never fitted on its own.
 //
 // The start of a career is the shipped population rank prior (PRIOR_MEAN /
 // PRIOR_SD, a Gaussian summary of it), so the first attempts move the estimate
 // away from where new players land rather than from nowhere.
 //
-// Pure: imports no app state, so the ablation that fits the drift and form
-// constants (ablations/skill_drift_fit.mjs) runs this module unmodified.
+// q, C and formSd are fitted by pipeline.fit_population_constants (population
+// maximum likelihood of every attempt's outcome given the same player's earlier
+// ones, through the Python mirror of this filter in utils/rating/skill_smoother.py)
+// and inlined from population_constants.json. Mandatory, no fallback.
+//
+// Pure: imports no app state, so it runs under node unmodified (the twin test and
+// ablations/skill_drift_fit.mjs).
 
 import { clearSpan } from './irt.js';
 import { sigmoid } from './math-utils.js';
 import { PRIOR_MEAN, PRIOR_SD } from '../shared/rank-window.js';
+// Baked at build time from the pipeline's output (pwa/tsumegos/population_constants.json).
+import POPULATION_CONSTANTS from '../tsumegos/population_constants.json';
 
 const DAY_MS = 24 * 3600 * 1000;
 
@@ -38,17 +48,30 @@ const DAY_MS = 24 * 3600 * 1000;
 // length of the form kernel, rounded to an even divisor of the day.
 export const SESSION_GAP_MS = 6 * 3600 * 1000;
 
-// Fitted by population maximum likelihood of the one-step-ahead predictions over
-// the attempt log (ablations/skill_drift_fit.py). Internal-rank units.
-export const SKILL_DRIFT_VAR_PER_DAY = 0.039;
-export const FORM_SD = 0.96;
+const FITTED = (() => {
+    const c = POPULATION_CONSTANTS.skill_smoother;
+    const v = c && {
+        driftVarPerDay: c.drift_var_per_day,
+        gapVarCap: c.gap_var_cap,
+        formSd: c.form_sd,
+    };
+    if (!v || !Object.values(v).every(x => Number.isFinite(x) && x > 0)) {
+        throw new Error('population_constants.json has no usable skill_smoother block '
+            + '(run pipeline.fit_population_constants, then package_for_pwa)');
+    }
+    return v;
+})();
 
 export const DEFAULT_PARAMS = Object.freeze({
-    driftVarPerDay: SKILL_DRIFT_VAR_PER_DAY,
-    formSd: FORM_SD,
+    ...FITTED,
     priorMean: PRIOR_MEAN,
     priorSd: PRIOR_SD,
 });
+
+// Skill variance a step of `days` adds: q·days, saturating at the cap.
+function stepVar(days, params) {
+    return -Math.expm1(-params.driftVarPerDay * days / params.gapVarCap) * params.gapVarCap;
+}
 
 // One attempt's Laplace update of the combined reading u = S + F, prior N(mu, Pu).
 // Returns the posterior mode and variance (curvature by the 4PL Fisher information,
@@ -83,7 +106,7 @@ function laplaceUpdate(mu, Pu, a) {
 // and the summed log predictive probability.
 function filter(attempts, params) {
     const n = attempts.length;
-    const q = params.driftVarPerDay, f2 = params.formSd * params.formSd;
+    const f2 = params.formSd * params.formSd;
     const mp = new Float64Array(2 * n), Pp = new Float64Array(3 * n);
     const mf = new Float64Array(2 * n), Pf = new Float64Array(3 * n);
     const reset = new Uint8Array(n);
@@ -93,7 +116,7 @@ function filter(attempts, params) {
     for (let j = 0; j < n; j++) {
         if (j > 0) {
             const dt = attempts[j].t - attempts[j - 1].t;
-            pSS += q * dt / DAY_MS;
+            pSS += stepVar(dt / DAY_MS, params);
             if (dt >= SESSION_GAP_MS) { reset[j] = 1; mF = 0; pSF = 0; pFF = f2; }
         } else {
             reset[j] = 1;
@@ -159,12 +182,13 @@ function rtsStep(m0, m1, a, b, d, nextReset, msN, PsN, mpN, PpN) {
 // Fit the whole history once. Returns an object whose at(t) gives the posterior
 // mean and standard deviation of SKILL (the form offset excluded) at any time t,
 // exactly: between two attempts it is the random-walk bridge between their
-// smoothed states, after the last it is the last state plus the drift since.
+// smoothed states — the step's variance spread evenly over its duration, so the
+// bridge reproduces the step the filter took — and after the last it is the last
+// state plus the step variance since.
 // Returns null for an empty history.
 export function smoothSkill(attempts, params = DEFAULT_PARAMS) {
     const n = attempts.length;
     if (!n) return null;
-    const q = params.driftVarPerDay;
     const { mp, Pp, mf, Pf, reset, logLik } = filter(attempts, params);
     const ms = new Float64Array(2 * n), Ps = new Float64Array(3 * n);
     ms[2 * (n - 1)] = mf[2 * (n - 1)]; ms[2 * (n - 1) + 1] = mf[2 * (n - 1) + 1];
@@ -187,15 +211,17 @@ export function smoothSkill(attempts, params = DEFAULT_PARAMS) {
         if (j < 0) return { S: ms[0], se: Math.sqrt(Ps[0]) };   // before the first attempt
         if (j === n - 1) {
             const days = (t - times[j]) / DAY_MS;
-            return { S: ms[2 * j], se: Math.sqrt(Ps[3 * j] + q * days) };
+            return { S: ms[2 * j], se: Math.sqrt(Ps[3 * j] + stepVar(days, params)) };
         }
         if (t === times[j]) return { S: ms[2 * j], se: Math.sqrt(Ps[3 * j]) };
         // Filtered state at j propagated to t (skill drifts, form held), then one
-        // RTS step against the next attempt. The next attempt's predicted moments
-        // are the same whether the walk is split at t or not.
-        const days = (t - times[j]) / DAY_MS;
+        // RTS step against the next attempt. The step's variance is split in
+        // proportion to time, so the next attempt's predicted moments are the same
+        // whether the walk is split at t or not.
+        const frac = (t - times[j]) / (times[j + 1] - times[j]);
+        const vPart = frac * stepVar((times[j + 1] - times[j]) / DAY_MS, params);
         const r = rtsStep(mf[2 * j], mf[2 * j + 1],
-            Pf[3 * j] + q * days, Pf[3 * j + 1], Pf[3 * j + 2],
+            Pf[3 * j] + vPart, Pf[3 * j + 1], Pf[3 * j + 2],
             reset[j + 1], at2(ms, j + 1), at3(Ps, j + 1), at2(mp, j + 1), at3(Pp, j + 1));
         return { S: r[0], se: Math.sqrt(Math.max(r[2], 0)) };
     };

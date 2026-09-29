@@ -51,7 +51,7 @@ Producers: **`corpus_figures.py`** (the published index, `pwa/lookup.txt`, whole
 
 ## The client's estimators
 
-- **`skill_drift_fit.py`** — fits the Rank tab's career skill smoother (`pwa/js/skill-smoother.js`): the skill drift variance per day and the per-session form SD, by population maximum likelihood of every first-time attempt's outcome given the same player's earlier attempts. Runs the shipped smoother under node (`skill_drift_fit.mjs`), and fits the walk with and without the form term so the table shows what that term does to the drift. Re-run after a `fetch_database` or a curve refit and carry the values into the module's constants.
+- **`skill_drift_fit.py`** — what each term of the Rank tab's career skill smoother (`pwa/js/skill-smoother.js`) is worth: three nested arms — the random walk alone, with the per-session form offset, and with the step variance saturating at a cap — each fitted by population maximum likelihood of every first-time attempt's outcome given the same player's earlier attempts, beside the shipped constants' own log-likelihood. Runs the shipped smoother under node (`skill_drift_fit.mjs`). The shipped constants are fitted by `pipeline.fit_population_constants`, not here.
 - **`eval_recall_model.py`** — validates the shipped retention model against the attempt log: per-rung realized retention against the window ceiling, within-user contrasts, delivery. Produces every figure in `docs/methodology.md` §2.8's closing subsection; `recall_figures` reads its returned statistics into the ledger, so a refresh is one ledger run.
 
 ## The activation encoder
