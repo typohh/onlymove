@@ -78,6 +78,7 @@ inside the swept range.
 """
 
 import os
+import shutil
 import sys
 import tempfile
 
@@ -90,6 +91,7 @@ if PROJECT_ROOT not in sys.path:
 from ablations import check_mapped_vs_declared_rank as calibration  # noqa: E402
 from ablations import eval_equivalent_tournament_games as tournament  # noqa: E402
 from ablations._figures import Figure, require  # noqa: E402
+from pipeline import map_rating_to_rank as mapping  # noqa: E402
 from utils.rating.rank_surveys import (  # noqa: E402
     SURVEY_RHO_MIN_SERVER, server_weighted_spearman, value_to_rank)
 from utils.rating.ratings_io import load_declaration_exclusions  # noqa: E402
@@ -206,6 +208,23 @@ def _honesty(stats):
     }
 
 
+def declarations_only_stats():
+    """The calibration statistics against a mapping fitted WITHOUT the verified
+    ratings. The honesty contrast differences a verified rating's residual against
+    self-reports' from one fitted prediction, which is only a contrast if the verified
+    rating did not help make that prediction; the shipped mapping anchors on them, so
+    the contrast runs against a declarations-only refit built here in a scratch copy
+    of ratings/ (its own curve, couplings and exclusions), never against the shipped
+    one."""
+    with tempfile.TemporaryDirectory() as tmp:
+        scratch = os.path.join(tmp, "ratings")
+        shutil.copytree(os.path.join(PROJECT_ROOT, "ratings"), scratch)
+        mapping.main(["--dir", scratch, "--no-verified"])
+        stats = calibration.main(["--dir", scratch, "--csv", os.path.join(tmp, "d.csv")])
+    require(isinstance(stats, dict), "declarations-only calibration returned no statistics")
+    return stats
+
+
 def measure():
     import pandas as pd
 
@@ -265,7 +284,7 @@ def measure():
 
     return {
         "n_screened": len(load_declaration_exclusions(os.path.join(PROJECT_ROOT, "ratings"))),
-        "honesty": _honesty(stats),
+        "honesty": _honesty(declarations_only_stats()),
         "stone_kyu": float(stone["kyu"]), "stone_dan": float(stone["dan"]),
         "stone_kyu_bands": stone["kyu_bands"], "stone_dan_bands": stone["dan_bands"],
         "n_declarations": int(len(surv)),

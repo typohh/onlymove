@@ -372,9 +372,10 @@ def main():
     spans_by_pair = {}
     for (uid, server), srows in surveys.sort_values("t").groupby(["user_id", "server"]):
         times, rows = att[uid]
-        bands = [rank_band(v) for v in srows["rank_value"].to_numpy(float)]
-        spans = mapping.declaration_spans(times, rows, srows["t"].to_numpy(float), bands, _rate)
-        spans_by_pair[(uid, server)] = spans or [(bands[-1], career[uid][0], len(rows))]
+        values = srows["rank_value"].to_numpy(float)
+        spans = [(g, R, n) for g, R, n, _ in
+                 mapping.declaration_spans(times, rows, srows["t"].to_numpy(float), values, _rate)]
+        spans_by_pair[(uid, server)] = spans or [(rank_band(values[-1]), career[uid][0], len(rows))]
 
     def span_decls(uids, weighting):
         """weighting: 'decl' (production: every stable declaration weight 1), 'pair'

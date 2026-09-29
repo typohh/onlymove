@@ -139,10 +139,8 @@ def _anchor_rows(ratings_dir, sql_path, sqlite_path):
     surveys = load_rank_surveys(sql_path)
     require(surveys is not None and not surveys.empty,
             f"no rank_surveys rows in {sql_path} — run pipeline.fetch_database")
-    surveys = surveys[surveys["rank_value"].notna()].copy()
+    surveys = mapping.observation_frame(surveys)
     require(len(surveys) > 0, "no declarations carry a parseable rank")
-    surveys["t_days"] = (pd.to_datetime(surveys["created_at"], utc=True, format="mixed")
-                         .astype("int64") / 86400e9)
 
     ratings, slopes, floors = {}, {}, {}
     for size in mapping.SIZES:
@@ -245,7 +243,7 @@ def _placements(arm, rows):
     """Each row's undocked rank under one arm — what `_band_error` buckets on when
     two arms have to be scored over the same rows."""
     a, _, ys, _, _ = arm
-    return interp_extrap_vec(np.array([R for _, R, _, _, _ in rows], float), a, ys)
+    return interp_extrap_vec(np.array([r[1] for r in rows], float), a, ys)
 
 
 def _likelihood_bar(server_fits, eps):

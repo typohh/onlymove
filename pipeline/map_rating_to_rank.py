@@ -22,20 +22,26 @@ THE MODEL — a latent CONSENSUS rank, every server (EGF included) a coupling of
   * The user's rating is their 80%-CLEAR rating (CALIBRATION_P), pooled across boards
     (`fit_user_rating`, full 4PL with each problem's own slope/floor + the global
     ceiling λ) — the SAME quantity the client computes, so the loop stays closed.
-  * ONE ANCHOR PER STABLE DECLARATION. A user's declarations on a server collapse into
-    runs of the same rank, and their first-time attempts are cut HALFWAY between the
-    last declaration of one run and the first of the next; each span's attempts give
-    one 80%-clear rating, anchored to that run's rank with weight 1
-    (declaration_spans, build_anchor_rows). This is the mapping's assumption — no
-    rank drift unless a survey says otherwise — stated directly: several ratings from
-    one span tied to one declared rank would read to the fit as noise at a fixed
-    rank, flattening the curve where declarations are fewest. It replaced 2-month
-    career blocks each tied to their nearest declaration, which held out no better
-    and sat lower at the top. Each DECLARATION counts once, not each user or pair:
-    frequent surveyors and one-time declarers do disagree, but reweighting toward
-    either moved the bias without improving the held-out fit (ablations.
-    eval_rank_map_cv). A pair with no span of MIN_ATTEMPTS falls back to the pooled
-    career rating against its latest declaration.
+  * ONE ANCHOR PER STABLE PROFILE. A user's observations on a server — a declaration read
+    as its band's CENTRE (a declared 4d is 4.5 dan), or a linked federation account's
+    verified rating (the EGD/AGAR heartbeats) as a continuous position, counted while its
+    player is active — collapse into runs (stable_runs: a new one opens only when an
+    observation sits MIN_RANK_CHANGE from the run's mean, with a doubled threshold for a
+    return toward the previous run), and their first-time attempts are cut HALFWAY between
+    the last observation of one run and the first of the next; each span's attempts give
+    one 80%-clear rating, anchored to that run's rank with weight 1 (declaration_spans,
+    build_anchor_rows). A run holding verified ratings is anchored at their mean and
+    supersedes the declarations beside it; the fit scores it as a POINT (density at the
+    coupling's interpolated position, times the band's width), a declaration as a band
+    (mass). This is the mapping's assumption — no rank drift unless an observation says
+    otherwise — stated directly: several ratings from one span tied to one declared rank
+    would read to the fit as noise at a fixed rank, flattening the curve where
+    declarations are fewest. It replaced 2-month career blocks each tied to their nearest
+    declaration, which held out no better and sat lower at the top. Each anchor counts
+    once, not each user or pair: frequent surveyors and one-time declarers do disagree,
+    but reweighting toward either moved the bias without improving the held-out fit
+    (ablations.eval_rank_map_cv). A pair with no span of MIN_ATTEMPTS falls back to the
+    pooled career rating against its latest observation.
   * RATINGS ARE TIME-ADJUSTED THROUGHOUT THE MAPPING. Each declaration's effective
     rating is `rating + α·(log10(median solve min) − center)`, with the slope α fit
     JOINTLY in the same objective (it is identified — the time feature is per-user
@@ -122,6 +128,7 @@ from collections import defaultdict, deque
 
 import numpy as np
 import pandas as pd
+from scipy.special import expit
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
@@ -129,7 +136,8 @@ if PROJECT_ROOT not in sys.path:
 
 from utils.paths import DB_SQLITE  # noqa: E402
 from utils.rating.rank_surveys import (  # noqa: E402
-    SERVERS, SQL_PATH_DEFAULT, load_rank_surveys, rank_band, value_to_rank,
+    SERVERS, SQL_PATH_DEFAULT, VERIFIED_SERVERS, is_verified_active, load_rank_surveys,
+    rank_band, value_to_rank, verified_rank_value, verified_tier_rank,
 )
 from utils.rating.rank_curve_shape import fit_shape, rank_to_axis  # noqa: E402
 from utils.rating.fit_rank_curves import (  # noqa: E402
@@ -163,6 +171,8 @@ EXTEND_TO = 8               # force each server range to cover at least up to 9d
 MIN_SERVER_SAMPLES = 3      # skip a server with less pooled declaration-weight
 JUNK_FLOOR = 0.5            # exclude above this junk posterior — see the screening note
 MIN_ATTEMPTS = 20           # drop survey users (and declaration spans) with fewer attempts
+MIN_RANK_CHANGE = 0.5       # a profile splits only once a new observation sits this many ranks
+                            # from the current profile's running mean (see stable_runs)
 # The consensus fit runs to CONVERGENCE, not to a budget. The shown onlymove rank rides
 # the direction the likelihood is flattest along (the couplings absorb the curve's
 # moves, so server ranks barely change while the headline rank does), which is exactly
@@ -265,39 +275,124 @@ def load_timed_attempts(sqlite_path, user_ids):
             for uid, grp in df.groupby("user_id")}
 
 
-def declaration_spans(times, rows, decl_times, decl_bands, rate):
-    """[(band, rating, n_attempts)] — one anchor per STABLE declaration of one user on
-    one server. The declarations (ascending decl_times, their bands) collapse into runs
-    of the same band; the user's history (`times` ascending, `rows` aligned) is cut
-    HALFWAY between the last declaration of one run and the first of the next, and each
-    span's attempts give one 80%-clear rating via `rate(rows) -> rating or None`. The
-    first span reaches back to the start of the history and the last forward to its
-    end: a declaration describes the player until another one says otherwise. A span
-    too thin to rate contributes nothing; an empty list means no span could be rated."""
-    starts = [0] + [i for i in range(1, len(decl_bands)) if decl_bands[i] != decl_bands[i - 1]]
+def observation_frame(surveys, use_verified=True):
+    """The mapping's observations: human declarations and ACTIVE verified ratings on
+    one frame, columns user_id, server, rank_value, created_at, t_days, verified.
+
+    `rank_value` is a POINT on the project rank scale in both cases: a declaration is
+    its band's CENTRE (a declared 4d is read as 4.5 dan, rank_to_value), a verified
+    rating its own continuous position (gor_to_value / aga_rating_to_value). The
+    machine heartbeat rows (EGD, AGAR) are re-keyed onto the system they rate (EGF,
+    AGA), so a user's declaration and rating on one system share a series. A rating
+    counts only while its player is active AS OF THE ROW (is_verified_active at the
+    row's own date — a stale rating no longer describes the player, and a dropped
+    row leaves the declaration to speak). Rows with no readable position are
+    dropped. `use_verified=False` leaves the heartbeats out entirely, so every anchor
+    is a declaration — the mapping any comparison of verified ratings against the fit
+    has to run against, since a rating that anchors the fit is not independent of it."""
+    rows = surveys[surveys["server"].isin(VERIFIED_SERVERS)]
+    if not use_verified:
+        rows = rows.iloc[0:0]
+    human = surveys[~surveys["server"].isin(VERIFIED_SERVERS)
+                    & surveys["rank_value"].notna()].copy()
+    human["verified"] = False
+    keep, n_inactive = [], 0
+    for r in rows.itertuples(index=False):
+        v = verified_rank_value(r.server, r.rank)
+        if v is None:
+            continue
+        label = r.rank_label if isinstance(r.rank_label, str) else None
+        last = r.last_game_at if isinstance(r.last_game_at, str) else None
+        as_of = pd.Timestamp(r.created_at).date()
+        if not is_verified_active(verified_tier_rank(r.server, r.rank, label), last, as_of):
+            n_inactive += 1
+            continue
+        keep.append({"user_id": r.user_id, "server": VERIFIED_SERVERS[r.server],
+                     "rank": r.rank, "rank_value": v, "created_at": r.created_at,
+                     "verified": True})
+    ver = pd.DataFrame(keep, columns=[*human.columns.drop("verified"), "verified"])
+    out = pd.concat([human, ver], ignore_index=True)
+    out["t_days"] = (pd.to_datetime(out["created_at"], utc=True, format="mixed")
+                     .astype("int64") / 86400e9)
+    print(f"  {len(human)} declarations + {len(ver)} active verified ratings "
+          f"({n_inactive} inactive dropped) from {out['user_id'].nunique()} users")
+    return out
+
+
+def stable_runs(values, min_change=MIN_RANK_CHANGE):
+    """Start index of each run of a (user, server) observation series — where the
+    player's profile splits.
+
+    A new run opens when an observation sits at least `min_change` ranks from the
+    MEAN of the run it would join, and the hysteresis is two-fold. The reference is
+    the run's mean, not its last value: a rating hovering either side of a band edge
+    never reaches the threshold, where a rule keyed on the band label would split at
+    every crossing. And a return toward the PREVIOUS run's level (within `min_change`
+    of its mean) must clear twice the threshold, so a series stepping back and forth
+    by about the threshold splits once and stays, instead of once per swing; a real
+    reversal of a full rank or more still splits. A declaration differs from the next
+    by whole ranks (its band's centre), so a declaration-only series splits exactly
+    where its band changes."""
+    starts, total, n, prev_mean = [0], float(values[0]), 1, None
+    for i in range(1, len(values)):
+        v, mean = float(values[i]), total / n
+        returning = prev_mean is not None and abs(v - prev_mean) < min_change
+        if abs(v - mean) >= min_change * (2 if returning else 1):
+            starts.append(i)
+            prev_mean, total, n = mean, v, 1
+        else:
+            total += v
+            n += 1
+    return starts
+
+
+def declaration_spans(times, rows, decl_times, decl_values, rate, verified=None):
+    """[(band, rating, n_attempts, v)] — one anchor per STABLE profile of one user on
+    one server. The observations (ascending decl_times, their point values on the
+    rank scale) collapse into runs (stable_runs); the user's history (`times`
+    ascending, `rows` aligned) is cut HALFWAY between the last observation of one run
+    and the first of the next, and each span's attempts give one 80%-clear rating via
+    `rate(rows) -> rating or None`. The first span reaches back to the start of the
+    history and the last forward to its end: an observation describes the player
+    until another one says otherwise.
+
+    A run holding verified ratings is anchored at their MEAN, as a continuous
+    position `v`, and the declarations beside it are superseded; a run of
+    declarations alone is anchored at its declared band (`v` None). `band` is the
+    band containing the anchor either way. A span too thin to rate contributes
+    nothing; an empty list means no span could be rated."""
+    values = np.asarray(decl_values, float)
+    ver = np.zeros(len(values), bool) if verified is None else np.asarray(verified, bool)
+    starts = stable_runs(values)
     cuts = [(decl_times[i - 1] + decl_times[i]) / 2 for i in starts[1:]]
     edges = [-np.inf] + cuts + [np.inf]
+    bounds = starts + [len(values)]
     out = []
     for k, i in enumerate(starts):
+        member = slice(i, bounds[k + 1])
+        v = float(values[member][ver[member]].mean()) if ver[member].any() else None
+        band = rank_band(v if v is not None else values[i])
         lo = int(np.searchsorted(times, edges[k], side="left"))
         hi = int(np.searchsorted(times, edges[k + 1], side="left"))
         R = rate(rows[lo:hi]) if hi - lo >= MIN_ATTEMPTS else None
         if R is not None:
-            out.append((int(decl_bands[i]), R, hi - lo))
+            out.append((band, R, hi - lo, v))
     return out
 
 
 def build_anchor_rows(surveys, attempts, med_min, ratings, slopes, floors, lapse):
-    """The mapping's anchor rows, one per stable declaration (declaration_spans).
+    """The mapping's anchor rows, one per stable profile (declaration_spans).
 
-    surveys: rank_surveys with `rank_value` and `t_days`; attempts: {user_id: (times,
-    rows)} first-time attempts; med_min: {user_prefix8: median solve minutes}. Returns
-    (decls, keys, users, n_fallback, center): rows (server, span rating, declared band, T,
-    weight 1) as fit_consensus takes them; their (user, server, band) keys, so an
-    exclusion drops a declaration whole; {user_id: (pooled career rating, T)}; and how
-    many (user, server) pairs had no ratable span and fell back to the pooled career
-    rating against their latest declaration; and the time dock's zero point. T is the
-    log10 median solve time less that center, 0 for a user without one (no time term)."""
+    surveys: observation_frame's output (`rank_value`, `t_days`, and `verified` — absent
+    reads as all declarations); attempts: {user_id: (times, rows)} first-time attempts;
+    med_min: {user_prefix8: median solve minutes}. Returns (decls, keys, users,
+    n_fallback, center): rows (server, span rating, band, T, weight 1, v) as
+    fit_consensus takes them — v the continuous position of a verified anchor, None
+    for a declared band; their (user, server, band) keys, so an exclusion drops a
+    declaration whole; {user_id: (pooled career rating, T)}; and how many (user,
+    server) pairs had no ratable span and fell back to the pooled career rating
+    against their latest observation; and the time dock's zero point. T is the log10
+    median solve time less that center, 0 for a user without one (no time term)."""
     def rate(rows):
         R, n = fit_user_rating(rows, ratings, min_n=MIN_ATTEMPTS,
                                slopes=slopes, floors=floors, lapse=lapse)
@@ -313,17 +408,24 @@ def build_anchor_rows(surveys, attempts, med_min, ratings, slopes, floors, lapse
     timed = [logT[u] for u in pooled if u in logT]
     center = float(np.mean(timed)) if timed else 0.0   # the time dock's zero point
     T_of = {u: (logT[u] - center) if u in logT else 0.0 for u in pooled}
+    if "verified" not in surveys:
+        surveys = surveys.assign(verified=False)
     decls, keys, n_fallback = [], [], 0
     for (uid, server), srows in (surveys[surveys["user_id"].isin(pooled)]
                                  .sort_values("t_days").groupby(["user_id", "server"])):
         times, rows = attempts[uid]
-        bands = [rank_band(v) for v in srows["rank_value"].to_numpy(float)]
-        spans = declaration_spans(times, rows, srows["t_days"].to_numpy(float), bands, rate)
+        values = srows["rank_value"].to_numpy(float)
+        ver = srows["verified"].to_numpy(bool)
+        spans = declaration_spans(times, rows, srows["t_days"].to_numpy(float),
+                                  values, rate, ver)
         if not spans:
-            spans = [(bands[-1], pooled[uid], len(rows))]
+            last = stable_runs(values)[-1]
+            v = float(values[last:][ver[last:]].mean()) if ver[last:].any() else None
+            spans = [(rank_band(v if v is not None else values[last]),
+                      pooled[uid], len(rows), v)]
             n_fallback += 1
-        for g, R, _ in spans:
-            decls.append((server, R, g, T_of[uid], 1.0))
+        for g, R, _, v in spans:
+            decls.append((server, R, g, T_of[uid], 1.0, v))
             keys.append((uid, server, g))
     users = {u: (pooled[u], T_of[u]) for u in pooled}
     return decls, keys, users, n_fallback, center
@@ -342,17 +444,24 @@ def _curve_arrays():
 
 def _bucket(decls):
     """One coupling block per server (EGF included): rating, declared-category index k,
-    the de-meaned time feature T, the identity-line target, and the per-row weight w
-    (block anchors normalize each declaration's rows to total weight 1; a plain
-    4-tuple row defaults to w=1). `g` is a rank BAND index (see rank_surveys.rank_band)."""
+    the de-meaned time feature T, the identity-line target, the per-row weight w and,
+    for a VERIFIED anchor, its continuous position in server ranks (`cont`, and
+    `frac` — how far into its band it sits; 0 and unused for a declared band). A row
+    is (server, rating, band, T[, weight[, v]]): weight defaults to 1, v to None
+    (a declared band). `g` is a rank BAND index (see rank_surveys.rank_band), and for
+    a verified row the band containing v."""
     rows_by = defaultdict(list)
-    for server, R, g, T, *w in decls:
-        rows_by[server].append((R, int(g), T, float(w[0]) if w else 1.0))
+    for server, R, g, T, *rest in decls:
+        w = float(rest[0]) if rest else 1.0
+        v = rest[1] if len(rest) > 1 else None
+        if v is not None and int(g) != rank_band(v):
+            raise ValueError(f"verified anchor at {v:.3f} carries band {g}, not {rank_band(v)}")
+        rows_by[server].append((R, int(g), T, w, v))
     blocks = {}
     for server, rows in rows_by.items():
-        if sum(w for *_, w in rows) < MIN_SERVER_SAMPLES:
+        if sum(r[3] for r in rows) < MIN_SERVER_SAMPLES:
             continue
-        declared = [g for _, g, _, _ in rows]
+        declared = [r[1] for r in rows]
         g_min = min(declared) - RANK_PADDING
         g_max = max(max(declared) + RANK_PADDING, EXTEND_TO)
         K = g_max - g_min
@@ -364,10 +473,12 @@ def _bucket(decls):
             "g_min": g_min, "g_max": g_max,
             "baseline": np.ones(K - 1) if K > 1 else np.array([]),
             "identity": np.array([float(g) for g in gs], float),
-            "rating": np.array([r for r, _, _, _ in rows], float),
-            "T": np.array([t for _, _, t, _ in rows], float),
-            "w": np.array([w for _, _, _, w in rows], float),
-            "k": np.array([max(0, min(N - 1, g - g_min)) for _, g, _, _ in rows], int),
+            "rating": np.array([r[0] for r in rows], float),
+            "T": np.array([r[2] for r in rows], float),
+            "w": np.array([r[3] for r in rows], float),
+            "cont": np.array([r[4] is not None for r in rows], bool),
+            "frac": np.array([0.0 if r[4] is None else r[4] - r[1] for r in rows], float),
+            "k": np.array([max(0, min(N - 1, r[1] - g_min)) for r in rows], int),
             "thr_w": _threshold_mass(rows, g_min, K)}
     return blocks
 
@@ -378,7 +489,7 @@ def _threshold_mass(rows, g_min, K):
     the weight the gauge pin uses, so the pin reads the coupling where players
     actually sit and never at the padded thresholds the spacing prior extrapolates."""
     tw = np.zeros(K)
-    for _, g, _, w in rows:
+    for _, g, _, w, _ in rows:
         for i in (g - g_min - 1, g - g_min):
             if 0 <= i < K:
                 tw[i] += 0.5 * w
@@ -424,7 +535,7 @@ def fit_consensus(decls, identity_servers=()):
     when nothing else does) is not applied. PRODUCTION PASSES NOTHING HERE and the
     default is the consensus fit, unchanged."""
     import torch
-    decls = [d if len(d) == 5 else (*d, 1.0) for d in decls]
+    decls = [(*d[:4], *(d[4:5] or (1.0,)), *(d[5:6] or (None,))) for d in decls]
     identity_servers = set(identity_servers)
     egf_thr_ranks, ys, _, _ = _curve_arrays()
     blocks = _bucket(decls)
@@ -438,8 +549,8 @@ def fit_consensus(decls, identity_servers=()):
     # Fixed rating knots over the anchors, and the shape prior's log-slope as a
     # function of rank: rating ∝ S(rank) ⇒ d rank/d rating ∝ 1 / S'(rank).
     h = RATING_KNOT_STEP
-    all_R = np.array([R for _, R, _, _, _ in decls], float)
-    all_g = np.array([g for _, _, g, _, _ in decls], float)
+    all_R = np.array([d[1] for d in decls], float)
+    all_g = np.array([d[2] for d in decls], float)
     r = np.arange(np.floor((all_R.min() - RATING_KNOT_PAD) / h) * h,
                   all_R.max() + RATING_KNOT_PAD + h / 2, h)
     m = len(r) - 1
@@ -472,7 +583,7 @@ def fit_consensus(decls, identity_servers=()):
     start = np.zeros(nS, np.int64); free = np.zeros(nS, bool); Kvec = np.zeros(nS, np.int64)
     sp_idx = np.zeros((nS, Kmax - 1), np.int64); sp_mask = np.zeros((nS, Kmax - 1))
     base = np.zeros((nS, Kmax - 1)); ident = np.zeros((nS, Kmax)); thr_w = np.zeros((nS, Kmax))
-    rating, T, k, w, sid = [], [], [], [], []
+    rating, T, k, w, sid, cont, frac = [], [], [], [], [], [], []
     for i, (srv, st, n) in enumerate(srv_layout):
         blk = blocks[srv]; K = len(blk["identity"]); Kvec[i] = K
         ident[i, :K] = blk["identity"]; ident[i, K:] = blk["identity"][-1]
@@ -483,7 +594,9 @@ def fit_consensus(decls, identity_servers=()):
             base[i, :n - 1] = blk["baseline"]
         rating.append(blk["rating"]); T.append(blk["T"]); k.append(blk["k"])
         w.append(blk["w"]); sid.append(np.full(len(blk["k"]), i))
+        cont.append(blk["cont"]); frac.append(blk["frac"])
     rating, T, w = tt(np.concatenate(rating)), tt(np.concatenate(T)), tt(np.concatenate(w))
+    cont_t, frac_t = torch.as_tensor(np.concatenate(cont), device=dev), tt(np.concatenate(frac))
     k, sid = ti(np.concatenate(k)), ti(np.concatenate(sid))
     start_t, free_t, sp_idx_t = ti(start), torch.as_tensor(free, device=dev), ti(sp_idx)
     sp_mask_t, base_t, ident_t, thr_w_t = tt(sp_mask), tt(base), tt(ident), tt(thr_w)
@@ -513,9 +626,18 @@ def fit_consensus(decls, identity_servers=()):
             torch.cat([zcol, base_t * torch.exp(params[sp_idx_t]) * sp_mask_t], 1), 1)
         thr = torch.where(free_t[:, None], thr_free, ident_t)
         # ordinal_nll_vec with the contamination mixture
-        up = torch.where(k < K_row, torch.sigmoid(thr[sid, torch.minimum(k, K_row - 1)] - x), 1.0)
-        lw = torch.where(k > 0, torch.sigmoid(thr[sid, torch.clamp(k - 1, min=0)] - x), 0.0)
-        p = (1.0 - EPS_CONTAMINATION) * torch.clamp(up - lw, 1e-12, 1.0) + junk_row
+        t_hi = thr[sid, torch.minimum(k, K_row - 1)]
+        t_lo = thr[sid, torch.clamp(k - 1, min=0)]
+        up = torch.where(k < K_row, torch.sigmoid(t_hi - x), 1.0)
+        lw = torch.where(k > 0, torch.sigmoid(t_lo - x), 0.0)
+        body = torch.clamp(up - lw, 1e-12, 1.0)
+        # A verified anchor is the same latent observed at a POINT rather than a band:
+        # the coupling places it at the interpolated threshold position, and the
+        # likelihood is the logistic density there times the band's width in consensus
+        # units (the Jacobian) — whose integral over the band is the ordinal mass.
+        z = torch.sigmoid(t_lo + frac_t * (t_hi - t_lo) - x)
+        dens = torch.clamp(z * (1.0 - z) * (t_hi - t_lo), 1e-12)
+        p = (1.0 - EPS_CONTAMINATION) * torch.where(cont_t, dens, body) + junk_row
         f = -torch.sum(w * torch.log(p))
         f = f + SERVER_LAMBDA * torch.sum((params[sp_idx_t] * sp_mask_t) ** 2)
         delta = th - (params[1] + shape_log_slope(rk))
@@ -664,26 +786,41 @@ def detect_junk_declarations(decls, keys, a, ys, alpha, server_fits):
     Returns (dropped, cut) — dropped is a list of dicts, one per excluded
     declaration, ordered by descending posterior; cut is (n, lowest excluded
     posterior, the separated head's gap)."""
-    x_by_key, w_by_key, cat_by_key = defaultdict(float), defaultdict(float), {}
-    for (server, R, g, T, w), key in zip(decls, keys):
-        x_by_key[key] += w * float(interp_extrap_vec(np.array([R + alpha * T]), a, ys)[0])
-        w_by_key[key] += w
-        cat_by_key[key] = (server, g)
-
-    rows = []
-    for key, xw in x_by_key.items():
-        server, g = cat_by_key[key]
+    x_by_key, p_by_key, w_by_key = defaultdict(float), defaultdict(float), defaultdict(float)
+    cat_by_key, v_by_key = {}, defaultdict(float)
+    for d, key in zip(decls, keys):
+        server, R, g, T, w = d[:5]
+        v = d[5] if len(d) > 5 else None
         thr = server_fits.get(server)
         if not thr or len(thr) < 2:
             continue                      # no coupling: nothing to be junk against
         gs = sorted(thr)
         tau = np.array([thr[k] for k in gs], float)
-        x = xw / max(w_by_key[key], 1e-12)
-        k = int(np.searchsorted(np.array([float(v) for v in gs]), g))
-        p = float(junk_posterior_vec(tau, np.array([x]), np.array([k]),
-                                     EPS_CONTAMINATION)[0])
+        x = float(interp_extrap_vec(np.array([R + alpha * T]), a, ys)[0])
+        # the fit's own category index: band g lies between the edges at g and g+1
+        k = int(np.searchsorted(np.array([float(u) for u in gs]), g, side="right"))
+        if v is None:
+            p = float(junk_posterior_vec(tau, np.array([x]), np.array([k]),
+                                         EPS_CONTAMINATION)[0])
+        else:
+            # the posterior of the same mixture the fit scores a verified anchor under
+            lo, hi = tau[k - 1], tau[k]
+            z = float(expit(lo + (v - g) * (hi - lo) - x))
+            dens = max(z * (1.0 - z) * (hi - lo), 1e-12)
+            junk = EPS_CONTAMINATION / (len(tau) + 1)
+            p = junk / ((1.0 - EPS_CONTAMINATION) * dens + junk)
+        x_by_key[key] += w * x
+        p_by_key[key] += w * p
+        w_by_key[key] += w
+        v_by_key[key] += w * (v if v is not None else g + 0.5)
+        cat_by_key[key] = (server, g, v is not None)
+
+    rows = []
+    for key, wsum in w_by_key.items():
+        server, g, verified = cat_by_key[key]
         rows.append({"key": key, "server": server, "declared_band": g,
-                     "internal": x, "p_junk": p})
+                     "internal": x_by_key[key] / wsum, "p_junk": p_by_key[key] / wsum,
+                     "declared_value": v_by_key[key] / wsum, "verified": verified})
     if not rows:
         return [], (0, float("nan"), 0.0)
 
@@ -701,7 +838,8 @@ def detect_junk_declarations(decls, keys, a, ys, alpha, server_fits):
         uid, server, g = r["key"]
         mark = "  cut" if i < n_cut else "  keep"
         head = " <- head" if i < n_knee else ""
-        print(f"   {mark:<6}{uid[:8]:<10}{server:<9}declared {value_to_rank(g + 0.5):>4}  "
+        what = "verified" if r["verified"] else "declared"
+        print(f"   {mark:<6}{uid[:8]:<10}{server:<9}{what} {value_to_rank(r['declared_value']):>4}  "
               f"we say {value_to_rank(r['internal']):>4}  P(junk)={r['p_junk']:.3f}{head}")
     return rows[:n_cut], (n_cut, float(rows[n_cut - 1]["p_junk"]), gap)
 
@@ -720,7 +858,7 @@ def write_exclusions(ratings_dir, dropped, cut, n_declarations):
                     "our_internal", "our_rank", "p_junk"])
         for r in dropped:
             uid, server, g = r["key"]
-            w.writerow([uid[:8], server, g, value_to_rank(g + 0.5),
+            w.writerow([uid[:8], server, g, value_to_rank(r["declared_value"]),
                         f"{r['internal']:.4f}", value_to_rank(r["internal"]),
                         f"{r['p_junk']:.6f}"])
     print(f"  wrote {path} ({len(dropped)} of {n_declarations} declarations"
@@ -746,13 +884,17 @@ def emit_server_curves(server_fits):
 
 
 # ---------------------------------------------------------------------------
-def main():
+def main(argv=None):
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--dir", default=os.path.join(PROJECT_ROOT, "ratings"))
     ap.add_argument("--sql", default=SQL_PATH_DEFAULT)
     ap.add_argument("--sqlite", default=DB_SQLITE)
-    args = ap.parse_args()
+    ap.add_argument("--no-verified", action="store_true",
+                    help="Fit on declarations alone, ignoring the EGD/AGAR heartbeats. "
+                         "For measurements that compare verified ratings against the "
+                         "fit (ablations.rank_calibration_figures).")
+    args = ap.parse_args(argv)
 
     print(f"Reading {args.sql} ...")
     surveys = load_rank_surveys(args.sql)
@@ -760,10 +902,7 @@ def main():
         sys.exit("No rank_surveys rows found — cannot fit the mapping.")
     # EVERY declaration anchors (weight 1 each; its blocks split that weight) —
     # a re-survey is a new anchor at its own time, not a replacement.
-    surveys = surveys[surveys["rank_value"].notna()].copy()
-    surveys["t_days"] = (pd.to_datetime(surveys["created_at"], utc=True, format="mixed")
-                         .astype("int64") / 86400e9)
-    print(f"  {len(surveys)} declarations from {surveys['user_id'].nunique()} users")
+    surveys = observation_frame(surveys, use_verified=not args.no_verified)
 
     merged_ratings, merged_slopes, merged_floors = {}, {}, {}
     for s in SIZES:
@@ -787,7 +926,8 @@ def main():
     decls, keys, users, n_fallback, center = build_anchor_rows(
         surveys, attempts, med_min, merged_ratings, merged_slopes, merged_floors, lapse)
     n_pairs = len({(u, srv) for u, srv, _ in keys})
-    print(f"  {len(users)} users with a usable rating; {len(decls)} spans over {n_pairs} "
+    n_verified = sum(1 for d in decls if d[5] is not None)
+    print(f"  {len(users)} users with a usable rating; {len(decls)} spans ({n_verified} verified) over {n_pairs} "
           f"(user, server) pairs ({n_fallback} fell back to the pooled career rating)")
     w_egf = sum(d[4] for d in decls if d[0] == "EGF")
     print(f"\nConsensus fit over {len(decls)} anchor rows [{w_egf:.0f} EGF, a "
@@ -809,17 +949,17 @@ def main():
 
     # In-sample EGF calibration check (EGF is now forward-mapped through its
     # coupling); weighted so it reads in declaration units, not block-row counts.
-    egf = [(R, g, T, w) for srv, R, g, T, w in decls if srv == "EGF"]
+    egf = [(R, g, T, w, v) for srv, R, g, T, w, v in decls if srv == "EGF"]
     if "EGF" in server_fits and len(egf) >= 2 and len(server_fits["EGF"]) >= 2:
         gs = sorted(server_fits["EGF"])
         our = np.array([server_fits["EGF"][k] for k in gs], float)
         srv = np.array([float(k) for k in gs], float)
         order = np.argsort(our)
-        R = np.array([r for r, _, _, _ in egf])
+        R = np.array([e[0] for e in egf])
         # Declared BAND -> its centre, so the residual against a boundary-scale
         # prediction reads in the same units it always has.
-        gdec = np.array([g + 0.5 for _, g, _, _ in egf], float)
-        T = np.array([t for _, _, t, _ in egf]); W = np.array([w for _, _, _, w in egf])
+        gdec = np.array([g + 0.5 if v is None else v for _, g, _, _, v in egf], float)
+        T = np.array([e[2] for e in egf]); W = np.array([e[3] for e in egf])
         x_int = interp_extrap_vec(R + alpha * T, a, ys)
         pred = interp_extrap_vec(x_int, our[order], srv[order])
         res = pred - gdec
