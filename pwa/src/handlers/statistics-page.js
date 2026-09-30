@@ -30,7 +30,7 @@ import { baseCss, flag } from './page-shell.js';
 const STR = {
     en: {
         title: 'Statistics',
-        window: '(last {days} days, updated {ago})',
+        window: '(active in the past {days} days, updated {ago})',
         agoJustNow: 'just now',
         agoMinutes: '{n}m ago',
         agoHours: '{n}h ago',
@@ -50,7 +50,7 @@ const STR = {
     },
     zh: {
         title: '统计',
-        window: '（最近 {days} 天，更新于 {ago}）',
+        window: '（过去 {days} 天内活跃，更新于 {ago}）',
         agoJustNow: '刚刚',
         agoMinutes: '{n} 分钟前',
         agoHours: '{n} 小时前',
@@ -70,7 +70,7 @@ const STR = {
     },
     ja: {
         title: '統計',
-        window: '（直近 {days} 日間、更新 {ago}）',
+        window: '（過去{days}日間に活動、更新 {ago}）',
         agoJustNow: 'たった今',
         agoMinutes: '{n} 分前',
         agoHours: '{n} 時間前',
@@ -90,7 +90,7 @@ const STR = {
     },
     ko: {
         title: '통계',
-        window: '(최근 {days}일, 업데이트 {ago})',
+        window: '(지난 {days}일간 활동, 업데이트 {ago})',
         agoJustNow: '방금 전',
         agoMinutes: '{n}분 전',
         agoHours: '{n}시간 전',
@@ -178,7 +178,7 @@ function buildView(data, youCountry) {
         windowDays: data.windowDays || 7,
         users: data.totals.users,
         attempts,
-        rate: attempts ? Math.round(wins / attempts * 100) : 0,
+        rate: (attempts ? wins / attempts * 100 : 0).toFixed(2),
         bySize: (data.bySize || []).map(s => ({ size: s.size, attempts: s.attempts, users: s.users })),
         charts,
     };
