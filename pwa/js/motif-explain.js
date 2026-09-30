@@ -77,11 +77,11 @@ export function explainMotif({ component, side = 'positive', name, kind, reading
             }
             if (Math.abs(r.z) <= CONFIDENT_Z) parts.push(getTerm('motifExplainTentative'));
         }
-        // What the reading is measured against, stated whenever there is a
-        // reading: "weak at X" is easily read as an absolute verdict.
-        if (r && Number.isFinite(r.z)) {
-            parts.push(getTerm(kind === 'strength' ? 'motifExplainRelativeStrength'
-                                                   : 'motifExplainRelativeTendency'));
+        // A tendency reading names no reference in its own sentence, and "you
+        // overvalue X" is easily read as an absolute verdict. The strength
+        // sentences state their reference (the overall rank) themselves.
+        if (kind === 'tendency' && r && Number.isFinite(r.z)) {
+            parts.push(getTerm('motifExplainRelativeTendency'));
         }
     }
     return parts.join('\n\n');
