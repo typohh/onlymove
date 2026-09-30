@@ -39,7 +39,6 @@ const STR = {
         vCrit1: 'Views',
         vCrit2: 'The quality of the explanation, scored by the organiser',
         vCrit3: 'The highest OnlyMove rank reached during the video',
-        judgingH: 'Judging',
         judging: 'Entries are judged by Henry Hemming, the author of OnlyMove, on the criteria above. Earlier entries are slightly favoured, counted from the day they appear on the list of entries. Entries the organiser considers dishonest are disqualified.',
         contact: 'Send questions to {name} on {discord}.',
         formH: 'Enter',
@@ -97,7 +96,6 @@ const STR = {
         vCrit1: '观看次数',
         vCrit2: '讲解质量，由组织者评分',
         vCrit3: '视频中达到的最高 OnlyMove 段位',
-        judgingH: '评判',
         judging: '由 OnlyMove 作者 Henry Hemming 依据上述标准评判。较早参加者略有优先，以出现在参赛列表中的日期为准。组织者认为不诚实的参赛将被取消资格。',
         contact: '如有问题，请在 {discord} 上联系 {name}。',
         formH: '参赛',
@@ -155,7 +153,6 @@ const STR = {
         vCrit1: '再生回数',
         vCrit2: '解説の質（主催者が採点）',
         vCrit3: '動画中に到達した最高 OnlyMove ランク',
-        judgingH: '審査',
         judging: 'OnlyMove の作者 Henry Hemming が上記の基準で審査します。早い参加がやや有利で、応募一覧に掲載された日を基準とします。不正と判断した応募は失格とします。',
         contact: 'ご質問は {discord} で {name} までお送りください。',
         formH: '応募する',
@@ -213,7 +210,6 @@ const STR = {
         vCrit1: '조회수',
         vCrit2: '해설의 질(주최자가 채점)',
         vCrit3: '영상 중 도달한 최고 OnlyMove 랭크',
-        judgingH: '심사',
         judging: 'OnlyMove 제작자 Henry Hemming이 위 기준에 따라 심사합니다. 먼저 참가할수록 약간 유리하며, 참가 목록에 오른 날을 기준으로 합니다. 주최자가 부정하다고 판단한 참가는 실격 처리됩니다.',
         contact: '문의는 {discord}에서 {name}에게 보내 주세요.',
         formH: '참가 신청',
@@ -376,9 +372,10 @@ function renderPage(view) {
   a.inline { color: inherit; text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: .18em; }
   a.inline:hover { color: var(--accent-hi); }
 
-  .judging { padding: 1.1rem 1.25rem; border-left: 3px solid var(--accent); background: var(--surface); border-radius: 0 10px 10px 0; }
-  .judging p { margin: 0 0 .6rem; }
-  .judging p:last-child { margin: 0; }
+  /* the fine print closing the page: when the figures update, how entries are
+     judged, where to ask */
+  .fine { margin-top: 2.2rem; }
+  .fine p { margin: 0 0 .5rem; }
 
   .tbl { overflow-x: auto; margin: .3rem 0 0; }
   .tbl table { margin: 0; font-variant-numeric: tabular-nums; }
@@ -386,7 +383,6 @@ function renderPage(view) {
   .tbl th, .tbl td { white-space: nowrap; }
   .tbl th.n, .tbl td.n { text-align: right; }
   .tbl td.pl { width: 99%; }
-  .note { margin-top: 1.4rem; }
   .empty { color: var(--ink-muted); padding: .9rem 1rem; border: 1px dashed var(--hairline); border-radius: 10px; margin: .3rem 0 0; }
 
   /* entry form */
@@ -451,7 +447,6 @@ function renderPage(view) {
 <section>
   <h2 id="entriesH"></h2>
   <div class="tbl" id="videoList"></div>
-  <p class="muted note" id="updated"></p>
 </section>
 
 <section id="videos">
@@ -462,14 +457,6 @@ function renderPage(view) {
   <ul class="criteria"><li id="vCrit1"></li><li id="vCrit2"></li><li id="vCrit3"></li></ul>
 </section>
 
-
-<section>
-  <h2 id="judgingH"></h2>
-  <div class="judging">
-    <p id="judging"></p>
-    <p id="contact"></p>
-  </div>
-</section>
 
 <section id="enter">
   <h2 id="formH"></h2>
@@ -514,6 +501,12 @@ function renderPage(view) {
   </form>
 </section>
 
+<section class="fine muted">
+  <p id="updated"></p>
+  <p id="judging"></p>
+  <p id="contact"></p>
+</section>
+
 <script>
 (function () {
   var STR = ${strJson};
@@ -550,7 +543,7 @@ function renderPage(view) {
   }
 
   ['intro', 'deadline', 'prizesH', 'videoH', 'videoWhat', 'vLang', 'vCrit1', 'vCrit2', 'vCrit3',
-   'judgingH', 'judging', 'entriesH'].forEach(function (k) { set(k); });
+   'judging', 'entriesH'].forEach(function (k) { set(k); });
   set('h1', 'title');
   set('vCritH', 'criteriaH');
   var amounts = esc(t('first')) + ' <b>100 €</b>&emsp;' + esc(t('second')) + ' <b>50 €</b>&emsp;' + esc(t('third')) + ' <b>25 €</b>';
@@ -695,7 +688,7 @@ function renderPage(view) {
     });
   }
 
-  if (!VIEW) { $('updated').textContent = t('unavailable'); linkBrand(); return; }
+  if (!VIEW) { $('videoList').innerHTML = '<p class="empty">' + esc(t('unavailable')) + '</p>'; linkBrand(); return; }
 
   function ago(iso) {
     var ms = Date.now() - Date.parse(iso);
