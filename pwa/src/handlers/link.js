@@ -96,20 +96,6 @@ function heartbeatLabel(beat) {
     return rankToLabel(clampRankBand(rankBand(rank)));
 }
 
-// Every statement that removes a binding removes the machine rating heartbeats
-// with it. They are keyed by user_id, not by player id, so one left behind keeps
-// reporting the PREVIOUS player's verified rating as this account's — on the
-// leaderboard's Declared column, under whatever name is linked next. The human
-// survey declarations ('EGF'/'AGA'/... rows) are the user's own and stay. Each
-// batch that clears them ends with refreshDeclaredStmt, so the leaderboard's
-// declared cache drops the old heartbeats too — and falls back to the user's own
-// EGF/AGA declaration where one exists.
-function clearHeartbeats(env, userId) {
-    return env.DB.prepare(
-        `DELETE FROM rank_surveys WHERE user_id = ?1 AND server IN ('EGD', 'AGAR')`
-    ).bind(userId);
-}
-
 export async function handleLink(request, env) {
     let data;
     try { data = await request.json(); } catch { return jsonResponse({ ok: false, error: 'bad_request' }, 400); }
@@ -158,11 +144,9 @@ export async function handleLink(request, env) {
         const nowIso = new Date().toISOString();
 
         // One row per account: relinking REPLACES, so the other service's column is
-        // cleared in the same write and the previous identity's heartbeats go with
-        // it (relinking to a different player of the same service would otherwise
-        // inherit their verified rating).
+        // cleared in the same write. The account's heartbeats are KEPT: they are
+        // its dated record, like its survey answers.
         const stmts = [
-            clearHeartbeats(env, userId),
             env.DB.prepare(
                 `INSERT INTO external_ids (user_id, egd_pin, aga_id, display_name, country_code)
                  VALUES (?1, ?2, ?3, ?4, ?5)
@@ -220,12 +204,15 @@ export async function handleUnlink(request, env) {
         return jsonResponse({ ok: false, error: 'bad_request' }, 400);
     }
     try {
-        // Identity + heartbeats go together (see clearHeartbeats). The leaderboard
-        // row is deliberately LEFT: it is the account's own rank state, rebuilt
-        // from tsumego_reports and shown for every active player, linked or not —
-        // unlinking makes the row anonymous, it does not remove the player.
+        // Only the binding goes. The account's heartbeats stay in the log (the
+        // rank-mapping fit reads them like survey answers) and simply stop being
+        // shown: declaredJsonSql admits heartbeats only for a linked account, so
+        // the declared refresh below hands the cells back to the user's own
+        // declarations. The leaderboard row is deliberately LEFT too: it is the
+        // account's own rank state, rebuilt from tsumego_reports and shown for
+        // every active player, linked or not — unlinking makes the row anonymous,
+        // it does not remove the player.
         await env.DB.batch([
-            clearHeartbeats(env, data.userId),
             env.DB.prepare(`DELETE FROM external_ids WHERE user_id = ?1`).bind(data.userId),
             refreshDeclaredStmt(env, 'user_id = ?1', data.userId),
         ]);

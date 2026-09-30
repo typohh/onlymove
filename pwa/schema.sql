@@ -248,9 +248,10 @@ CREATE TABLE IF NOT EXISTS history_refresh_log (
 -- fetch; the latest such row doubles as the "checked this week" marker, and
 -- rank_to_scalar can't parse raw digits so the rank-calibration pipeline ignores
 -- 'EGD'/'AGAR' rows until deliberately enabled), and the rank/buffer state on
--- the (prunable) `leaderboard` row. Unlinking deletes this row AND the account's
--- 'EGD'/'AGAR' heartbeats together — a heartbeat is keyed by user_id, so one
--- left behind would keep showing the old player's verified rating.
+-- the (prunable) `leaderboard` row. Unlinking deletes only this row: the
+-- account's 'EGD'/'AGAR' heartbeats are its dated record, like its survey
+-- answers, and stay in the log. They are SHOWN only while this row exists
+-- (declaredJsonSql, src/leaderboard.js).
 --
 -- The schema supports an egd_pin AND an aga_id on one row; the "one identity per
 -- account" rule is enforced only as POLICY in handleLink (link.js), NOT as a DB

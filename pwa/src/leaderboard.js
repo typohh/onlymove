@@ -402,6 +402,8 @@ export function pushBuffer(buffer, problemId, success, timeUsed) {
 //
 // The value is a JSON array of { server, rank, country, rank_label, last_game_at },
 // one per server, newest row per server by id; '[]' for a user with no rows.
+// A machine heartbeat enters only while the account is linked, so an unlinked
+// account shows its own declarations in those cells instead.
 // `userIdSql` is the SQL expression naming the user (a bind parameter, or an outer
 // column), inlined into the correlated subquery.
 export function declaredJsonSql(userIdSql) {
@@ -409,8 +411,12 @@ export function declaredJsonSql(userIdSql) {
                 'server', s.server, 'rank', s.rank, 'country', s.country,
                 'rank_label', s.rank_label, 'last_game_at', s.last_game_at))
                FROM rank_surveys s
-              WHERE s.id IN (SELECT MAX(id) FROM rank_surveys
-                              WHERE user_id = ${userIdSql} GROUP BY server))`;
+              WHERE s.id IN (SELECT MAX(r.id) FROM rank_surveys r
+                              WHERE r.user_id = ${userIdSql}
+                                AND (r.server NOT IN ('EGD', 'AGAR')
+                                     OR EXISTS (SELECT 1 FROM external_ids
+                                                 WHERE user_id = ${userIdSql}))
+                              GROUP BY r.server))`;
 }
 
 // Recompute one user's cache from the log. `whereSql` selects the leaderboard
