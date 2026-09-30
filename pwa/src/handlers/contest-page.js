@@ -2,9 +2,8 @@
 //
 // GET /contest — the contribution-rewards page: the rules of the 2026 content
 // creators category (videos) and every entry so far, rendered from the
-// cached contest blob (src/contest.js), which recomputes on request once it is 12
-// hours old (so an entrant's rename or hide shows without an organiser edit);
-// the page prints no update time. Localized on the CLIENT from navigator.language like /statistics
+// cached contest blob (src/contest.js), which recomputes only after an organiser
+// write or a deploy. Localized on the CLIENT from navigator.language like /statistics
 // and /leaderboard, so one response serves every viewer.
 //
 // The page ranks nothing: entries are listed in submission order, the order the

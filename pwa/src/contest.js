@@ -4,9 +4,11 @@
 // sent from the page's form and not yet verified, stay out) resolved into what the
 // page shows, cached as one JSON blob in server_stats under key 'contest' (the same
 // single-row cache the Community stats use under 'latest'). Recomputed ON REQUEST
-// when the blob is older than CONTEST_MAX_AGE_MS or was produced by an older code
-// version; the organiser's script (auxiliary/contest_entries.mjs) deletes the row
-// after an edit so the next view recomputes.
+// only when the row is missing or was produced by an older code version: the
+// organiser's script (auxiliary/contest_entries.mjs) deletes the row on every
+// write, so an entry's name is resolved when it is listed and not re-read on a
+// timer — an entrant's rename or hide reaches the page at the next organiser
+// write or deploy.
 //
 // Nothing identifying the account leaves this module: the blob carries no user id
 // (the id is the account credential), only the display fields below.
@@ -23,7 +25,6 @@ import { APP_VERSION } from './version.js';
 import { getProblemParams, rankWalkFromAttempts, resolveRowCountry, declaredJsonSql } from './leaderboard.js';
 
 const CONTEST_KEY = 'contest';
-export const CONTEST_MAX_AGE_MS = 12 * 3600 * 1000;
 // Entries close here: the page counts down to it and POST /contest/submit refuses after it.
 export const CONTEST_DEADLINE_ISO = '2026-12-31T23:59:59Z';
 
@@ -37,14 +38,13 @@ function computeContestOnce(env) {
 
 export async function loadContest(env) {
     const row = await env.DB.prepare(
-        `SELECT data, computed_at FROM server_stats WHERE key = ?1`
+        `SELECT data FROM server_stats WHERE key = ?1`
     ).bind(CONTEST_KEY).first();
     let cached = null;
     if (row && row.data) {
         try { cached = JSON.parse(row.data); } catch { cached = null; }
     }
-    const age = row?.computed_at ? Date.now() - Date.parse(row.computed_at) : Infinity;
-    if (cached && cached.version === APP_VERSION && age < CONTEST_MAX_AGE_MS) return cached;
+    if (cached && cached.version === APP_VERSION) return cached;
     return computeContestOnce(env);
 }
 

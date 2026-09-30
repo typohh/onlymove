@@ -90,7 +90,7 @@ const GET_ROUTES = [
   // standings, no D1 read).
   { path: '/tournament', handler: () => handleTournament() },
   // Contribution-rewards page (HTML): the rules and the live entry lists, from
-  // the cached contest blob (src/contest.js), recomputed on request every 12h.
+  // the cached contest blob (src/contest.js), recomputed only after an organiser write or a deploy.
   { path: '/contest', handler: (request, env) => handleContest(env) },
   // The account's leaderboard profile: the hide flag + the linked EGD/AGA identity,
   // which is everything the Account dialog paints. Read; no limiter. no-store, set
