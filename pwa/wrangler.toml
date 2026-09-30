@@ -34,6 +34,10 @@ crons = ["0 * * * *"]
 # VAPID identity for Web Push. The private key is a wrangler secret:
 #   wrangler secret put VAPID_PRIVATE_KEY
 # Public key is non-secret (clients fetch it via GET /push/vapid-public-key).
+# Contest submissions are announced to the organiser's Discord channel through a
+# webhook URL, a secret because the URL alone lets anyone post there. Unset, the
+# announcement is skipped (src/handlers/contest-submit.js).
+#   cd pwa && npx wrangler secret put CONTEST_DISCORD_WEBHOOK
 # Maintenance freeze. MAINTENANCE_MODE = "1" makes every POST route return 503 and
 # skips the cron, so a snapshot-relative operation (auxiliary/purge_tsumegos.mjs,
 # auxiliary/update_leaderboard_ranks.mjs) can run against tables that are standing

@@ -76,6 +76,7 @@ const STR = {
         colProblems: 'Problems', colVideo: 'Video', colViews: 'Views', colQuality: 'Quality', colPeak: 'Highest OnlyMove',
         watch: 'Watch', anonymous: 'Anonymous',
         emptyVideo: 'No videos yet.',
+        pendingOne: '1 submission is waiting for review.', pendingMany: '{n} submissions are waiting for review.',
         unavailable: 'The entry list could not be loaded. Reload the page to try again.',
         dan: '{n} dan', kyu: '{n} kyu',
     },
@@ -131,6 +132,7 @@ const STR = {
         colProblems: '题目数', colVideo: '视频', colViews: '观看', colQuality: '质量', colPeak: 'OnlyMove 最高',
         watch: '观看', anonymous: '匿名',
         emptyVideo: '暂无视频。',
+        pendingOne: '有 1 份参赛作品等待审核。', pendingMany: '有 {n} 份参赛作品等待审核。',
         unavailable: '无法加载参赛列表，请刷新页面重试。',
         dan: '{n} 段', kyu: '{n} 级',
     },
@@ -186,6 +188,7 @@ const STR = {
         colProblems: '問題数', colVideo: '動画', colViews: '再生', colQuality: '質', colPeak: 'OnlyMove 最高',
         watch: '見る', anonymous: '匿名',
         emptyVideo: '動画の応募はまだありません。',
+        pendingOne: '審査待ちの応募が 1 件あります。', pendingMany: '審査待ちの応募が {n} 件あります。',
         unavailable: '応募一覧を読み込めませんでした。ページを再読み込みしてください。',
         dan: '{n} 段', kyu: '{n} 級',
     },
@@ -241,6 +244,7 @@ const STR = {
         colProblems: '문제 수', colVideo: '영상', colViews: '조회수', colQuality: '질', colPeak: 'OnlyMove 최고',
         watch: '보기', anonymous: '익명',
         emptyVideo: '아직 영상이 없습니다.',
+        pendingOne: '검토를 기다리는 참가 신청이 1건 있습니다.', pendingMany: '검토를 기다리는 참가 신청이 {n}건 있습니다.',
         unavailable: '참가 목록을 불러오지 못했습니다. 페이지를 새로 고쳐 주세요.',
         dan: '{n}단', kyu: '{n}급',
     },
@@ -253,7 +257,20 @@ export async function handleContest(env) {
     } catch (e) {
         console.error('contest read failed:', e);
     }
-    return new Response(renderPage(buildView(data)), {
+    // Read live, outside the cached blob: a submission does not drop the cache,
+    // and this count is one small indexed read.
+    let pending = 0;
+    try {
+        const row = await env.DB.prepare(
+            `SELECT COUNT(*) AS n FROM contest_entries WHERE category = 'video' AND listed_at IS NULL`
+        ).first();
+        pending = row ? row.n : 0;
+    } catch (e) {
+        console.error('contest pending count failed:', e);
+    }
+    const view = buildView(data);
+    if (view) view.pending = pending;
+    return new Response(renderPage(view), {
         status: 200,
         headers: {
             'Content-Type': 'text/html; charset=utf-8',
@@ -435,6 +452,7 @@ function renderPage(view) {
 <section>
   <h2 id="entriesH"></h2>
   <div class="tbl" id="videoList"></div>
+  <p class="muted" id="pending" hidden></p>
 </section>
 
 <section id="videos">
@@ -701,6 +719,10 @@ function renderPage(view) {
         val(r.quality === null ? null : r.quality + ' / 10') + '</td><td class="n">' + val(fmtRank(r.peak)) +
         '</td><td class="n">' + val(r.problems) + '</td></tr>';
     }), 'emptyVideo');
+  if (VIEW.pending > 0) {
+    $('pending').textContent = VIEW.pending === 1 ? t('pendingOne') : t('pendingMany', { n: VIEW.pending });
+    $('pending').hidden = false;
+  }
   linkBrand();
 })();
 </script>

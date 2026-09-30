@@ -22,6 +22,14 @@
 //
 // Format-validated before any D1 write, like every other write handler, and
 // rate-limited by RL_WRITE at the route (src/index.js).
+//
+// Every accepted submission is announced to the organiser through a Discord
+// webhook (secret CONTEST_DISCORD_WEBHOOK; absent, nothing is sent). The post
+// carries the entry id and what is public or harmless — the video link, its
+// problem count and language, the app-link choice, the contact METHOD — and
+// never the contact detail, the message or the user id: the privacy policy
+// promises the first two are seen only by the organiser, and a Discord channel
+// is a third party; the third is the account credential.
 
 import { jsonResponse } from '../http.js';
 import { isValidUserId } from '../guards.js';
@@ -48,7 +56,42 @@ function validContact(method, raw) {
     return /^[^\s@:#]{2,32}(#\d{4})?$/.test(v) ? v : null;
 }
 
-export async function handleContestSubmit(request, env) {
+const KIND_TEXT = {
+    new: 'New contest submission',
+    replaced: 'Contest submission replaced (still pending)',
+    listed: 'Listed contest entry updated its contact details',
+};
+
+// Fire-and-forget: a failed post is logged and never fails the submission.
+async function notifyOrganiser(env, { id, kind, url, problems, language, appLink, contactMethod, hasMessage }) {
+    if (!env.CONTEST_DISCORD_WEBHOOK) return;
+    // A listed entry's link, count and language are not changed by the form
+    // (the organiser's script owns them), so they are left out of its post.
+    const details = [
+        ...(url ? [`${problems} problems`, language] : []),
+        `contact by ${contactMethod}`,
+        ...(appLink ? ['may be linked from the app'] : []),
+        ...(hasMessage ? ['has a message'] : []),
+    ];
+    const lines = [
+        `**${KIND_TEXT[kind]}** — entry #${id ?? '?'}`,
+        ...(url ? [`<${url}>`] : []),
+        details.join(' · '),
+    ];
+    try {
+        const res = await fetch(env.CONTEST_DISCORD_WEBHOOK, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            // No mentions of any kind, whatever the URL happens to contain.
+            body: JSON.stringify({ content: lines.join('\n'), allowed_mentions: { parse: [] } }),
+        });
+        if (!res.ok) console.error('contest webhook failed:', res.status);
+    } catch (e) {
+        console.error('contest webhook failed:', e);
+    }
+}
+
+export async function handleContestSubmit(request, env, ctx) {
     let d;
     try { d = await request.json(); } catch { return jsonResponse({ ok: false, error: 'bad_request' }, 400); }
     if (!d || !isValidUserId(d.userId)) {
@@ -84,16 +127,19 @@ export async function handleContestSubmit(request, env) {
             `SELECT id, listed_at FROM contest_entries WHERE category = 'video' AND user_id = ?1`
         ).bind(d.userId).first();
         const now = new Date().toISOString();
+        let id = prior ? prior.id : null;
         if (!prior) {
             // The UNIQUE (category, user_id) index settles a double-submit race:
             // the loser's INSERT is ignored and its fields are the same form's.
-            await env.DB.prepare(
+            const row = await env.DB.prepare(
                 `INSERT OR IGNORE INTO contest_entries
                      (category, user_id, submitted_at, contact_method, contact,
                       video_url, video_problems, video_language, app_link, message)
-                 VALUES ('video', ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)`
+                 VALUES ('video', ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                 RETURNING id`
             ).bind(d.userId, now, d.contactMethod, contact,
-                   url, problems, language, appLink, message).run();
+                   url, problems, language, appLink, message).first();
+            id = row ? row.id : null;
         } else if (prior.listed_at === null) {
             await env.DB.prepare(
                 `UPDATE contest_entries SET submitted_at = ?2, contact_method = ?3, contact = ?4,
@@ -106,7 +152,15 @@ export async function handleContestSubmit(request, env) {
                   WHERE id = ?1`
             ).bind(prior.id, d.contactMethod, contact, appLink, message).run();
         }
-        return jsonResponse({ ok: true, replaced: !!prior && prior.listed_at === null, listed: !!prior && prior.listed_at !== null });
+        const replaced = !!prior && prior.listed_at === null;
+        const listed = !!prior && prior.listed_at !== null;
+        const note = notifyOrganiser(env, {
+            id, kind: listed ? 'listed' : replaced ? 'replaced' : 'new',
+            url: listed ? null : url, problems, language, appLink,
+            contactMethod: d.contactMethod, hasMessage: !!message,
+        });
+        if (ctx && ctx.waitUntil) ctx.waitUntil(note); else await note;
+        return jsonResponse({ ok: true, replaced, listed });
     } catch (e) {
         console.error('handleContestSubmit failed:', e);
         return jsonResponse({ ok: false, error: 'server' }, 500);
