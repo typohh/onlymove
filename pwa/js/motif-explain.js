@@ -77,6 +77,12 @@ export function explainMotif({ component, side = 'positive', name, kind, reading
             }
             if (Math.abs(r.z) <= CONFIDENT_Z) parts.push(getTerm('motifExplainTentative'));
         }
+        // What the reading is measured against, stated whenever there is a
+        // reading: "weak at X" is easily read as an absolute verdict.
+        if (r && Number.isFinite(r.z)) {
+            parts.push(getTerm(kind === 'strength' ? 'motifExplainRelativeStrength'
+                                                   : 'motifExplainRelativeTendency'));
+        }
     }
     return parts.join('\n\n');
 }
@@ -98,5 +104,6 @@ export function explainPace({ pace, reading }) {
         parts.push(getTerm(`paceExplain${key}${r.z < 0 ? 'Weak' : 'Strong'}`, { ranks: fmtRanks(r.ranks) }));
         if (Math.abs(r.z) <= CONFIDENT_Z) parts.push(getTerm('motifExplainTentative'));
     }
+    if (r && Number.isFinite(r.z)) parts.push(getTerm('paceExplainRelative'));
     return parts.join('\n\n');
 }

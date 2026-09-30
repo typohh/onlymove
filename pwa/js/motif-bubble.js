@@ -46,6 +46,11 @@ const MAX_MOTIFS = 3;
 // as a multiple of MOTIF_Z — this is the two-sigma point, not "twice the bar",
 // and it must stay there if the shared gate is ever retuned.
 const CONFIDENT_Z = 2;
+// Whether the training-focus list shows TENTATIVE findings — those between the
+// admission gate and CONFIDENT_Z, worded "you might…". Off, the list carries
+// only confident findings; serving and the stats panes are unaffected either
+// way, since they read the flagged categories directly.
+const SHOW_POSSIBLE_WEAKNESSES = false;
 // Sub-pixel slack on the fits-on-screen comparison: both sides are fractional
 // CSS pixels, and a bubble whose last text row ends a rounding error past the
 // band is visible.
@@ -136,8 +141,8 @@ function topMotifs(problem) {
  * (flaggedMotifCategories — named tails whose own-attempt reading clears the
  * shared confidence gate), minus the
  * `strong` direction, strongest first, same MAX_MOTIFS cap as the
- * problem list. Empty whenever nothing is flagged or the model is absent,
- * which is what keeps the bubble silent rather than showing a "none found".
+ * problem list. Empty whenever nothing is flagged or the model is absent;
+ * syncMotifBubble then shows the "none detected" line.
  */
 function trainingFocusMotifs() {
     const labels = state.embeddingLabels;
@@ -228,7 +233,8 @@ function trainingFocusMotifs() {
                       explain: () => explainPace({ pace: kind, reading: computePaceReadings()[kind] }) });
     }
     scored.sort((a, b) => b.z - a.z);
-    return scored.slice(0, MAX_MOTIFS);
+    const shown = SHOW_POSSIBLE_WEAKNESSES ? scored : scored.filter((m) => m.z > CONFIDENT_Z);
+    return shown.slice(0, MAX_MOTIFS);
 }
 
 /**
@@ -248,8 +254,8 @@ export function populateMotifBubble(problem) {
  * Derive content and visibility from current state; safe to call on every UI
  * refresh. Review mode shows the reviewed problem's motifs, and only at the
  * root position (no motifs exist for deeper nodes). Solving mode shows the
- * training-focus list. Linked play and empty lists show nothing — there is
- * deliberately no empty-state text.
+ * training-focus list, or a "none detected" line once the labels are loaded
+ * and nothing clears the bar. An empty review-mode list shows nothing.
  */
 export function syncMotifBubble() {
     const bubble = el('motif-bubble');
@@ -266,15 +272,25 @@ export function syncMotifBubble() {
         motifs = trainingFocusMotifs();
         titleKey = 'trainingFocusTitle';
     }
-    const show = motifs.length > 0;
+    // The training-focus box stays up when empty, saying so, rather than
+    // vanishing — an absent box reads as a missing feature, not a clean bill.
+    const empty = motifs.length === 0
+                && titleKey === 'trainingFocusTitle' && !!state.embeddingLabels;
+    const show = motifs.length > 0 || empty;
 
     // Rebuild the DOM only when the content actually changed — this runs on
     // every repaint.
-    const key = show ? `${titleKey}|${motifs.map((m) => m.text).join('|')}` : null;
+    const key = show ? `${titleKey}|${empty ? '∅' : motifs.map((m) => m.text).join('|')}` : null;
     if (show && key !== _renderedKey) {
         const tabLabel = el('motif-bubble-tab-label');
         if (tabLabel) tabLabel.textContent = getTerm(titleKey);
         content.textContent = '';
+        if (empty) {
+            const p = document.createElement('p');
+            p.className = 'motif-bubble-empty';
+            p.textContent = getTerm('trainingFocusNone');
+            content.appendChild(p);
+        }
         const ul = document.createElement('ul');
         ul.className = 'motif-bubble-list';
         for (const m of motifs) {
@@ -288,7 +304,7 @@ export function syncMotifBubble() {
             li.appendChild(span);
             ul.appendChild(li);
         }
-        content.appendChild(ul);
+        if (!empty) content.appendChild(ul);
         _renderedKey = key;
     }
 
@@ -300,7 +316,7 @@ export function syncMotifBubble() {
         refreshMotifBubbleMetrics();   // (re)anchor below the buttons in portrait
         // First-appearance announcement for the training-focus list; the hook
         // is once-ever and self-gating, so calling it per repaint is fine.
-        if (titleKey === 'trainingFocusTitle') onTrainingFocusShown();
+        if (titleKey === 'trainingFocusTitle' && !empty) onTrainingFocusShown();
     }
 }
 
