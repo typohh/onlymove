@@ -1,29 +1,24 @@
 // pwa/src/handlers/contest-submit.js
 //
 // POST /contest/submit — the /contest page's entry form. Creates the account's
-// contest_entries row in that category PENDING (listed_at NULL): the organiser
+// video contest_entries row PENDING (listed_at NULL): the organiser
 // verifies it and lists it with auxiliary/contest_entries.mjs, so the public list
 // never shows an unverified entry.
 //
-// A second submission from the same account in the same category updates the
-// row. While it is pending every field the form sends is replaced; once it is
+// A second submission from the same account updates the row. While it is pending every field the form sends is replaced; once it is
 // listed only the contact, the message and the app-link consent are, so a
 // verified video link or problem count cannot be swapped after verification —
 // those change through the organiser.
 //
 //   POST /contest/submit
-//     { userId, category: 'strength'|'video',
-//       contactMethod: 'whatsapp'|'discord'|'email', contact,
-//       videoUrl?, videoProblems?, videoLanguage?, appLink?,   (video only)
-//       message? }
+//     { userId, contactMethod: 'whatsapp'|'discord'|'email', contact,
+//       videoUrl, videoProblems, videoLanguage, appLink?, message? }
 //     -> { ok: true, replaced: bool, listed: bool }
-//   Rejections: 400 bad_request | 400 invalid_<field> | 409 not_linked | 409 closed
+//   Rejections: 400 bad_request | 400 invalid_<field> | 409 closed
 //
 // `replaced` says a pending submission was overwritten, `listed` that the entry
-// is already public, so the page can say which of the three happened.
-// A strong-player submission needs the account's linked EGD/AGA record, since
-// that is what the organiser verifies and what the list shows; a video one needs
-// nothing of the account, whose alias is recommended but optional.
+// is already public, so the page can say which of the three happened. Nothing of
+// the account is required: its alias is what the list shows, and is optional.
 //
 // Format-validated before any D1 write, like every other write handler, and
 // rate-limited by RL_WRITE at the route (src/index.js).
@@ -56,7 +51,7 @@ function validContact(method, raw) {
 export async function handleContestSubmit(request, env) {
     let d;
     try { d = await request.json(); } catch { return jsonResponse({ ok: false, error: 'bad_request' }, 400); }
-    if (!d || !isValidUserId(d.userId) || !['strength', 'video'].includes(d.category)) {
+    if (!d || !isValidUserId(d.userId)) {
         return jsonResponse({ ok: false, error: 'bad_request' }, 400);
     }
     if (Date.now() > Date.parse(CONTEST_DEADLINE_ISO)) return jsonResponse({ ok: false, error: 'closed' }, 409);
@@ -71,31 +66,23 @@ export async function handleContestSubmit(request, env) {
         message = d.message.trim() || null;
     }
 
-    let url = null, problems = null, language = null, appLink = 0;
-    if (d.category === 'video') {
-        url = typeof d.videoUrl === 'string' ? d.videoUrl.trim() : '';
-        if (url.length > MAX_URL || !/^https:\/\/[^\s/]+\.[^\s]+$/.test(url)) {
-            return jsonResponse({ ok: false, error: 'invalid_url' }, 400);
-        }
-        problems = d.videoProblems;
-        if (!Number.isInteger(problems) || problems < 1 || problems > 10000) {
-            return jsonResponse({ ok: false, error: 'invalid_problems' }, 400);
-        }
-        if (!VIDEO_LANGUAGES.has(d.videoLanguage)) return jsonResponse({ ok: false, error: 'invalid_language' }, 400);
-        language = d.videoLanguage;
-        appLink = d.appLink === true ? 1 : 0;
+    const url = typeof d.videoUrl === 'string' ? d.videoUrl.trim() : '';
+    if (url.length > MAX_URL || !/^https:\/\/[^\s/]+\.[^\s]+$/.test(url)) {
+        return jsonResponse({ ok: false, error: 'invalid_url' }, 400);
     }
+    const problems = d.videoProblems;
+    if (!Number.isInteger(problems) || problems < 1 || problems > 10000) {
+        return jsonResponse({ ok: false, error: 'invalid_problems' }, 400);
+    }
+    if (!VIDEO_LANGUAGES.has(d.videoLanguage)) return jsonResponse({ ok: false, error: 'invalid_language' }, 400);
+    const language = d.videoLanguage;
+    const appLink = d.appLink === true ? 1 : 0;
     if (!env.DB) return jsonResponse({ ok: false, error: 'server' }, 500);
 
     try {
-        const [linked, prior] = await Promise.all([
-            d.category === 'strength'
-                ? env.DB.prepare(`SELECT 1 AS x FROM external_ids WHERE user_id = ?1`).bind(d.userId).first()
-                : null,
-            env.DB.prepare(`SELECT id, listed_at FROM contest_entries WHERE category = ?1 AND user_id = ?2`)
-                .bind(d.category, d.userId).first(),
-        ]);
-        if (d.category === 'strength' && !linked) return jsonResponse({ ok: false, error: 'not_linked' }, 409);
+        const prior = await env.DB.prepare(
+            `SELECT id, listed_at FROM contest_entries WHERE category = 'video' AND user_id = ?1`
+        ).bind(d.userId).first();
         const now = new Date().toISOString();
         if (!prior) {
             // The UNIQUE (category, user_id) index settles a double-submit race:
@@ -104,8 +91,8 @@ export async function handleContestSubmit(request, env) {
                 `INSERT OR IGNORE INTO contest_entries
                      (category, user_id, submitted_at, contact_method, contact,
                       video_url, video_problems, video_language, app_link, message)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)`
-            ).bind(d.category, d.userId, now, d.contactMethod, contact,
+                 VALUES ('video', ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)`
+            ).bind(d.userId, now, d.contactMethod, contact,
                    url, problems, language, appLink, message).run();
         } else if (prior.listed_at === null) {
             await env.DB.prepare(

@@ -414,8 +414,9 @@ CREATE TABLE IF NOT EXISTS hidden_profiles (
     created_at TEXT NOT NULL
 );
 -- Contribution-rewards entries (the /contest page, src/contest.js). One row per
--- (category, account). A player creates the row from the page's entry form
--- (POST /contest/submit), pending with listed_at NULL; the organiser verifies it
+-- (category, account). Only 'video' (the content-creators category) is written;
+-- the CHECK's 'strength' is unused. A player creates the row from the page's
+-- entry form (POST /contest/submit), pending with listed_at NULL; the organiser verifies it
 -- and lists it with auxiliary/contest_entries.mjs, which sets listed_at — the
 -- public date, the one the rules favour — and later enters views and quality.
 -- The page reads listed rows only. Once listed, a resubmission updates only the
@@ -423,14 +424,11 @@ CREATE TABLE IF NOT EXISTS hidden_profiles (
 -- count change only through the organiser.
 -- The row holds only what the account cannot supply. Everything else the page
 -- shows is resolved at compute time off the account — the name (linked EGD/AGA
--- display_name, else the alias, withheld by hidden_profiles), the federation rank
--- (the latest EGD/AGAR heartbeat in rank_surveys) and the OnlyMove ranks (a replay
--- of the account's novel attempts) — so an entry has no anonymity flag of its own.
+-- display_name, else the alias, withheld by hidden_profiles) and the peak OnlyMove
+-- rank (a replay of the account's novel attempts) — so an entry has no anonymity
+-- flag of its own.
 -- contact is the only personal datum the site keeps: no Worker route reads it,
--- and the privacy policy promises its deletion once the prizes are paid. The
--- organiser is not an entry: the page shows the organiser's current figures
--- beside the entry criteria, off the account linked to ORGANISER_EGD_PIN
--- (src/contest.js).
+-- and the privacy policy promises its deletion once the prizes are paid.
 CREATE TABLE IF NOT EXISTS contest_entries (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     category       TEXT NOT NULL CHECK (category IN ('strength', 'video')),

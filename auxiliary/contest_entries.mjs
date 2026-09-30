@@ -5,7 +5,7 @@
 // pwa/schema.sql). Players send entries from the page's form (POST
 // /contest/submit), which leaves them PENDING (listed_at NULL); nothing reaches
 // the public list until it is verified and `accept`ed here. Entries can also be
-// added directly (add-strength / add-video), listed at once. Everything goes
+// added directly (add-video), listed at once. Everything goes
 // through `wrangler d1 execute`. Each write also drops the page's cached blob
 // (server_stats key 'contest'), so the next view of /contest recomputes instead
 // of waiting out the 12-hour refresh.
@@ -14,18 +14,13 @@
 // keeps. `purge-contacts` clears every contact and message once the prizes are
 // paid, which is what the privacy policy promises.
 //
-// An entry names an ACCOUNT, never a user id typed by hand: a strong player is
-// found through the EGD/AGA record they linked in the app (by PIN, AGA id or the
-// linked display name), a video entrant through the leaderboard alias they picked
-// on the account they played. The user id is the account credential, so this
-// script prints none.
+// An entry names an ACCOUNT, never a user id typed by hand: a direct add finds
+// it through the leaderboard alias the entrant picked on the account they played.
+// The user id is the account credential, so this script prints none.
 //
 // Usage (from anywhere; one of --remote / --local is required):
 //   node auxiliary/contest_entries.mjs list                                   --remote
 //   node auxiliary/contest_entries.mjs accept --id 3 [--date YYYY-MM-DD]      --remote
-//   node auxiliary/contest_entries.mjs add-strength --egd 12345678            --remote
-//   node auxiliary/contest_entries.mjs add-strength --aga 12345               --remote
-//   node auxiliary/contest_entries.mjs add-strength --name "Jane Doe"         --remote
 //   node auxiliary/contest_entries.mjs add-video --alias "Brave Crimson Fox" \
 //        --url https://youtu.be/... --problems 60 [--views 120] [--quality 7.5] --remote
 //   node auxiliary/contest_entries.mjs set --id 3 [--views N] [--quality Q] [--problems N] [--url U] [--date YYYY-MM-DD] --remote
@@ -108,25 +103,6 @@ function d1(sql) {
 
 const DROP_CACHE = `DELETE FROM server_stats WHERE key = 'contest'`;
 
-function resolveStrengthAccount() {
-    let where;
-    if (opts.egd !== undefined) {
-        if (!/^\d+$/.test(opts.egd)) die('--egd must be a numeric PIN');
-        where = `egd_pin = ${sq(opts.egd)}`;
-    } else if (opts.aga !== undefined) {
-        if (!/^\d+$/.test(opts.aga)) die('--aga must be a numeric id');
-        where = `aga_id = ${sq(opts.aga)}`;
-    } else if (opts.name !== undefined) {
-        where = `display_name = ${sq(opts.name)} COLLATE NOCASE`;
-    } else die('add-strength needs --egd, --aga or --name');
-    const rows = d1(`SELECT user_id, display_name, egd_pin, aga_id FROM external_ids WHERE ${where}`);
-    if (!rows.length) die('no account has linked that EGD/AGA record — the player links it in the app first (menu → Account)');
-    if (rows.length > 1) die(`${rows.length} accounts match; use --egd or --aga`);
-    const r = rows[0];
-    console.log(`account: ${r.display_name} (${r.egd_pin ? `EGD ${r.egd_pin}` : `AGA ${r.aga_id}`})`);
-    return r.user_id;
-}
-
 function resolveVideoAccount() {
     const words = String(opts.alias || '').trim().split(/\s+/);
     if (words.length !== 3 || !words.every((w) => /^[A-Za-z]+$/.test(w))) {
@@ -191,9 +167,6 @@ switch (cmd) {
     case 'list':
         list();
         break;
-    case 'add-strength':
-        insert('strength', resolveStrengthAccount(), {});
-        break;
     case 'add-video': {
         const url = urlArg();
         const problems = intArg('problems', { min: 1 });
@@ -250,5 +223,5 @@ switch (cmd) {
         console.log('cache dropped; the next view of /contest recomputes');
         break;
     default:
-        die('commands: list, accept, add-strength, add-video, set, remove, refresh, purge-contacts (see the header of this file)');
+        die('commands: list, accept, add-video, set, remove, refresh, purge-contacts (see the header of this file)');
 }
