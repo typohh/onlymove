@@ -26,7 +26,7 @@ const DISCORD_NAME = 'ootakamoku';
 const STR = {
     en: {
         title: 'Content creator rewards 2026',
-        intro: 'Videos introducing OnlyMove to new players and showing how a strong player actually reads a problem. The three best win prizes.',
+        intro: 'Videos introducing OnlyMove to new players and showing how a strong player actually reads a problem. The three best submissions win prizes.',
         first: '1st', second: '2nd', third: '3rd',
         deadline: 'Entries close 31 December 2026, 23:59 UTC.',
         daysLeft: '{n} days left.',
@@ -83,7 +83,7 @@ const STR = {
     },
     zh: {
         title: '内容创作者奖励 2026',
-        intro: '向新棋手介绍 OnlyMove、展示强手如何真正计算一道题的视频。最出色的三部视频获得奖金。',
+        intro: '向新棋手介绍 OnlyMove、展示强手如何真正计算一道题的视频。最出色的三份参赛作品获得奖金。',
         first: '第一名', second: '第二名', third: '第三名',
         deadline: '截止时间：2026 年 12 月 31 日 23:59（UTC）。',
         daysLeft: '还剩 {n} 天。',
@@ -140,7 +140,7 @@ const STR = {
     },
     ja: {
         title: 'コンテンツクリエイター賞 2026',
-        intro: 'OnlyMove を新しいプレイヤーに紹介し、強い人が実際にどう問題を読むのかを伝える動画。優れた 3 本に賞金があります。',
+        intro: 'OnlyMove を新しいプレイヤーに紹介し、強い人が実際にどう問題を読むのかを伝える動画。最も優れた 3 件の応募に賞金があります。',
         first: '1 位', second: '2 位', third: '3 位',
         deadline: '締め切り：2026 年 12 月 31 日 23:59（UTC）。',
         daysLeft: '残り {n} 日。',
@@ -197,7 +197,7 @@ const STR = {
     },
     ko: {
         title: '콘텐츠 크리에이터 보상 2026',
-        intro: '새로운 기사들에게 OnlyMove를 소개하고, 강자가 실제로 문제를 어떻게 읽는지 보여 주는 영상. 가장 뛰어난 세 편에 상금을 드립니다.',
+        intro: '새로운 기사들에게 OnlyMove를 소개하고, 강자가 실제로 문제를 어떻게 읽는지 보여 주는 영상. 가장 뛰어난 참가작 세 편에 상금을 드립니다.',
         first: '1위', second: '2위', third: '3위',
         deadline: '마감: 2026년 12월 31일 23:59 (UTC).',
         daysLeft: '{n}일 남음.',
