@@ -25,27 +25,22 @@ const DISCORD_NAME = 'ootakamoku';
 
 const STR = {
     en: {
-        title: 'Contribution rewards 2026',
-        intro: 'Make a video solving OnlyMove problems and explaining your reading, with prizes for the best three.',
+        title: 'Content creator rewards 2026',
+        intro: 'Videos introduce OnlyMove to new players and show how a strong player actually reads a problem. The three best win prizes.',
         first: '1st', second: '2nd', third: '3rd',
         deadline: 'Entries close 31 December 2026, 23:59 UTC.',
         daysLeft: '{n} days left.',
         closed: 'Entries are closed.',
         criteriaH: 'Judged with roughly equal weight on',
-        howH: 'How to enter',
-        videoH: 'Content creators',
-        videoLead: 'Videos introduce OnlyMove to new players and show how a strong player actually reads a problem.',
-        videoWhat: 'Record yourself solving OnlyMove problems in a single session, thinking aloud and explaining how you solve each one, starting from a new account and climbing as high as you can.',
+        prizesH: 'Prizes',
+        videoH: 'What to record',
+        videoWhat: 'Record yourself solving OnlyMove problems in a single session on a new account, thinking aloud and explaining each one, climbing as high as you can.',
         vLang: 'Record in English, Chinese, Japanese or Korean: the four languages OnlyMove itself is available in, so viewers can follow along in the app in the language they watched.',
         vCrit1: 'Views',
         vCrit2: 'The quality of the explanation, scored by the organiser',
         vCrit3: 'The highest OnlyMove rank reached during the video',
-        vStep1: 'Before recording, create a new account and, if you like, pick an alias for it (menu → Account).',
-        vStep2: 'Solve in one session, thinking aloud and explaining each problem.',
-        vStep3: 'Publish the video and fill in the [entry form] below with the link and how many problems you solved in it.',
-        vLink: 'If you want, the organiser can link your video from the app for an appropriate strength audience. Tick the box in the entry form.',
         judgingH: 'Judging',
-        judging: 'Entries are judged by Henry Hemming, the author of OnlyMove, on the criteria above. Earlier entries are slightly favoured, counted from the day they appear on the list below. Entries the organiser considers dishonest are disqualified.',
+        judging: 'Entries are judged by Henry Hemming, the author of OnlyMove, on the criteria above. Earlier entries are slightly favoured, counted from the day they appear on the list of entries. Entries the organiser considers dishonest are disqualified.',
         contact: 'Send questions to {name} on {discord}.',
         formH: 'Enter',
         formAccount: 'Account code',
@@ -53,14 +48,14 @@ const STR = {
         formAccountNone: 'No OnlyMove account in this browser. Enter the code shown in the app under menu → Account.',
         acctChecking: 'Checking the account…',
         acctAlias: 'Listed as {alias}.',
-        acctNoAlias: 'This account has no alias, so it will be listed as Anonymous. You can pick one in the app (menu → Account).',
+        acctNoAlias: 'Listed as Anonymous.',
         acctHidden: 'This account\'s profile is hidden, so it will be listed as Anonymous.',
         acctInvalid: 'That is not a valid account code.',
         formUrl: 'Video link',
         formProblems: 'Problems solved in the video',
         formLanguage: 'Language of the video',
         langEn: 'English', langZh: 'Chinese', langJa: 'Japanese', langKo: 'Korean',
-        formAppLink: 'The organiser may link this video from the app',
+        formAppLink: 'The organiser may link this video from the app, for players of a suitable strength',
         formContact: 'How to reach you about prizes',
         contactWhatsapp: 'WhatsApp', contactDiscord: 'Discord', contactEmail: 'Email',
         phWhatsapp: 'Phone number, e.g. +44 7700 900123', phDiscord: 'Discord username', phEmail: 'name@example.com',
@@ -68,7 +63,7 @@ const STR = {
         formMessage: 'Message to the organiser (optional)',
         formSubmit: 'Submit entry',
         formSending: 'Sending…',
-        okNew: 'Received. The organiser will verify your entry and add it to the list below.',
+        okNew: 'Received. The organiser will verify your entry and add it to the list of entries.',
         okReplaced: 'Received. This replaces your earlier submission.',
         okListed: 'Received. Your entry is already on the list, so this updates your contact details, message and app-link choice. Ask the organiser to change anything else.',
         errContact: 'The contact detail does not look right for the chosen method.',
@@ -88,27 +83,22 @@ const STR = {
         dan: '{n} dan', kyu: '{n} kyu',
     },
     zh: {
-        title: '贡献奖励 2026',
-        intro: '录制解答 OnlyMove 题目并讲解思路的视频，最出色的三位获得奖金。',
+        title: '内容创作者奖励 2026',
+        intro: '视频能向新棋手介绍 OnlyMove，并展示强手如何真正地计算一道题。最出色的三部视频获得奖金。',
         first: '第一名', second: '第二名', third: '第三名',
         deadline: '截止时间：2026 年 12 月 31 日 23:59（UTC）。',
         daysLeft: '还剩 {n} 天。',
         closed: '参赛已截止。',
         criteriaH: '评判时大致同等考虑',
-        howH: '参加方法',
-        videoH: '内容创作者',
-        videoLead: '视频能向新棋手介绍 OnlyMove，并展示强手如何真正地计算一道题。',
-        videoWhat: '录制你在一次连续的时段内解答 OnlyMove 题目的过程，边想边说，讲解每道题的解法；从新账户开始，尽可能攀升到更高的段位。',
+        prizesH: '奖金',
+        videoH: '录制内容',
+        videoWhat: '在一次连续的时段内，用新账户录制你解答 OnlyMove 题目的过程，边想边说，讲解每道题，尽可能攀升到更高的段位。',
         vLang: '视频可使用英语、中文、日语或韩语录制，也就是 OnlyMove 本身支持的四种语言，这样观众可以在应用中以同一种语言跟着练习。',
         vCrit1: '观看次数',
         vCrit2: '讲解质量，由组织者评分',
         vCrit3: '视频中达到的最高 OnlyMove 段位',
-        vStep1: '录制之前注册新账户，如果愿意，可为其选择一个别名（菜单 → 账户）。',
-        vStep2: '在一次连续的时段内解题，边想边说，讲解每道题。',
-        vStep3: '发布视频，并在下方的[参赛表格]中填写链接以及视频中解答的题目数量。',
-        vLink: '如果你愿意，组织者可以在应用中向棋力合适的观众推荐你的视频。请在参赛表格中勾选相应选项。',
         judgingH: '评判',
-        judging: '由 OnlyMove 作者 Henry Hemming 依据上述标准评判。较早参加者略有优先，以出现在下方列表中的日期为准。组织者认为不诚实的参赛将被取消资格。',
+        judging: '由 OnlyMove 作者 Henry Hemming 依据上述标准评判。较早参加者略有优先，以出现在参赛列表中的日期为准。组织者认为不诚实的参赛将被取消资格。',
         contact: '如有问题，请在 {discord} 上联系 {name}。',
         formH: '参赛',
         formAccount: '账户代码',
@@ -116,14 +106,14 @@ const STR = {
         formAccountNone: '此浏览器中没有 OnlyMove 账户。请输入应用中“菜单 → 账户”显示的代码。',
         acctChecking: '正在检查账户……',
         acctAlias: '将以“{alias}”列出。',
-        acctNoAlias: '此账户没有别名，将以“匿名”列出。你可以在应用中选择别名（菜单 → 账户）。',
+        acctNoAlias: '将以“匿名”列出。',
         acctHidden: '此账户的个人资料已隐藏，将以“匿名”列出。',
         acctInvalid: '账户代码无效。',
         formUrl: '视频链接',
         formProblems: '视频中解答的题目数量',
         formLanguage: '视频语言',
         langEn: '英语', langZh: '中文', langJa: '日语', langKo: '韩语',
-        formAppLink: '组织者可以在应用中推荐此视频',
+        formAppLink: '组织者可以在应用中向棋力合适的棋手推荐此视频',
         formContact: '领奖联系方式',
         contactWhatsapp: 'WhatsApp', contactDiscord: 'Discord', contactEmail: '电子邮件',
         phWhatsapp: '电话号码，例如 +86 138 0000 0000', phDiscord: 'Discord 用户名', phEmail: 'name@example.com',
@@ -131,7 +121,7 @@ const STR = {
         formMessage: '给组织者的留言（可选）',
         formSubmit: '提交参赛',
         formSending: '正在发送……',
-        okNew: '已收到。组织者核实后会将你加入下方列表。',
+        okNew: '已收到。组织者核实后会将你加入参赛列表。',
         okReplaced: '已收到。此次提交将替换你之前的提交。',
         okListed: '已收到。你已在列表中，此次提交更新了联系方式、留言和应用推荐选项。如需更改其他内容，请联系组织者。',
         errContact: '联系方式与所选方式不符，请检查。',
@@ -151,27 +141,22 @@ const STR = {
         dan: '{n} 段', kyu: '{n} 级',
     },
     ja: {
-        title: '貢献者リワード 2026',
-        intro: 'OnlyMove の問題を解き、読みを解説する動画を作ってください。上位 3 名に賞金があります。',
+        title: 'コンテンツクリエイター賞 2026',
+        intro: '動画は OnlyMove を新しいプレイヤーに紹介し、強い人が実際にどう問題を読むのかを伝えます。優れた 3 本に賞金があります。',
         first: '1 位', second: '2 位', third: '3 位',
         deadline: '締め切り：2026 年 12 月 31 日 23:59（UTC）。',
         daysLeft: '残り {n} 日。',
         closed: '受付は終了しました。',
         criteriaH: '次をほぼ同じ重みで審査します',
-        howH: '参加方法',
-        videoH: 'コンテンツクリエイター',
-        videoLead: '動画は OnlyMove を新しいプレイヤーに紹介し、強い人が実際にどう問題を読むのかを伝えます。',
-        videoWhat: '1 回のセッションで OnlyMove の問題を解く様子を、考えを声に出して解き方を説明しながら録画してください。新しいアカウントから始めて、できるだけ高いランクまで上がってください。',
+        prizesH: '賞金',
+        videoH: '録画する内容',
+        videoWhat: '新しいアカウントで、1 回のセッションで OnlyMove の問題を解く様子を、考えを声に出して各問題を説明しながら録画し、できるだけ高いランクまで上がってください。',
         vLang: '動画は英語・中国語・日本語・韓国語のいずれかで録画してください。OnlyMove 自体が対応している 4 言語なので、視聴者は同じ言語のアプリで一緒に解くことができます。',
         vCrit1: '再生回数',
         vCrit2: '解説の質（主催者が採点）',
         vCrit3: '動画中に到達した最高 OnlyMove ランク',
-        vStep1: '録画の前に新しいアカウントを作り、必要なら別名を選びます（メニュー → アカウント）。',
-        vStep2: '1 回のセッションで、考えを声に出し、各問題を説明しながら解きます。',
-        vStep3: '動画を公開し、下の[応募フォーム]にリンクと動画内で解いた問題数を記入します。',
-        vLink: '希望すれば、棋力の合う視聴者向けにアプリから動画を紹介できます。応募フォームのチェックボックスを選んでください。',
         judgingH: '審査',
-        judging: 'OnlyMove の作者 Henry Hemming が上記の基準で審査します。早い参加がやや有利で、下の一覧に掲載された日を基準とします。不正と判断した応募は失格とします。',
+        judging: 'OnlyMove の作者 Henry Hemming が上記の基準で審査します。早い参加がやや有利で、応募一覧に掲載された日を基準とします。不正と判断した応募は失格とします。',
         contact: 'ご質問は {discord} で {name} までお送りください。',
         formH: '応募する',
         formAccount: 'アカウントコード',
@@ -179,14 +164,14 @@ const STR = {
         formAccountNone: 'このブラウザには OnlyMove のアカウントがありません。アプリの「メニュー → アカウント」に表示されるコードを入力してください。',
         acctChecking: 'アカウントを確認しています…',
         acctAlias: '「{alias}」として掲載されます。',
-        acctNoAlias: 'このアカウントには別名がないため、「匿名」として掲載されます。別名はアプリで選べます（メニュー → アカウント）。',
+        acctNoAlias: '「匿名」として掲載されます。',
         acctHidden: 'このアカウントのプロフィールは非公開のため、「匿名」として掲載されます。',
         acctInvalid: 'アカウントコードが無効です。',
         formUrl: '動画のリンク',
         formProblems: '動画内で解いた問題数',
         formLanguage: '動画の言語',
         langEn: '英語', langZh: '中国語', langJa: '日本語', langKo: '韓国語',
-        formAppLink: 'アプリからこの動画を紹介してもよい',
+        formAppLink: 'アプリから棋力の合うプレイヤーにこの動画を紹介してもよい',
         formContact: '賞金についての連絡先',
         contactWhatsapp: 'WhatsApp', contactDiscord: 'Discord', contactEmail: 'メール',
         phWhatsapp: '電話番号（例：+81 90 1234 5678）', phDiscord: 'Discord のユーザー名', phEmail: 'name@example.com',
@@ -194,7 +179,7 @@ const STR = {
         formMessage: '主催者へのメッセージ（任意）',
         formSubmit: '応募する',
         formSending: '送信しています…',
-        okNew: '受け付けました。主催者が確認したうえで、下の一覧に追加します。',
+        okNew: '受け付けました。主催者が確認したうえで、応募一覧に追加します。',
         okReplaced: '受け付けました。以前の応募を置き換えます。',
         okListed: '受け付けました。すでに一覧に掲載されているため、連絡先、メッセージ、アプリでの紹介の可否を更新しました。その他の変更は主催者にご連絡ください。',
         errContact: '選んだ連絡方法に対して、連絡先の形式が正しくないようです。',
@@ -214,27 +199,22 @@ const STR = {
         dan: '{n} 段', kyu: '{n} 級',
     },
     ko: {
-        title: '기여 보상 2026',
-        intro: 'OnlyMove 문제를 풀며 수읽기를 설명하는 영상을 만들어 주세요. 상위 세 편에 상금을 드립니다.',
+        title: '콘텐츠 크리에이터 보상 2026',
+        intro: '영상은 새로운 기사들에게 OnlyMove를 소개하고, 강자가 실제로 문제를 어떻게 읽는지 보여 줍니다. 가장 뛰어난 세 편에 상금을 드립니다.',
         first: '1위', second: '2위', third: '3위',
         deadline: '마감: 2026년 12월 31일 23:59 (UTC).',
         daysLeft: '{n}일 남음.',
         closed: '참가가 마감되었습니다.',
         criteriaH: '다음을 대략 같은 비중으로 심사합니다',
-        howH: '참가 방법',
-        videoH: '콘텐츠 크리에이터',
-        videoLead: '영상은 새로운 기사들에게 OnlyMove를 소개하고, 강자가 실제로 문제를 어떻게 읽는지 보여 줍니다.',
-        videoWhat: '한 번의 세션에서 OnlyMove 문제를 푸는 모습을, 생각을 소리 내어 말하고 풀이를 설명하면서 녹화해 주세요. 새 계정으로 시작해 가능한 한 높은 랭크까지 올라가 보세요.',
+        prizesH: '상금',
+        videoH: '녹화할 내용',
+        videoWhat: '새 계정으로 한 번의 세션에서 OnlyMove 문제를 푸는 모습을, 생각을 소리 내어 말하며 각 문제를 설명하면서 녹화하고, 가능한 한 높은 랭크까지 올라가 보세요.',
         vLang: '영상은 영어, 중국어, 일본어, 한국어 중 하나로 녹화해 주세요. OnlyMove가 지원하는 네 가지 언어이므로 시청자가 같은 언어의 앱에서 함께 따라 풀 수 있습니다.',
         vCrit1: '조회수',
         vCrit2: '해설의 질(주최자가 채점)',
         vCrit3: '영상 중 도달한 최고 OnlyMove 랭크',
-        vStep1: '녹화하기 전에 새 계정을 만들고, 원하면 별명을 고릅니다(메뉴 → 계정).',
-        vStep2: '한 번의 세션에서 생각을 소리 내어 말하고 각 문제를 설명하며 풉니다.',
-        vStep3: '영상을 공개하고 아래 [참가 신청서]에 링크와 영상에서 푼 문제 수를 적습니다.',
-        vLink: '원하시면 기력이 맞는 시청자들을 위해 앱에서 영상을 소개할 수 있습니다. 참가 신청서의 확인란을 선택해 주세요.',
         judgingH: '심사',
-        judging: 'OnlyMove 제작자 Henry Hemming이 위 기준에 따라 심사합니다. 먼저 참가할수록 약간 유리하며, 아래 목록에 오른 날을 기준으로 합니다. 주최자가 부정하다고 판단한 참가는 실격 처리됩니다.',
+        judging: 'OnlyMove 제작자 Henry Hemming이 위 기준에 따라 심사합니다. 먼저 참가할수록 약간 유리하며, 참가 목록에 오른 날을 기준으로 합니다. 주최자가 부정하다고 판단한 참가는 실격 처리됩니다.',
         contact: '문의는 {discord}에서 {name}에게 보내 주세요.',
         formH: '참가 신청',
         formAccount: '계정 코드',
@@ -242,14 +222,14 @@ const STR = {
         formAccountNone: '이 브라우저에는 OnlyMove 계정이 없습니다. 앱의 메뉴 → 계정에 표시된 코드를 입력하세요.',
         acctChecking: '계정을 확인하는 중…',
         acctAlias: '"{alias}"(으)로 표시됩니다.',
-        acctNoAlias: '이 계정에는 별명이 없어 "익명"으로 표시됩니다. 앱에서 별명을 고를 수 있습니다(메뉴 → 계정).',
+        acctNoAlias: '"익명"으로 표시됩니다.',
         acctHidden: '이 계정의 프로필은 숨김 상태라 "익명"으로 표시됩니다.',
         acctInvalid: '잘못된 계정 코드입니다.',
         formUrl: '영상 링크',
         formProblems: '영상에서 푼 문제 수',
         formLanguage: '영상 언어',
         langEn: '영어', langZh: '중국어', langJa: '일본어', langKo: '한국어',
-        formAppLink: '주최자가 앱에서 이 영상을 소개해도 됩니다',
+        formAppLink: '주최자가 앱에서 기력이 맞는 기사들에게 이 영상을 소개해도 됩니다',
         formContact: '상금 관련 연락처',
         contactWhatsapp: 'WhatsApp', contactDiscord: 'Discord', contactEmail: '이메일',
         phWhatsapp: '전화번호, 예: +82 10 1234 5678', phDiscord: 'Discord 사용자 이름', phEmail: 'name@example.com',
@@ -257,7 +237,7 @@ const STR = {
         formMessage: '주최자에게 남길 메시지(선택)',
         formSubmit: '신청하기',
         formSending: '보내는 중…',
-        okNew: '접수되었습니다. 주최자가 확인한 뒤 아래 목록에 추가합니다.',
+        okNew: '접수되었습니다. 주최자가 확인한 뒤 참가 목록에 추가합니다.',
         okReplaced: '접수되었습니다. 이전에 보낸 신청을 대체합니다.',
         okListed: '접수되었습니다. 이미 목록에 올라 있으므로 연락처, 메시지, 앱 소개 여부를 갱신했습니다. 그 밖의 변경은 주최자에게 요청해 주세요.',
         errContact: '선택한 연락 방법에 맞지 않는 연락처입니다. 확인해 주세요.',
@@ -341,8 +321,8 @@ function renderPage(view) {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>onlymove — Contribution rewards 2026</title>
-<meta name="description" content="Prizes for strong EGF/AGA players who climb the OnlyMove ranks, and for videos solving OnlyMove problems while explaining the reading. Until the end of 2026.">
+<title>onlymove — Content creator rewards 2026</title>
+<meta name="description" content="Prizes for videos solving OnlyMove problems while explaining the reading. Until the end of 2026.">
 <link rel="canonical" href="https://onlymove.net/contest">
 <style>
   ${baseCss(760)}
@@ -371,7 +351,7 @@ function renderPage(view) {
             mask-image: linear-gradient(170deg, #000 10%, transparent 78%);
   }
   .hero h1 { font-size: clamp(2.2rem, 7vw, 3.3rem); line-height: 1.05; margin: 0 0 .7rem; letter-spacing: -.015em; }
-  .hero .intro { font-size: 1.15rem; margin: 0 0 1.8rem; max-width: 34em; }
+  .hero .intro { font-size: 1.15rem; margin: 0 0 1.8rem; }
   .prizes { display: grid; grid-template-columns: minmax(0, 24rem); gap: 1rem; margin: 0 0 1.2rem; }
   .prize {
     display: grid; grid-template-columns: auto 1fr; column-gap: .9rem; align-items: center;
@@ -395,15 +375,6 @@ function renderPage(view) {
                    font-size: .97rem; font-weight: 500; line-height: 1.45; }
   a.inline { color: inherit; text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: .18em; }
   a.inline:hover { color: var(--accent-hi); }
-
-  /* how to enter: a real sequence, so numbered */
-  ol.steps { counter-reset: step; list-style: none; padding: 0; margin: .4rem 0 .8rem; }
-  ol.steps li { counter-increment: step; position: relative; padding: .1rem 0 .7rem 2.4rem; margin: 0; }
-  ol.steps li::before {
-    content: counter(step); position: absolute; left: 0; top: .05rem; width: 1.6rem; height: 1.6rem;
-    border-radius: 50%; border: 1px solid var(--hairline); display: grid; place-items: center;
-    font-size: .85rem; font-weight: 600; color: var(--ink-muted); font-variant-numeric: tabular-nums;
-  }
 
   .judging { padding: 1.1rem 1.25rem; border-left: 3px solid var(--accent); background: var(--surface); border-radius: 0 10px 10px 0; }
   .judging p { margin: 0 0 .6rem; }
@@ -472,21 +443,32 @@ function renderPage(view) {
   <h1 id="h1"></h1>
   <p class="intro" id="intro"></p>
   <div class="prizes">
-    <a class="prize" href="#videos">${stone('white', 34)}<span class="cat" id="pV"></span><span class="amounts" id="pVa"></span></a>
+    <a class="prize" href="#videos">${stone('white', 34)}<span class="cat" id="prizesH"></span><span class="amounts" id="pVa"></span></a>
   </div>
   <p class="deadline"><span id="deadline"></span> <strong id="daysLeft"></strong></p>
 </header>
 
+<section>
+  <h2 id="entriesH"></h2>
+  <div class="tbl" id="videoList"></div>
+  <p class="muted note" id="updated"></p>
+</section>
+
 <section id="videos">
   <h2>${stone('white', 26)}<span id="videoH"></span></h2>
-  <p class="lead" id="videoLead"></p>
   <p id="videoWhat"></p>
   <p id="vLang"></p>
   <h3 id="vCritH"></h3>
   <ul class="criteria"><li id="vCrit1"></li><li id="vCrit2"></li><li id="vCrit3"></li></ul>
-  <h3 id="vHowH"></h3>
-  <ol class="steps"><li id="vStep1"></li><li id="vStep2"></li><li id="vStep3"></li></ol>
-  <p class="muted" id="vLink"></p>
+</section>
+
+
+<section>
+  <h2 id="judgingH"></h2>
+  <div class="judging">
+    <p id="judging"></p>
+    <p id="contact"></p>
+  </div>
 </section>
 
 <section id="enter">
@@ -532,19 +514,6 @@ function renderPage(view) {
   </form>
 </section>
 
-<section>
-  <h2 id="judgingH"></h2>
-  <div class="judging">
-    <p id="judging"></p>
-    <p id="contact"></p>
-  </div>
-</section>
-
-<section>
-  <h2 id="entriesH"></h2>
-  <div class="tbl" id="videoList"></div>
-  <p class="muted note" id="updated"></p>
-</section>
 <script>
 (function () {
   var STR = ${strJson};
@@ -580,13 +549,10 @@ function renderPage(view) {
     return t('kyu', { n: -Math.floor(v) });
   }
 
-  ['intro', 'deadline', 'videoH', 'videoLead',
-   'videoWhat', 'vLang', 'vCrit1', 'vCrit2', 'vCrit3', 'vStep1', 'vStep2', 'vStep3', 'vLink',
+  ['intro', 'deadline', 'prizesH', 'videoH', 'videoWhat', 'vLang', 'vCrit1', 'vCrit2', 'vCrit3',
    'judgingH', 'judging', 'entriesH'].forEach(function (k) { set(k); });
   set('h1', 'title');
-  set('pV', 'videoH');
   set('vCritH', 'criteriaH');
-  set('vHowH', 'howH');
   var amounts = esc(t('first')) + ' <b>100 €</b>&emsp;' + esc(t('second')) + ' <b>50 €</b>&emsp;' + esc(t('third')) + ' <b>25 €</b>';
   $('pVa').innerHTML = amounts;
   var days = Math.ceil((DEADLINE - Date.now()) / 86400000);
@@ -621,9 +587,6 @@ function renderPage(view) {
   }
   $('fMethod').addEventListener('change', syncMethod);
   syncMethod();
-
-  // The step's bracketed words link to the form.
-  $('vStep3').innerHTML = esc(t('vStep3')).replace(/\\[(.+?)\\]/, '<a class="inline" href="#enter">$1</a>');
 
   var stored = null;
   try { stored = localStorage.getItem('userId'); } catch (e) { stored = null; }
