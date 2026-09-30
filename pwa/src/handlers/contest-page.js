@@ -485,7 +485,7 @@ function renderPage(view) {
     <div>
       <label class="lbl" for="fContact" id="formContact"></label>
       <div class="row2">
-        <select id="fMethod" aria-label="Contact method"><option value="whatsapp"></option><option value="discord"></option><option value="email"></option></select>
+        <select id="fMethod" aria-label="Contact method"><option value="email"></option><option value="whatsapp"></option><option value="discord"></option></select>
         <input type="text" id="fContact" maxlength="254">
       </div>
       <p class="hint" id="formContactNote"></p>
