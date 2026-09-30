@@ -739,12 +739,6 @@ input, textarea, [contenteditable],
     list-style: none;
 }
 
-.motif-bubble-empty {
-    margin: 0.25em 0;
-    line-height: 1.3;
-    color: var(--ink-muted);
-}
-
 /* A small hanging dot instead of the browser bullet, so the list matches the
    rest of the shell. */
 .motif-bubble-list li {

@@ -141,8 +141,8 @@ function topMotifs(problem) {
  * (flaggedMotifCategories — named tails whose own-attempt reading clears the
  * shared confidence gate), minus the
  * `strong` direction, strongest first, same MAX_MOTIFS cap as the
- * problem list. Empty whenever nothing is flagged or the model is absent;
- * syncMotifBubble then shows the "none detected" line.
+ * problem list. Empty whenever nothing is flagged or the model is absent,
+ * which is what keeps the bubble silent rather than showing a "none found".
  */
 function trainingFocusMotifs() {
     const labels = state.embeddingLabels;
@@ -254,8 +254,8 @@ export function populateMotifBubble(problem) {
  * Derive content and visibility from current state; safe to call on every UI
  * refresh. Review mode shows the reviewed problem's motifs, and only at the
  * root position (no motifs exist for deeper nodes). Solving mode shows the
- * training-focus list, or a "none detected" line once the labels are loaded
- * and nothing clears the bar. An empty review-mode list shows nothing.
+ * training-focus list. Linked play and empty lists show nothing — there is
+ * deliberately no empty-state text.
  */
 export function syncMotifBubble() {
     const bubble = el('motif-bubble');
@@ -272,25 +272,15 @@ export function syncMotifBubble() {
         motifs = trainingFocusMotifs();
         titleKey = 'trainingFocusTitle';
     }
-    // The training-focus box stays up when empty, saying so, rather than
-    // vanishing — an absent box reads as a missing feature, not a clean bill.
-    const empty = motifs.length === 0
-                && titleKey === 'trainingFocusTitle' && !!state.embeddingLabels;
-    const show = motifs.length > 0 || empty;
+    const show = motifs.length > 0;
 
     // Rebuild the DOM only when the content actually changed — this runs on
     // every repaint.
-    const key = show ? `${titleKey}|${empty ? '∅' : motifs.map((m) => m.text).join('|')}` : null;
+    const key = show ? `${titleKey}|${motifs.map((m) => m.text).join('|')}` : null;
     if (show && key !== _renderedKey) {
         const tabLabel = el('motif-bubble-tab-label');
         if (tabLabel) tabLabel.textContent = getTerm(titleKey);
         content.textContent = '';
-        if (empty) {
-            const p = document.createElement('p');
-            p.className = 'motif-bubble-empty';
-            p.textContent = getTerm('trainingFocusNone');
-            content.appendChild(p);
-        }
         const ul = document.createElement('ul');
         ul.className = 'motif-bubble-list';
         for (const m of motifs) {
@@ -304,7 +294,7 @@ export function syncMotifBubble() {
             li.appendChild(span);
             ul.appendChild(li);
         }
-        if (!empty) content.appendChild(ul);
+        content.appendChild(ul);
         _renderedKey = key;
     }
 
@@ -316,7 +306,7 @@ export function syncMotifBubble() {
         refreshMotifBubbleMetrics();   // (re)anchor below the buttons in portrait
         // First-appearance announcement for the training-focus list; the hook
         // is once-ever and self-gating, so calling it per repaint is fine.
-        if (titleKey === 'trainingFocusTitle' && !empty) onTrainingFocusShown();
+        if (titleKey === 'trainingFocusTitle') onTrainingFocusShown();
     }
 }
 
