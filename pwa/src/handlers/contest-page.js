@@ -3,7 +3,8 @@
 // GET /contest — the contribution-rewards page: the rules of the 2026 content
 // creators category (videos) and every entry so far, rendered from the
 // cached contest blob (src/contest.js), which recomputes on request once it is 12
-// hours old. Localized on the CLIENT from navigator.language like /statistics
+// hours old (so an entrant's rename or hide shows without an organiser edit);
+// the page prints no update time. Localized on the CLIENT from navigator.language like /statistics
 // and /leaderboard, so one response serves every viewer.
 //
 // The page ranks nothing: entries are listed in submission order, the order the
@@ -36,10 +37,10 @@ const STR = {
         videoH: 'What to record',
         videoWhat: 'Record yourself solving OnlyMove problems in a single session on a new account, thinking aloud and explaining each one, climbing as high as you can.',
         vLang: 'Record in English, Chinese, Japanese or Korean: the four languages OnlyMove itself is available in, so viewers can follow along in the app in the language they watched.',
-        vCrit1: 'Views',
+        vCrit1: 'Views at the end of the contest',
         vCrit2: 'The quality of the explanation, scored by the organiser',
         vCrit3: 'The highest OnlyMove rank reached during the video',
-        judging: 'Henry Hemming, the author of OnlyMove, judges the entries on the criteria above and updates their view counts and quality scores, which are revised until the deadline.',
+        judging: 'Entries are judged by Henry Hemming, the author of OnlyMove. I try to keep the view counts up to date, and may adjust the explanation scores until the deadline.',
         contact: 'Send questions to {name} on {discord}.',
         formH: 'Enter',
         formAccount: 'Account code',
@@ -72,8 +73,6 @@ const STR = {
         errMaint: 'The site is briefly under maintenance. Try again in a few minutes.',
         errServer: 'The entry could not be sent. Try again later, or contact the organiser on Discord.',
         entriesH: 'Entries so far',
-        updated: 'Updated {ago}. Every figure on this page is updated every 12 hours.',
-        agoJustNow: 'just now', agoMinutes: '{n} min ago', agoHours: '{n} h ago', agoDays: '{n} d ago',
         colSubmitted: 'Entered', colPlayer: 'Player',
         colProblems: 'Problems', colVideo: 'Video', colViews: 'Views', colQuality: 'Quality', colPeak: 'Highest OnlyMove',
         watch: 'Watch', anonymous: 'Anonymous',
@@ -93,10 +92,10 @@ const STR = {
         videoH: '录制内容',
         videoWhat: '在一次连续的时段内，用新账户录制你解答 OnlyMove 题目的过程，边想边说，讲解每道题，尽可能攀升到更高的段位。',
         vLang: '视频可使用英语、中文、日语或韩语录制，也就是 OnlyMove 本身支持的四种语言，这样观众可以在应用中以同一种语言跟着练习。',
-        vCrit1: '观看次数',
+        vCrit1: '活动结束时的观看次数',
         vCrit2: '讲解质量，由组织者评分',
         vCrit3: '视频中达到的最高 OnlyMove 段位',
-        judging: 'OnlyMove 作者 Henry Hemming 依据上述标准评判参赛作品，并更新观看次数和质量评分，直至截止。',
+        judging: '参赛作品由 OnlyMove 作者 Henry Hemming 评判。我会尽量及时更新观看次数，截止前也可能调整讲解评分。',
         contact: '如有问题，请在 {discord} 上联系 {name}。',
         formH: '参赛',
         formAccount: '账户代码',
@@ -129,8 +128,6 @@ const STR = {
         errMaint: '网站正在短暂维护，请几分钟后重试。',
         errServer: '无法发送参赛信息。请稍后重试，或在 Discord 上联系组织者。',
         entriesH: '目前的参赛',
-        updated: '更新于 {ago}。本页所有数值每 12 小时更新一次。',
-        agoJustNow: '刚刚', agoMinutes: '{n} 分钟前', agoHours: '{n} 小时前', agoDays: '{n} 天前',
         colSubmitted: '参加日期', colPlayer: '棋手',
         colProblems: '题目数', colVideo: '视频', colViews: '观看', colQuality: '质量', colPeak: 'OnlyMove 最高',
         watch: '观看', anonymous: '匿名',
@@ -150,10 +147,10 @@ const STR = {
         videoH: '録画する内容',
         videoWhat: '新しいアカウントで、1 回のセッションで OnlyMove の問題を解く様子を、考えを声に出して各問題を説明しながら録画し、できるだけ高いランクまで上がってください。',
         vLang: '動画は英語・中国語・日本語・韓国語のいずれかで録画してください。OnlyMove 自体が対応している 4 言語なので、視聴者は同じ言語のアプリで一緒に解くことができます。',
-        vCrit1: '再生回数',
+        vCrit1: 'コンテスト終了時の再生回数',
         vCrit2: '解説の質（主催者が採点）',
         vCrit3: '動画中に到達した最高 OnlyMove ランク',
-        judging: 'OnlyMove の作者 Henry Hemming が上記の基準で審査し、再生回数と質の評価を締め切りまで更新します。',
+        judging: '審査は OnlyMove の作者 Henry Hemming が行います。再生回数はなるべく最新に保ち、締め切りまでは解説の評価を見直すこともあります。',
         contact: 'ご質問は {discord} で {name} までお送りください。',
         formH: '応募する',
         formAccount: 'アカウントコード',
@@ -186,8 +183,6 @@ const STR = {
         errMaint: 'サイトは一時的にメンテナンス中です。数分後に再度お試しください。',
         errServer: '応募を送信できませんでした。後でもう一度試すか、Discord で主催者に連絡してください。',
         entriesH: 'これまでの応募',
-        updated: '更新 {ago}。このページのすべての数値は 12 時間ごとに更新されます。',
-        agoJustNow: 'たった今', agoMinutes: '{n} 分前', agoHours: '{n} 時間前', agoDays: '{n} 日前',
         colSubmitted: '応募日', colPlayer: 'プレイヤー',
         colProblems: '問題数', colVideo: '動画', colViews: '再生', colQuality: '質', colPeak: 'OnlyMove 最高',
         watch: '見る', anonymous: '匿名',
@@ -207,10 +202,10 @@ const STR = {
         videoH: '녹화할 내용',
         videoWhat: '새 계정으로 한 번의 세션에서 OnlyMove 문제를 푸는 모습을, 생각을 소리 내어 말하며 각 문제를 설명하면서 녹화하고, 가능한 한 높은 랭크까지 올라가 보세요.',
         vLang: '영상은 영어, 중국어, 일본어, 한국어 중 하나로 녹화해 주세요. OnlyMove가 지원하는 네 가지 언어이므로 시청자가 같은 언어의 앱에서 함께 따라 풀 수 있습니다.',
-        vCrit1: '조회수',
+        vCrit1: '대회 종료 시점의 조회수',
         vCrit2: '해설의 질(주최자가 채점)',
         vCrit3: '영상 중 도달한 최고 OnlyMove 랭크',
-        judging: 'OnlyMove 제작자 Henry Hemming이 위 기준에 따라 심사하며, 조회수와 질 점수를 마감 전까지 갱신합니다.',
+        judging: '심사는 OnlyMove 제작자 Henry Hemming이 합니다. 조회수는 되도록 최신으로 유지하고, 마감 전까지 해설 점수를 조정할 수도 있습니다.',
         contact: '문의는 {discord}에서 {name}에게 보내 주세요.',
         formH: '참가 신청',
         formAccount: '계정 코드',
@@ -243,8 +238,6 @@ const STR = {
         errMaint: '사이트가 잠시 점검 중입니다. 몇 분 뒤에 다시 시도해 주세요.',
         errServer: '신청을 보내지 못했습니다. 나중에 다시 시도하거나 Discord로 주최자에게 연락해 주세요.',
         entriesH: '지금까지의 참가',
-        updated: '{ago} 업데이트. 이 페이지의 모든 수치는 12시간마다 갱신됩니다.',
-        agoJustNow: '방금 전', agoMinutes: '{n}분 전', agoHours: '{n}시간 전', agoDays: '{n}일 전',
         colSubmitted: '참가일', colPlayer: '기사',
         colProblems: '문제 수', colVideo: '영상', colViews: '조회수', colQuality: '질', colPeak: 'OnlyMove 최고',
         watch: '보기', anonymous: '익명',
@@ -284,7 +277,6 @@ function buildView(data) {
         date: typeof e.listedAt === 'string' ? e.listedAt.slice(0, 10) : '',
     });
     return {
-        computedAt: data.computedAt,
         video: (data.video || []).map((e) => ({
             ...who(e),
             url: typeof e.url === 'string' && /^https:\/\//.test(e.url) ? e.url : null,
@@ -371,8 +363,7 @@ function renderPage(view) {
   a.inline { color: inherit; text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: .18em; }
   a.inline:hover { color: var(--accent-hi); }
 
-  /* the fine print closing the page: when the figures update, how entries are
-     judged, where to ask */
+  /* the fine print closing the page: how entries are judged, where to ask */
   .fine { margin-top: 2.2rem; }
   .fine p { margin: 0 0 .5rem; }
 
@@ -500,7 +491,6 @@ function renderPage(view) {
 </section>
 
 <section class="fine muted">
-  <p id="updated"></p>
   <p id="judging"></p>
   <p id="contact"></p>
 </section>
@@ -688,15 +678,6 @@ function renderPage(view) {
 
   if (!VIEW) { $('videoList').innerHTML = '<p class="empty">' + esc(t('unavailable')) + '</p>'; linkBrand(); return; }
 
-  function ago(iso) {
-    var ms = Date.now() - Date.parse(iso);
-    if (!isFinite(ms) || ms < 60000) return t('agoJustNow');
-    var h = ms / 3600000;
-    if (h < 1) return t('agoMinutes', { n: Math.round(ms / 60000) });
-    if (h < 24) return t('agoHours', { n: Math.round(h) });
-    return t('agoDays', { n: Math.round(h / 24) });
-  }
-  $('updated').textContent = t('updated', { ago: ago(VIEW.computedAt) });
 
   function playerCell(r) {
     var label = r.name ? esc(r.name)
