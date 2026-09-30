@@ -202,6 +202,26 @@ export function displayOverlay(message, duration, callback, color = 'rgba(139, 0
     }
 }
 
+// The answer fade's blur is baked into the snapshot's pixels ONCE, at capture,
+// and only its opacity is animated. Animating a CSS blur radius re-rasterizes
+// the blurred layer every frame, which a browser without GPU compositing does
+// on the CPU at full board resolution; an opacity fade over a static bitmap is
+// cheap on either path. The blur runs at a fraction of the board's resolution
+// (the result is smooth, so the upscale loses nothing visible).
+const SNAPSHOT_BLUR_CSS_PX = 14;     // matches #board-wrapper.board-blurred
+const SNAPSHOT_DOWNSCALE = 4;
+
+const woodImages = new Map();
+function getWoodImage(url) {
+    let img = woodImages.get(url);
+    if (!img) {
+        img = new Image();
+        img.src = url;
+        woodImages.set(url, img);
+    }
+    return img;
+}
+
 function captureBoardSnapshot(boardWrapper) {
     if (!boardWrapper) return null;
     const canvases = Array.from(boardWrapper.querySelectorAll('canvas'))
@@ -209,25 +229,67 @@ function captureBoardSnapshot(boardWrapper) {
     if (!canvases.length) return null;
 
     const first = canvases[0];
-    const snapshot = document.createElement('canvas');
-    snapshot.width = first.width;
-    snapshot.height = first.height;
-    snapshot.className = 'board-snapshot';
+    // Device pixels per CSS pixel of the board canvases (WGo sizes them by
+    // devicePixelRatio and sets the CSS size to match).
+    const cssWidth = parseFloat(first.style.width) || first.clientWidth;
+    const pxPerCss = cssWidth ? first.width / cssWidth : (window.devicePixelRatio || 1);
 
-    // Copy matching wood background from .wgo-board so the snapshot is 100% opaque
+    const w = Math.max(1, Math.round(first.width / SNAPSHOT_DOWNSCALE));
+    const h = Math.max(1, Math.round(first.height / SNAPSHOT_DOWNSCALE));
+    const scale = w / first.width;
+
+    // The sharp board at reduced resolution: the wood (a CSS background on
+    // .wgo-board, drawn here at its natural CSS size from the padding-box
+    // origin, as the browser does) under every layer canvas.
+    const sharp = document.createElement('canvas');
+    sharp.width = w;
+    sharp.height = h;
+    const sctx = sharp.getContext('2d');
+    if (!sctx) return null;
     const wgoBoard = boardWrapper.querySelector('.wgo-board');
-    if (wgoBoard && wgoBoard.style.backgroundImage) {
-        snapshot.style.backgroundImage = wgoBoard.style.backgroundImage;
+    sctx.fillStyle = (wgoBoard && getComputedStyle(wgoBoard).backgroundColor) || EMPTY_BOARD_AVG_COLOR;
+    sctx.fillRect(0, 0, w, h);
+    const woodUrl = wgoBoard && /url\(["']?([^"')]+)["']?\)/.exec(wgoBoard.style.backgroundImage || '')?.[1];
+    const wood = woodUrl ? getWoodImage(woodUrl) : null;
+    if (wood && wood.complete && wood.naturalWidth) {
+        const k = pxPerCss * scale;
+        const tw = wood.naturalWidth * k;
+        const th = wood.naturalHeight * k;
+        if (!(tw > 0 && th > 0)) return null;
+        for (let y = 0; y < h; y += th) {
+            for (let x = 0; x < w; x += tw) sctx.drawImage(wood, x, y, tw, th);
+        }
     }
-    if (wgoBoard && wgoBoard.style.backgroundColor) {
-        snapshot.style.backgroundColor = wgoBoard.style.backgroundColor;
+    for (const c of canvases) {
+        sctx.drawImage(c, 0, 0, w, h);
     }
 
+    const snapshot = document.createElement('canvas');
+    snapshot.width = w;
+    snapshot.height = h;
+    snapshot.className = 'board-snapshot';
     const ctx = snapshot.getContext('2d');
     if (!ctx) return null;
 
-    for (const c of canvases) {
-        ctx.drawImage(c, 0, 0);
+    const radius = SNAPSHOT_BLUR_CSS_PX * pxPerCss * scale;
+    if (typeof ctx.filter === 'string') {
+        // Blur from an edge-extended copy so the border doesn't fade toward
+        // transparent: the margin holds the board stretched outward, which is
+        // what the blur kernel samples past the edge.
+        const pad = Math.ceil(radius * 3);
+        const padded = document.createElement('canvas');
+        padded.width = w + 2 * pad;
+        padded.height = h + 2 * pad;
+        const pctx = padded.getContext('2d');
+        pctx.drawImage(sharp, 0, 0, padded.width, padded.height);
+        pctx.drawImage(sharp, pad, pad);
+        ctx.filter = `blur(${radius}px)`;
+        ctx.drawImage(padded, -pad, -pad);
+    } else {
+        // No canvas filter (older Safari): a static CSS blur on the snapshot.
+        // Still no animated radius — only the opacity transitions.
+        ctx.drawImage(sharp, 0, 0);
+        snapshot.classList.add('board-snapshot-css-blur');
     }
     return snapshot;
 }
@@ -274,8 +336,11 @@ export function fadeOverlay(duration, callback, stats = null, message = null, co
     if (snapshot) void snapshot.offsetWidth;
     void overlay.offsetWidth;
 
-    if (boardWrapper) boardWrapper.classList.add('board-blurred');
-    if (snapshot) snapshot.classList.add('board-blurred');
+    // The pre-blurred snapshot fades in over the (still identical) live board
+    // and covers it while the next problem loads underneath; with no snapshot
+    // the live board is blurred directly instead.
+    if (snapshot) snapshot.classList.add('board-snapshot-visible');
+    else if (boardWrapper) boardWrapper.classList.add('board-blurred');
     overlay.style.opacity = '1';
 
     // Halfway through the transition (at 500ms), under full blur cover,
@@ -311,7 +376,7 @@ export function fadeOverlay(duration, callback, stats = null, message = null, co
             boardWrapper.classList.remove('board-blurred');
         }
         if (snapshot) {
-            snapshot.style.opacity = '0';
+            snapshot.classList.remove('board-snapshot-visible');
         }
         overlay.style.pointerEvents = 'none';
         overlay.style.transition = 'opacity 0.5s ease-in-out';

@@ -245,6 +245,8 @@ input, textarea, [contenteditable],
     transform: scale(1.04);
 }
 
+/* A pre-blurred bitmap of the board (overlays.js captureBoardSnapshot): only
+   its opacity animates, so the fade stays cheap without GPU compositing. */
 .board-snapshot {
     position: absolute;
     inset: 0;
@@ -252,19 +254,17 @@ input, textarea, [contenteditable],
     height: 100%;
     pointer-events: none;
     z-index: 5;
-    background-color: #CEB053;
-    background-image: url('lib/wgo/wood_1024.jpg');
-    border-top: #F0E7A7 solid 1px;
-    border-right: #D1A974 solid 1px;
-    border-left: #CCB467 solid 1px;
-    border-bottom: #665926 solid 3px;
     border-radius: 3px;
-    box-sizing: border-box;
-    transition: opacity 0.5s ease-in-out, filter 0.5s ease-in-out, transform 0.5s ease-in-out;
-    will-change: opacity, filter, transform;
+    opacity: 0;
+    transition: opacity 0.5s ease-in-out;
+    will-change: opacity;
 }
 
-.board-snapshot.board-blurred {
+.board-snapshot.board-snapshot-visible {
+    opacity: 1;
+}
+
+.board-snapshot.board-snapshot-css-blur {
     filter: blur(14px);
     transform: scale(1.04);
 }
