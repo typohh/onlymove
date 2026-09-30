@@ -348,7 +348,7 @@ function renderPage(view) {
   }
   .hero h1 { font-size: clamp(2.2rem, 7vw, 3.3rem); line-height: 1.05; margin: 0 0 .7rem; letter-spacing: -.015em; }
   .hero .intro { font-size: 1.15rem; margin: 0 0 1.8rem; }
-  .prizes { display: grid; grid-template-columns: minmax(0, 24rem); gap: 1rem; margin: 0 0 1.2rem; }
+  .prizes { display: grid; grid-template-columns: minmax(0, 24rem); justify-content: center; gap: 1rem; margin: 0; }
   .prize {
     display: grid; grid-template-columns: auto 1fr; column-gap: .9rem; align-items: center;
     padding: 1rem 1.1rem; border-radius: 14px; background: var(--panel);
@@ -359,8 +359,7 @@ function renderPage(view) {
   .prize .cat { font-weight: 600; font-size: 1.05rem; }
   .prize .amounts { color: var(--ink-muted); font-variant-numeric: tabular-nums; }
   .prize .amounts b { color: var(--ink); font-weight: 600; font-size: 1.1rem; }
-  .deadline { margin: 0; }
-  .deadline strong { font-weight: 600; }
+  .hero .intro strong { font-weight: 600; }
 
   /* criteria: three items of equal weight, as three equal cells of board wood
      divided by board lines */
@@ -437,11 +436,10 @@ function renderPage(view) {
 
 <header class="hero">
   <h1 id="h1"></h1>
-  <p class="intro" id="intro"></p>
+  <p class="intro"><span id="intro"></span> <span id="deadline"></span> <strong id="daysLeft"></strong></p>
   <div class="prizes">
     <a class="prize" href="#videos">${stone('white', 34)}<span class="cat" id="prizesH"></span><span class="amounts" id="pVa"></span></a>
   </div>
-  <p class="deadline"><span id="deadline"></span> <strong id="daysLeft"></strong></p>
 </header>
 
 <section>
