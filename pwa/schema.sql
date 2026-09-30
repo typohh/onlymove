@@ -414,17 +414,23 @@ CREATE TABLE IF NOT EXISTS hidden_profiles (
     created_at TEXT NOT NULL
 );
 -- Contribution-rewards entries (the /contest page, src/contest.js). One row per
--- (category, account); written only by the organiser's auxiliary/contest_entries.mjs,
--- never by a Worker route. The row holds only what the account cannot supply:
--- the date the entry went public, and for a video the link, the number of problems
--- solved on camera, the view count and the organiser's quality score. Everything
--- else the page shows is resolved at compute time off the account — the name
--- (linked EGD/AGA display_name, else the alias, withheld by hidden_profiles), the
--- federation rank (the latest EGD/AGAR heartbeat in rank_surveys) and the OnlyMove
--- ranks (a replay of the account's novel attempts) — so an entry has no anonymity
--- flag of its own. The organiser is not an entry: the page shows the organiser's
--- current figures beside the entry criteria, off the account linked to
--- ORGANISER_EGD_PIN (src/contest.js).
+-- (category, account). A player creates the row from the page's entry form
+-- (POST /contest/submit), pending with listed_at NULL; the organiser verifies it
+-- and lists it with auxiliary/contest_entries.mjs, which sets listed_at — the
+-- public date, the one the rules favour — and later enters views and quality.
+-- The page reads listed rows only. Once listed, a resubmission updates only the
+-- contact, the message and the app-link consent: the verified link and problem
+-- count change only through the organiser.
+-- The row holds only what the account cannot supply. Everything else the page
+-- shows is resolved at compute time off the account — the name (linked EGD/AGA
+-- display_name, else the alias, withheld by hidden_profiles), the federation rank
+-- (the latest EGD/AGAR heartbeat in rank_surveys) and the OnlyMove ranks (a replay
+-- of the account's novel attempts) — so an entry has no anonymity flag of its own.
+-- contact is the only personal datum the site keeps: no Worker route reads it,
+-- and the privacy policy promises its deletion once the prizes are paid. The
+-- organiser is not an entry: the page shows the organiser's current figures
+-- beside the entry criteria, off the account linked to ORGANISER_EGD_PIN
+-- (src/contest.js).
 CREATE TABLE IF NOT EXISTS contest_entries (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     category       TEXT NOT NULL CHECK (category IN ('strength', 'video')),
@@ -433,7 +439,13 @@ CREATE TABLE IF NOT EXISTS contest_entries (
     video_url      TEXT,
     video_problems INTEGER,
     views          INTEGER,
-    quality        REAL
+    quality        REAL,
+    listed_at      TEXT,
+    contact_method TEXT CHECK (contact_method IN ('whatsapp', 'discord', 'email')),
+    contact        TEXT,
+    video_language TEXT,
+    app_link       INTEGER NOT NULL DEFAULT 0,
+    message        TEXT
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_contest_entries_account ON contest_entries(category, user_id);
 

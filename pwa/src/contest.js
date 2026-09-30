@@ -1,6 +1,7 @@
 // pwa/src/contest.js
 //
-// The /contest page's data: every contest_entries row resolved into what the page
+// The /contest page's data: every LISTED contest_entries row (pending ones, sent
+// from the page's form and not yet verified, stay out) resolved into what the page
 // shows, cached as one JSON blob in server_stats under key 'contest' (the same
 // single-row cache the Community stats use under 'latest'). Recomputed ON REQUEST
 // when the blob is older than CONTEST_MAX_AGE_MS or was produced by an older code
@@ -37,6 +38,8 @@ import { rankToLabel } from '../shared/rank-math.js';
 
 const CONTEST_KEY = 'contest';
 export const CONTEST_MAX_AGE_MS = 12 * 3600 * 1000;
+// Entries close here: the page counts down to it and POST /contest/submit refuses after it.
+export const CONTEST_DEADLINE_ISO = '2026-12-31T23:59:59Z';
 const ORGANISER_EGD_PIN = '16025130';
 
 let computeInFlight = null;
@@ -103,7 +106,7 @@ async function organiserFigures(env, params) {
 
 async function computeContest(env) {
     const res = await env.DB.prepare(
-        `SELECT e.id, e.category, e.user_id, e.submitted_at, e.video_url,
+        `SELECT e.id, e.category, e.user_id, e.listed_at, e.video_url,
                 e.video_problems, e.views, e.quality,
                 x.display_name, x.country_code, a.adjective, a.color, a.animal,
                 (h.user_id IS NOT NULL) AS hidden,
@@ -112,7 +115,8 @@ async function computeContest(env) {
            LEFT JOIN external_ids x ON x.user_id = e.user_id
            LEFT JOIN user_aliases a ON a.user_id = e.user_id
            LEFT JOIN hidden_profiles h ON h.user_id = e.user_id
-          ORDER BY e.submitted_at, e.id`
+          WHERE e.listed_at IS NOT NULL
+          ORDER BY e.listed_at, e.id`
     ).all();
     const rows = (res && res.results) || [];
     const params = await getProblemParams(env);
@@ -128,7 +132,7 @@ async function computeContest(env) {
         const alias = (r.adjective && r.color && r.animal)
             ? { adjective: r.adjective, color: r.color, animal: r.animal } : null;
         const base = {
-            submittedAt: r.submitted_at,
+            listedAt: r.listed_at,
             name: hidden ? null : (r.display_name || null),
             alias: hidden ? null : alias,
             country: hidden ? null

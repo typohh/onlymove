@@ -14,13 +14,14 @@
 // a reader outside the site has no key for the front page's "3d 97%". A kyu
 // rank has no such reading, since kyu count down, so it prints as its band label.
 
-import { loadContest } from '../contest.js';
-import { composeAliasAll } from '../../shared/alias-words.js';
+import { loadContest, CONTEST_DEADLINE_ISO } from '../contest.js';
+import {
+    composeAliasAll, ALIAS_ADJECTIVES, ALIAS_COLORS, ALIAS_ANIMALS, ALIAS_JOIN, ALIAS_LANGS,
+} from '../../shared/alias-words.js';
 import { baseCss, flag, ESC_SNIPPET } from './page-shell.js';
 
 const DISCORD = 'https://discord.gg/ZU7jJNnkbB';
 const DISCORD_NAME = 'ootakamoku';
-const DEADLINE_ISO = '2026-12-31T23:59:59Z';
 
 const STR = {
     en: {
@@ -40,7 +41,7 @@ const STR = {
         sCrit3: 'The number of problems your account has solved',
         howH: 'How to enter',
         sStep1: 'Link your EGD or AGA record in the app (menu → Account).',
-        sStep2: 'Send the organiser your name or your EGD PIN / AGA id.',
+        sStep2: 'Fill in the [entry form] below. Your name and rank come from the linked record.',
         sStep3: 'The organiser verifies your identity through other Go players and adds you to the list.',
         sAnon: 'To stay anonymous here, hide your profile in the same Account dialog. You are listed as Anonymous, and your rank is still shown.',
         videoH: 'Videos',
@@ -52,11 +53,44 @@ const STR = {
         vCrit3: 'The highest OnlyMove rank reached during the video',
         vStep1: 'At the start of the recording, create a new account and pick an alias for it (menu → Account).',
         vStep2: 'Solve in one session, thinking aloud and explaining each problem.',
-        vStep3: 'Publish the video and send the organiser the link, the alias, and how many problems you solved in it.',
-        vLink: 'If you want, the organiser can link your video from the app for an appropriate strength audience. Mention it in your submission.',
+        vStep3: 'Publish the video and fill in the [entry form] below with the link and how many problems you solved in it.',
+        vLink: 'If you want, the organiser can link your video from the app for an appropriate strength audience. Tick the box in the entry form.',
         judgingH: 'Judging',
         judging: 'Both categories are judged by Henry Hemming, the author of OnlyMove, on the criteria above. In both, earlier entries are slightly favoured, counted from the day they appear on the list below. Entries the organiser considers dishonest are disqualified.',
-        contact: 'Send entries and questions to {name} on {discord}.',
+        contact: 'Send questions to {name} on {discord}.',
+        formH: 'Enter',
+        formCat: 'Category',
+        formAccount: 'Account code',
+        formAccountHint: 'Filled in from this browser. If you played on another device, enter the code shown in the app under menu → Account.',
+        formAccountNone: 'No OnlyMove account in this browser. Enter the code shown in the app under menu → Account.',
+        acctChecking: 'Checking the account…',
+        acctLinked: 'Linked record: {name} ({service} {id}).',
+        acctNotLinked: 'This account has no linked EGD or AGA record. Link it in the app first (menu → Account), then submit.',
+        acctAlias: 'Listed as {alias}.',
+        acctNoAlias: 'This account has no alias, so it will be listed as Anonymous. You can pick one in the app (menu → Account).',
+        acctHidden: 'This account\'s profile is hidden, so it will be listed as Anonymous.',
+        acctInvalid: 'That is not a valid account code.',
+        formUrl: 'Video link',
+        formProblems: 'Problems solved in the video',
+        formLanguage: 'Language of the video',
+        langEn: 'English', langZh: 'Chinese', langJa: 'Japanese', langKo: 'Korean',
+        formAppLink: 'The organiser may link this video from the app',
+        formContact: 'How to reach you about prizes',
+        contactWhatsapp: 'WhatsApp', contactDiscord: 'Discord', contactEmail: 'Email',
+        phWhatsapp: 'Phone number, e.g. +44 7700 900123', phDiscord: 'Discord username', phEmail: 'name@example.com',
+        formContactNote: 'Seen only by the organiser, used only to reach you about this contest, and deleted once the prizes are paid.',
+        formMessage: 'Message to the organiser (optional)',
+        formSubmit: 'Submit entry',
+        formSending: 'Sending…',
+        okNew: 'Received. The organiser will verify your entry and add it to the list below.',
+        okReplaced: 'Received. This replaces your earlier submission in this category.',
+        okListed: 'Received. Your entry is already on the list, so this updates your contact details, message and app-link choice. Ask the organiser to change anything else.',
+        errContact: 'The contact detail does not look right for the chosen method.',
+        errUrl: 'Enter the video link, starting with https://.',
+        errProblems: 'Enter how many problems you solved in the video.',
+        errRate: 'Too many attempts. Wait a minute and try again.',
+        errMaint: 'The site is briefly under maintenance. Try again in a few minutes.',
+        errServer: 'The entry could not be sent. Try again later, or contact the organiser on Discord.',
         entriesH: 'Entries so far',
         updated: 'Updated {ago}. Every figure on this page, including the organiser\'s ranks, is updated every 12 hours. Problem difficulties are re-estimated regularly as new attempts come in, so any account\'s OnlyMove ranks can change retroactively, averages and peaks included. View counts and quality scores are entered by the organiser and may be revised until the deadline.',
         agoJustNow: 'just now', agoMinutes: '{n} min ago', agoHours: '{n} h ago', agoDays: '{n} d ago',
@@ -85,7 +119,7 @@ const STR = {
         sCrit3: '账户解答的题目数量',
         howH: '参加方法',
         sStep1: '在应用中关联你的 EGD 或 AGA 记录（菜单 → 账户）。',
-        sStep2: '将你的姓名或 EGD PIN / AGA ID 发送给组织者。',
+        sStep2: '填写下方的[参赛表格]。你的姓名和段位取自已关联的记录。',
         sStep3: '组织者通过其他围棋棋手核实你的身份，并将你加入列表。',
         sAnon: '如希望在此匿名，可在同一账户对话框中隐藏个人资料。你将以“匿名”列出，段位仍会显示。',
         videoH: '视频',
@@ -97,11 +131,44 @@ const STR = {
         vCrit3: '视频中达到的最高 OnlyMove 段位',
         vStep1: '在录制开始时注册新账户，并为其选择一个别名（菜单 → 账户）。',
         vStep2: '在一次连续的时段内解题，边想边说，讲解每道题。',
-        vStep3: '发布视频，并将链接、别名以及视频中解答的题目数量发送给组织者。',
-        vLink: '如果你愿意，组织者可以在应用中向棋力合适的观众推荐你的视频。请在提交时说明。',
+        vStep3: '发布视频，并在下方的[参赛表格]中填写链接以及视频中解答的题目数量。',
+        vLink: '如果你愿意，组织者可以在应用中向棋力合适的观众推荐你的视频。请在参赛表格中勾选相应选项。',
         judgingH: '评判',
         judging: '两个类别均由 OnlyMove 作者 Henry Hemming 依据上述标准评判。两个类别中较早参加者均略有优先，以出现在下方列表中的日期为准。组织者认为不诚实的参赛将被取消资格。',
-        contact: '请在 {discord} 上联系 {name}，提交参赛和咨询问题。',
+        contact: '如有问题，请在 {discord} 上联系 {name}。',
+        formH: '参赛',
+        formCat: '类别',
+        formAccount: '账户代码',
+        formAccountHint: '已根据此浏览器自动填写。如果你在其他设备上解题，请输入应用中“菜单 → 账户”显示的代码。',
+        formAccountNone: '此浏览器中没有 OnlyMove 账户。请输入应用中“菜单 → 账户”显示的代码。',
+        acctChecking: '正在检查账户……',
+        acctLinked: '已关联记录：{name}（{service} {id}）。',
+        acctNotLinked: '此账户尚未关联 EGD 或 AGA 记录。请先在应用中关联（菜单 → 账户），然后再提交。',
+        acctAlias: '将以“{alias}”列出。',
+        acctNoAlias: '此账户没有别名，将以“匿名”列出。你可以在应用中选择别名（菜单 → 账户）。',
+        acctHidden: '此账户的个人资料已隐藏，将以“匿名”列出。',
+        acctInvalid: '账户代码无效。',
+        formUrl: '视频链接',
+        formProblems: '视频中解答的题目数量',
+        formLanguage: '视频语言',
+        langEn: '英语', langZh: '中文', langJa: '日语', langKo: '韩语',
+        formAppLink: '组织者可以在应用中推荐此视频',
+        formContact: '领奖联系方式',
+        contactWhatsapp: 'WhatsApp', contactDiscord: 'Discord', contactEmail: '电子邮件',
+        phWhatsapp: '电话号码，例如 +86 138 0000 0000', phDiscord: 'Discord 用户名', phEmail: 'name@example.com',
+        formContactNote: '仅组织者可见，仅用于就本次活动与你联系，奖金发放后即删除。',
+        formMessage: '给组织者的留言（可选）',
+        formSubmit: '提交参赛',
+        formSending: '正在发送……',
+        okNew: '已收到。组织者核实后会将你加入下方列表。',
+        okReplaced: '已收到。此次提交将替换你在该类别中之前的提交。',
+        okListed: '已收到。你已在列表中，此次提交更新了联系方式、留言和应用推荐选项。如需更改其他内容，请联系组织者。',
+        errContact: '联系方式与所选方式不符，请检查。',
+        errUrl: '请输入以 https:// 开头的视频链接。',
+        errProblems: '请输入视频中解答的题目数量。',
+        errRate: '尝试次数过多，请稍等一分钟后重试。',
+        errMaint: '网站正在短暂维护，请几分钟后重试。',
+        errServer: '无法发送参赛信息。请稍后重试，或在 Discord 上联系组织者。',
         entriesH: '目前的参赛',
         updated: '更新于 {ago}。本页所有数值（包括组织者的段位）每 12 小时更新一次。题目难度会随新的解题记录定期重新估计，因此任何账户的 OnlyMove 段位（包括平均段位和最高段位）都可能被追溯更改。观看次数和质量评分由组织者录入，截止前可能调整。',
         agoJustNow: '刚刚', agoMinutes: '{n} 分钟前', agoHours: '{n} 小时前', agoDays: '{n} 天前',
@@ -130,7 +197,7 @@ const STR = {
         sCrit3: 'アカウントが解いた問題数',
         howH: '参加方法',
         sStep1: 'アプリで EGD または AGA の記録を連携します（メニュー → アカウント）。',
-        sStep2: '氏名または EGD PIN / AGA ID を主催者に送ります。',
+        sStep2: '下の[応募フォーム]に記入します。氏名と段級位は連携した記録から取られます。',
         sStep3: '主催者が他の碁打ちを通じて本人確認を行い、一覧に追加します。',
         sAnon: 'ここで匿名にしたい場合は、同じアカウント画面でプロフィールを非公開にしてください。「匿名」として掲載され、段級位は表示されます。',
         videoH: '動画',
@@ -142,11 +209,44 @@ const STR = {
         vCrit3: '動画中に到達した最高 OnlyMove ランク',
         vStep1: '録画の最初に新しいアカウントを作り、別名を選びます（メニュー → アカウント）。',
         vStep2: '1 回のセッションで、考えを声に出し、各問題を説明しながら解きます。',
-        vStep3: '動画を公開し、リンク、別名、動画内で解いた問題数を主催者に送ります。',
-        vLink: '希望すれば、棋力の合う視聴者向けにアプリから動画を紹介できます。応募の際にお知らせください。',
+        vStep3: '動画を公開し、下の[応募フォーム]にリンクと動画内で解いた問題数を記入します。',
+        vLink: '希望すれば、棋力の合う視聴者向けにアプリから動画を紹介できます。応募フォームのチェックボックスを選んでください。',
         judgingH: '審査',
         judging: '両部門とも、OnlyMove の作者 Henry Hemming が上記の基準で審査します。どちらの部門でも早い参加がやや有利で、下の一覧に掲載された日を基準とします。不正と判断した応募は失格とします。',
-        contact: '応募と質問は {discord} で {name} までお送りください。',
+        contact: 'ご質問は {discord} で {name} までお送りください。',
+        formH: '応募する',
+        formCat: '部門',
+        formAccount: 'アカウントコード',
+        formAccountHint: 'このブラウザから自動入力しました。別の端末で解いた場合は、アプリの「メニュー → アカウント」に表示されるコードを入力してください。',
+        formAccountNone: 'このブラウザには OnlyMove のアカウントがありません。アプリの「メニュー → アカウント」に表示されるコードを入力してください。',
+        acctChecking: 'アカウントを確認しています…',
+        acctLinked: '連携済みの記録：{name}（{service} {id}）。',
+        acctNotLinked: 'このアカウントには EGD または AGA の記録が連携されていません。先にアプリで連携してから（メニュー → アカウント）応募してください。',
+        acctAlias: '「{alias}」として掲載されます。',
+        acctNoAlias: 'このアカウントには別名がないため、「匿名」として掲載されます。別名はアプリで選べます（メニュー → アカウント）。',
+        acctHidden: 'このアカウントのプロフィールは非公開のため、「匿名」として掲載されます。',
+        acctInvalid: 'アカウントコードが無効です。',
+        formUrl: '動画のリンク',
+        formProblems: '動画内で解いた問題数',
+        formLanguage: '動画の言語',
+        langEn: '英語', langZh: '中国語', langJa: '日本語', langKo: '韓国語',
+        formAppLink: 'アプリからこの動画を紹介してもよい',
+        formContact: '賞金についての連絡先',
+        contactWhatsapp: 'WhatsApp', contactDiscord: 'Discord', contactEmail: 'メール',
+        phWhatsapp: '電話番号（例：+81 90 1234 5678）', phDiscord: 'Discord のユーザー名', phEmail: 'name@example.com',
+        formContactNote: '主催者のみが見るもので、このコンテストに関する連絡にだけ使い、賞金の支払い後に削除します。',
+        formMessage: '主催者へのメッセージ（任意）',
+        formSubmit: '応募する',
+        formSending: '送信しています…',
+        okNew: '受け付けました。主催者が確認したうえで、下の一覧に追加します。',
+        okReplaced: '受け付けました。この部門での以前の応募を置き換えます。',
+        okListed: '受け付けました。すでに一覧に掲載されているため、連絡先、メッセージ、アプリでの紹介の可否を更新しました。その他の変更は主催者にご連絡ください。',
+        errContact: '選んだ連絡方法に対して、連絡先の形式が正しくないようです。',
+        errUrl: 'https:// で始まる動画のリンクを入力してください。',
+        errProblems: '動画内で解いた問題数を入力してください。',
+        errRate: '試行回数が多すぎます。1 分ほど待ってから再度お試しください。',
+        errMaint: 'サイトは一時的にメンテナンス中です。数分後に再度お試しください。',
+        errServer: '応募を送信できませんでした。後でもう一度試すか、Discord で主催者に連絡してください。',
         entriesH: 'これまでの応募',
         updated: '更新 {ago}。このページのすべての数値（主催者のランクを含む）は 12 時間ごとに更新されます。問題の難易度は新しい解答記録に基づいて定期的に再推定されるため、どのアカウントの OnlyMove ランクも（平均と最高を含め）さかのぼって変わることがあります。再生回数と質の評価は主催者が入力し、締め切りまで見直すことがあります。',
         agoJustNow: 'たった今', agoMinutes: '{n} 分前', agoHours: '{n} 時間前', agoDays: '{n} 日前',
@@ -175,7 +275,7 @@ const STR = {
         sCrit3: '계정이 푼 문제 수',
         howH: '참가 방법',
         sStep1: '앱에서 EGD 또는 AGA 기록을 연결합니다(메뉴 → 계정).',
-        sStep2: '이름 또는 EGD PIN / AGA ID를 주최자에게 보냅니다.',
+        sStep2: '아래 [참가 신청서]를 작성합니다. 이름과 급수는 연결된 기록에서 가져옵니다.',
         sStep3: '주최자가 다른 바둑 기사들을 통해 신원을 확인하고 목록에 추가합니다.',
         sAnon: '여기서 익명으로 남고 싶다면 같은 계정 화면에서 프로필을 숨기세요. "익명"으로 표시되며 급수는 그대로 표시됩니다.',
         videoH: '영상 부문',
@@ -187,11 +287,44 @@ const STR = {
         vCrit3: '영상 중 도달한 최고 OnlyMove 랭크',
         vStep1: '녹화를 시작할 때 새 계정을 만들고 별명을 고릅니다(메뉴 → 계정).',
         vStep2: '한 번의 세션에서 생각을 소리 내어 말하고 각 문제를 설명하며 풉니다.',
-        vStep3: '영상을 공개하고 링크, 별명, 영상에서 푼 문제 수를 주최자에게 보냅니다.',
-        vLink: '원하시면 기력이 맞는 시청자들을 위해 앱에서 영상을 소개할 수 있습니다. 참가 신청 시 알려 주세요.',
+        vStep3: '영상을 공개하고 아래 [참가 신청서]에 링크와 영상에서 푼 문제 수를 적습니다.',
+        vLink: '원하시면 기력이 맞는 시청자들을 위해 앱에서 영상을 소개할 수 있습니다. 참가 신청서의 확인란을 선택해 주세요.',
         judgingH: '심사',
         judging: '두 부문 모두 OnlyMove 제작자 Henry Hemming이 위 기준에 따라 심사합니다. 두 부문 모두 먼저 참가할수록 약간 유리하며, 아래 목록에 오른 날을 기준으로 합니다. 주최자가 부정하다고 판단한 참가는 실격 처리됩니다.',
-        contact: '참가 신청과 문의는 {discord}에서 {name}에게 보내 주세요.',
+        contact: '문의는 {discord}에서 {name}에게 보내 주세요.',
+        formH: '참가 신청',
+        formCat: '부문',
+        formAccount: '계정 코드',
+        formAccountHint: '이 브라우저에서 자동으로 채웠습니다. 다른 기기에서 풀었다면 앱의 메뉴 → 계정에 표시된 코드를 입력하세요.',
+        formAccountNone: '이 브라우저에는 OnlyMove 계정이 없습니다. 앱의 메뉴 → 계정에 표시된 코드를 입력하세요.',
+        acctChecking: '계정을 확인하는 중…',
+        acctLinked: '연결된 기록: {name} ({service} {id}).',
+        acctNotLinked: '이 계정에는 연결된 EGD 또는 AGA 기록이 없습니다. 먼저 앱에서 연결한 뒤(메뉴 → 계정) 신청해 주세요.',
+        acctAlias: '"{alias}"(으)로 표시됩니다.',
+        acctNoAlias: '이 계정에는 별명이 없어 "익명"으로 표시됩니다. 앱에서 별명을 고를 수 있습니다(메뉴 → 계정).',
+        acctHidden: '이 계정의 프로필은 숨김 상태라 "익명"으로 표시됩니다.',
+        acctInvalid: '잘못된 계정 코드입니다.',
+        formUrl: '영상 링크',
+        formProblems: '영상에서 푼 문제 수',
+        formLanguage: '영상 언어',
+        langEn: '영어', langZh: '중국어', langJa: '일본어', langKo: '한국어',
+        formAppLink: '주최자가 앱에서 이 영상을 소개해도 됩니다',
+        formContact: '상금 관련 연락처',
+        contactWhatsapp: 'WhatsApp', contactDiscord: 'Discord', contactEmail: '이메일',
+        phWhatsapp: '전화번호, 예: +82 10 1234 5678', phDiscord: 'Discord 사용자 이름', phEmail: 'name@example.com',
+        formContactNote: '주최자만 볼 수 있으며, 이 대회와 관련된 연락에만 사용하고 상금 지급 후 삭제합니다.',
+        formMessage: '주최자에게 남길 메시지(선택)',
+        formSubmit: '신청하기',
+        formSending: '보내는 중…',
+        okNew: '접수되었습니다. 주최자가 확인한 뒤 아래 목록에 추가합니다.',
+        okReplaced: '접수되었습니다. 이 부문에서 이전에 보낸 신청을 대체합니다.',
+        okListed: '접수되었습니다. 이미 목록에 올라 있으므로 연락처, 메시지, 앱 소개 여부를 갱신했습니다. 그 밖의 변경은 주최자에게 요청해 주세요.',
+        errContact: '선택한 연락 방법에 맞지 않는 연락처입니다. 확인해 주세요.',
+        errUrl: 'https://로 시작하는 영상 링크를 입력하세요.',
+        errProblems: '영상에서 푼 문제 수를 입력하세요.',
+        errRate: '시도 횟수가 너무 많습니다. 1분 뒤에 다시 시도해 주세요.',
+        errMaint: '사이트가 잠시 점검 중입니다. 몇 분 뒤에 다시 시도해 주세요.',
+        errServer: '신청을 보내지 못했습니다. 나중에 다시 시도하거나 Discord로 주최자에게 연락해 주세요.',
         entriesH: '지금까지의 참가',
         updated: '{ago} 업데이트. 이 페이지의 모든 수치(주최자의 랭크 포함)는 12시간마다 갱신됩니다. 문제 난이도는 새로운 풀이 기록에 따라 정기적으로 다시 추정되므로, 어느 계정의 OnlyMove 랭크든(평균과 최고 포함) 소급하여 바뀔 수 있습니다. 조회수와 질 점수는 주최자가 입력하며 마감 전까지 조정될 수 있습니다.',
         agoJustNow: '방금 전', agoMinutes: '{n}분 전', agoHours: '{n}시간 전', agoDays: '{n}일 전',
@@ -232,7 +365,7 @@ function buildView(data) {
         name: e.name || null,
         alias: e.name ? null : composeAliasAll(e.alias),
         flag: e.country ? flag(e.country) : '',
-        date: typeof e.submittedAt === 'string' ? e.submittedAt.slice(0, 10) : '',
+        date: typeof e.listedAt === 'string' ? e.listedAt.slice(0, 10) : '',
     });
     const org = data.organiser || {};
     return {
@@ -262,6 +395,13 @@ function stone(color, size) {
     const fill = color === 'black' ? 'url(#stoneB)' : 'url(#stoneW)';
     return `<svg class="stone" width="${size}" height="${size}" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="9.2" fill="${fill}"/></svg>`;
 }
+
+// The alias vocabulary, for the entry form's account preview: /profile returns the
+// account's alias as its English triplet, and the page composes it in the reader's
+// language with the shared module's own words and join rules.
+const ALIAS_WORDS_JSON = JSON.stringify(Object.fromEntries(
+    [...ALIAS_ADJECTIVES, ...ALIAS_COLORS, ...ALIAS_ANIMALS].map((w) => [w.en, w])));
+const ALIAS_JOIN_JS = `{${ALIAS_LANGS.map((l) => `${l}: ${ALIAS_JOIN[l].toString()}`).join(', ')}}`;
 
 function renderPage(view) {
     const json = JSON.stringify(view).replace(/</g, '\\u003c');
@@ -348,8 +488,47 @@ function renderPage(view) {
   .note { margin-top: 1.4rem; }
   .empty { color: var(--ink-muted); padding: .9rem 1rem; border: 1px dashed var(--hairline); border-radius: 10px; margin: .3rem 0 0; }
 
+  /* entry form */
+  form.enter { display: grid; gap: 1.1rem; margin: .6rem 0 0; padding: 1.3rem 1.25rem; border-radius: 14px;
+               background: var(--panel); border: 1px solid var(--hairline); }
+  form.enter fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+  form.enter legend, form.enter .lbl { display: block; font-weight: 600; font-size: .92rem; margin: 0 0 .4rem; padding: 0; }
+  .cats { display: grid; grid-template-columns: 1fr 1fr; gap: .6rem; }
+  .cats label { display: flex; align-items: center; gap: .6rem; padding: .7rem .85rem; border-radius: 10px; cursor: pointer;
+                border: 1px solid var(--hairline); background: var(--surface); }
+  .cats label:has(input:checked) { border-color: var(--accent); background: var(--surface-hi); }
+  .cats input { position: absolute; opacity: 0; pointer-events: none; }
+  .cats label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+  form.enter input[type=text], form.enter input[type=url], form.enter input[type=number],
+  form.enter input[type=email], form.enter input[type=tel], form.enter textarea {
+    font: inherit; width: 100%; box-sizing: border-box; padding: .5rem .65rem; color: var(--ink);
+    background: var(--surface); border: 1px solid var(--hairline); border-radius: 8px;
+  }
+  form.enter input:focus, form.enter textarea:focus, form.enter select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  form.enter textarea { min-height: 4.5rem; resize: vertical; }
+  form.enter select { font-size: .95rem; padding: .45rem 1.6rem .45rem .6rem; }
+  form.enter input#fAccount { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; max-width: 14rem; }
+  form.enter input#fProblems { max-width: 8rem; }
+  .row2 { display: grid; grid-template-columns: auto 1fr; gap: .6rem; align-items: center; }
+  .hint { font-size: .88rem; color: var(--ink-muted); margin: .35rem 0 0; }
+  .hint.warn { color: var(--accent-hi); }
+  .check { display: flex; gap: .55rem; align-items: flex-start; cursor: pointer; }
+  .check input { margin-top: .25rem; accent-color: var(--accent); }
+  form.enter button {
+    justify-self: start; font: inherit; font-weight: 600; padding: .6rem 1.3rem; border-radius: 10px; cursor: pointer;
+    border: 1px solid var(--accent); background: var(--accent); color: #fff;
+  }
+  form.enter button:hover { background: var(--accent-hi); border-color: var(--accent-hi); }
+  form.enter button:disabled { opacity: .55; cursor: default; }
+  .status { margin: 0; padding: .7rem .9rem; border-radius: 10px; background: var(--surface); }
+  .status.err { border-left: 3px solid var(--accent); }
+  .status.ok { border-left: 3px solid #6a9a5b; }
+  .status:empty { display: none; }
+  [hidden] { display: none !important; }
+
   @media (max-width: 560px) {
     .prizes, ul.criteria { grid-template-columns: 1fr; }
+    .row2 { grid-template-columns: 1fr; }
     .hero { padding-top: 2.2rem; }
   }
   @media (prefers-color-scheme: light) {
@@ -398,6 +577,56 @@ function renderPage(view) {
   <p class="muted" id="vLink"></p>
 </section>
 
+<section id="enter">
+  <h2 id="formH"></h2>
+  <form class="enter" id="form" novalidate>
+    <fieldset>
+      <legend id="formCat"></legend>
+      <div class="cats">
+        <label>${stone('black', 22)}<input type="radio" name="cat" value="strength"><span id="catS"></span></label>
+        <label>${stone('white', 22)}<input type="radio" name="cat" value="video"><span id="catV"></span></label>
+      </div>
+    </fieldset>
+    <div>
+      <label class="lbl" for="fAccount" id="formAccount"></label>
+      <input type="text" id="fAccount" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="8">
+      <p class="hint" id="acctHint"></p>
+      <p class="hint" id="acctInfo" aria-live="polite"></p>
+    </div>
+    <div id="videoFields" hidden>
+      <div>
+        <label class="lbl" for="fUrl" id="formUrl"></label>
+        <input type="url" id="fUrl" placeholder="https://" maxlength="500">
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(12rem,1fr));gap:1.1rem;margin-top:1.1rem">
+        <div>
+          <label class="lbl" for="fProblems" id="formProblems"></label>
+          <input type="number" id="fProblems" min="1" max="10000" step="1" inputmode="numeric">
+        </div>
+        <div>
+          <label class="lbl" for="fLang" id="formLanguage"></label>
+          <select id="fLang"><option value="en"></option><option value="zh"></option><option value="ja"></option><option value="ko"></option></select>
+        </div>
+      </div>
+      <label class="check" style="margin-top:1.1rem"><input type="checkbox" id="fAppLink"><span id="formAppLink"></span></label>
+    </div>
+    <div>
+      <label class="lbl" for="fContact" id="formContact"></label>
+      <div class="row2">
+        <select id="fMethod" aria-label="Contact method"><option value="whatsapp"></option><option value="discord"></option><option value="email"></option></select>
+        <input type="text" id="fContact" maxlength="254">
+      </div>
+      <p class="hint" id="formContactNote"></p>
+    </div>
+    <div>
+      <label class="lbl" for="fMessage" id="formMessage"></label>
+      <textarea id="fMessage" maxlength="1000"></textarea>
+    </div>
+    <p class="status" id="formStatus" role="status"></p>
+    <button type="submit" id="formSubmit"></button>
+  </form>
+</section>
+
 <section>
   <h2 id="judgingH"></h2>
   <div class="judging">
@@ -420,7 +649,7 @@ function renderPage(view) {
   var VIEW = ${json};
   var DISCORD = ${JSON.stringify(DISCORD)};
   var DISCORD_NAME = ${JSON.stringify(DISCORD_NAME)};
-  var DEADLINE = Date.parse(${JSON.stringify(DEADLINE_ISO)});
+  var DEADLINE = Date.parse(${JSON.stringify(CONTEST_DEADLINE_ISO)});
   ${ESC_SNIPPET}
   function getLang() {
     var l = navigator.language || 'en';
@@ -484,6 +713,151 @@ function renderPage(view) {
   $('contact').innerHTML = esc(t('contact'))
     .replace('{discord}', '<a href="' + DISCORD + '" target="_blank" rel="noopener">Discord</a>')
     .replace('{name}', '<strong>' + esc(DISCORD_NAME) + '</strong>');
+
+  // The entry form. The account code is the app's own, read from this origin's
+  // storage (the app keeps it under localStorage 'userId'); it stays editable
+  // for a player who solved on another device, or in an installed app whose
+  // storage is its own. The preview under it shows what the list will show.
+  var ALIAS_WORDS = ${ALIAS_WORDS_JSON};
+  var ALIAS_JOIN = ${ALIAS_JOIN_JS};
+  var USER_ID_RE = /^[A-Za-z0-9_-]{8}$/;
+  var form = $('form');
+  ['formH', 'formCat', 'formAccount', 'formUrl', 'formProblems', 'formLanguage', 'formAppLink',
+   'formContact', 'formContactNote', 'formMessage', 'formSubmit'].forEach(function (k) { set(k); });
+  set('catS', 'strengthH'); set('catV', 'videoH');
+  [['en', 'langEn'], ['zh', 'langZh'], ['ja', 'langJa'], ['ko', 'langKo']].forEach(function (p) {
+    $('fLang').querySelector('option[value="' + p[0] + '"]').textContent = t(p[1]);
+  });
+  $('fLang').value = LANG;
+  var PH = { whatsapp: 'phWhatsapp', discord: 'phDiscord', email: 'phEmail' };
+  var INPUT_TYPE = { whatsapp: 'tel', discord: 'text', email: 'email' };
+  [['whatsapp', 'contactWhatsapp'], ['discord', 'contactDiscord'], ['email', 'contactEmail']].forEach(function (p) {
+    $('fMethod').querySelector('option[value="' + p[0] + '"]').textContent = t(p[1]);
+  });
+  function syncMethod() {
+    var m = $('fMethod').value;
+    $('fContact').placeholder = t(PH[m]);
+    $('fContact').type = INPUT_TYPE[m];
+  }
+  $('fMethod').addEventListener('change', syncMethod);
+  syncMethod();
+
+  // The steps' bracketed words link to the form and pick its category.
+  [['sStep2', 'strength'], ['vStep3', 'video']].forEach(function (p) {
+    $(p[0]).innerHTML = esc(t(p[0])).replace(/\\[(.+?)\\]/, '<a class="inline" href="#enter" data-cat="' + p[1] + '">$1</a>');
+  });
+  document.querySelectorAll('a[data-cat]').forEach(function (a) {
+    a.addEventListener('click', function () { pickCat(a.getAttribute('data-cat')); });
+  });
+
+  function cat() { var c = form.querySelector('input[name=cat]:checked'); return c ? c.value : null; }
+  function pickCat(c) {
+    form.querySelector('input[name=cat][value="' + c + '"]').checked = true;
+    onCat();
+  }
+  function onCat() {
+    $('videoFields').hidden = cat() !== 'video';
+    renderAccount();
+  }
+  form.querySelectorAll('input[name=cat]').forEach(function (r) { r.addEventListener('change', onCat); });
+
+  var stored = null;
+  try { stored = localStorage.getItem('userId'); } catch (e) { stored = null; }
+  if (stored && USER_ID_RE.test(stored)) $('fAccount').value = stored;
+  $('acctHint').textContent = t($('fAccount').value ? 'formAccountHint' : 'formAccountNone');
+
+  // The account preview: one /profile read per distinct code, cached here.
+  var profiles = {}, lookupTimer = null;
+  function lookup(id) {
+    if (profiles[id]) return;
+    profiles[id] = { pending: true };
+    fetch('/profile?userId=' + encodeURIComponent(id), { cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (p) { profiles[id] = p || { failed: true }; renderAccount(); })
+      .catch(function () { profiles[id] = { failed: true }; renderAccount(); });
+  }
+  function aliasText(a) {
+    if (!a || !a.adjective || !a.color || !a.animal) return null;
+    function w(en) { var x = ALIAS_WORDS[en]; return (x && x[LANG]) || en; }
+    return (ALIAS_JOIN[LANG] || ALIAS_JOIN.en)(w(a.adjective), w(a.color), w(a.animal));
+  }
+  function renderAccount() {
+    var el = $('acctInfo'), id = $('fAccount').value.trim(), c = cat();
+    el.className = 'hint';
+    if (!id) { el.textContent = ''; return; }
+    if (!USER_ID_RE.test(id)) { el.textContent = t('acctInvalid'); el.className = 'hint warn'; return; }
+    var p = profiles[id];
+    if (!p) { lookup(id); p = profiles[id]; }
+    if (p.pending) { el.textContent = t('acctChecking'); return; }
+    if (p.failed || !c) { el.textContent = ''; return; }
+    var L = p.linked;
+    if (c === 'strength') {
+      if (L) el.textContent = t('acctLinked', { name: L.name || '—', service: L.service, id: L.id });
+      else { el.textContent = t('acctNotLinked'); el.className = 'hint warn'; }
+    } else if (p.hidden) {
+      el.textContent = t('acctHidden');
+    } else if (L && L.name) {
+      el.textContent = t('acctAlias', { alias: L.name });
+    } else if (aliasText(p.alias)) {
+      el.textContent = t('acctAlias', { alias: aliasText(p.alias) });
+    } else {
+      el.textContent = t('acctNoAlias');
+    }
+  }
+  $('fAccount').addEventListener('input', function () {
+    clearTimeout(lookupTimer);
+    lookupTimer = setTimeout(renderAccount, 350);
+  });
+  renderAccount();
+
+  function status(key, ok) {
+    var el = $('formStatus');
+    el.textContent = key ? t(key) : '';
+    el.className = 'status ' + (ok ? 'ok' : 'err');
+  }
+  var ERR = {
+    not_linked: 'acctNotLinked', invalid_contact: 'errContact', invalid_url: 'errUrl',
+    invalid_problems: 'errProblems', closed: 'closed', bad_request: 'acctInvalid',
+  };
+  form.addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    var c = cat();
+    if (!c) { status('formCat'); return; }
+    var id = $('fAccount').value.trim();
+    if (!USER_ID_RE.test(id)) { status('acctInvalid'); $('fAccount').focus(); return; }
+    var body = {
+      userId: id, category: c, contactMethod: $('fMethod').value,
+      contact: $('fContact').value.trim(), message: $('fMessage').value.trim(),
+    };
+    if (!body.contact) { status('errContact'); $('fContact').focus(); return; }
+    if (c === 'video') {
+      body.videoUrl = $('fUrl').value.trim();
+      body.videoProblems = parseInt($('fProblems').value, 10);
+      body.videoLanguage = $('fLang').value;
+      body.appLink = $('fAppLink').checked;
+      if (!/^https:\\/\\//.test(body.videoUrl)) { status('errUrl'); $('fUrl').focus(); return; }
+      if (!(body.videoProblems >= 1)) { status('errProblems'); $('fProblems').focus(); return; }
+    }
+    var btn = $('formSubmit');
+    btn.disabled = true; btn.textContent = t('formSending'); status(null);
+    fetch('/contest/submit', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (j) { return { code: r.status, j: j }; });
+    }).then(function (res) {
+      if (res.j && res.j.ok) {
+        status(res.j.listed ? 'okListed' : res.j.replaced ? 'okReplaced' : 'okNew', true);
+      } else if (res.code === 429) status('errRate');
+      else if (res.code === 503) status('errMaint');
+      else status(ERR[res.j && res.j.error] || 'errServer');
+    }).catch(function () {
+      status('errServer');
+    }).then(function () {
+      btn.disabled = DEADLINE < Date.now(); btn.textContent = t('formSubmit');
+    });
+  });
+  if (DEADLINE < Date.now()) { $('formSubmit').disabled = true; status('closed'); }
+  if (/^#enter-(strength|video)$/.test(location.hash)) pickCat(location.hash.slice(7));
 
   // Every "OnlyMove" in the prose links to the app. Run once the text is in
   // place; text already inside a link, and the table cells, are left alone.

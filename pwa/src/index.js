@@ -14,6 +14,7 @@ import { handleLeaderboard } from './handlers/leaderboard-page.js';
 import { handleStatistics } from './handlers/statistics-page.js';
 import { handleTournament } from './handlers/tournament-page.js';
 import { handleContest } from './handlers/contest-page.js';
+import { handleContestSubmit } from './handlers/contest-submit.js';
 import { handleProfileHide, handleProfile } from './handlers/profile.js';
 import { handleAlias } from './handlers/alias.js';
 import { handleGoogleSignIn, handleGoogleLink, handleGoogleUnlink } from './handlers/google.js';
@@ -64,6 +65,9 @@ const WRITE_ROUTES = [
   // maintenance freeze SHOULD cover it, since a snapshot-relative window is
   // exactly when the sidecars it reads may be half-replaced. Clients already
   // treat a 503 as being offline and retry, which is the right behaviour here.
+  // The /contest page's entry form: one pending submission per (category,
+  // account), which the organiser verifies before it reaches the public list.
+  { path: '/contest/submit', method: 'POST', limiter: 'RL_WRITE', handler: handleContestSubmit },
   { path: '/refit', method: 'POST', limiter: 'RL_WRITE', handler: handleRefit },
 ];
 
