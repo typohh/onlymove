@@ -61,6 +61,11 @@ from utils.rating.model_constants import (  # noqa: E402
     K_AXES, PCA_DIM, PRODUCTION_BLOCKS)
 
 DEV_RUNS = os.path.join(PROJECT_ROOT, "ablations", "dev_runs")
+# What every arm holds aside to be scored on — rows or whole problems, as its
+# stop unit says. The shipped fit holds nothing aside, so this is the arm
+# runner's own and is not part of an arm's config: a shipped arm's config stays
+# empty while it is still measured.
+HELD_ASIDE_FRAC = 0.03
 
 
 def _sha16(path):
@@ -133,7 +138,8 @@ def run_arm(panel, arm, cfg, force=False):
 
     pins = snapshot_pins(cfg)
     metrics = train_mirt.run(out_dir=os.path.join(arm_dir, "ratings"),
-                             axes_dir=os.path.join(arm_dir, "axes"), **cfg)
+                             axes_dir=os.path.join(arm_dir, "axes"),
+                             stop_row_frac=HELD_ASIDE_FRAC, **cfg)
     record = {"panel": panel, "arm": arm, "config": cfg,
               "pins": pins, "metrics": metrics}
     tmp = meta_path + ".tmp"

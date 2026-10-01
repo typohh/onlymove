@@ -138,9 +138,9 @@ from utils.rating.tail_agreement import (  # noqa: E402
     TAIL_HINGE, hinged_r, tail_weight as tail_weight_np)
 
 # The fit runs a FIXED budget under a cosine decay of both rates to zero, and the
-# final epoch is what ships. Nothing is selected on the stop split: it is measured
-# and printed as the record of where the fit got to and as the signal that would
-# show a run diverging. The decay is what makes the budget a real choice rather
+# final epoch is what ships. Nothing is selected on a stop split, which is why the
+# shipped fit holds none aside (STOP_ROW_FRAC): a comparison arm passes a fraction
+# and gets the split measured and printed as the record of where it got to. The decay is what makes the budget a real choice rather
 # than a stopping rule in disguise. Under a constant rate the fit wanders inside a
 # band at its end and the shipped value is whichever point of that band the last
 # epoch lands on, so a patience rule reading the split selects an epoch out of
@@ -240,7 +240,10 @@ ORTHO_AXES_DETACH = True
 # at all; anything above it is a judgement about how WELL, which the likelihood
 # already makes by giving a thin record few terms.
 MIN_BOTH_OUTCOMES = 1
-STOP_ROW_FRAC = 0.03             # rows held aside purely to detect convergence
+STOP_ROW_FRAC = 0.0              # the shipped fit trains on every row: the budget
+                                 # is fixed, so a held-aside split decides nothing
+                                 # and only withholds data. Comparison arms pass
+                                 # their own fraction (ablations.ablation_mirt)
 # The `spread` holdout (an ablation path; the shipped fit holds out rows). A
 # per-problem departure from the fitted curve is visible only as outcomes that
 # AGREE across different users on one problem, so it is drawn among problems
@@ -648,10 +651,8 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
     ty = torch.tensor(y, device=device)
     tp = torch.tensor(prob_idx, device=device)
 
-    # A convergence detector, not a criterion: every row spent here is a row the
-    # model does not learn from, so it is small. Stopping on TRAINING loss alone
-    # would pick the wrong epoch — held-out quality peaks hundreds of epochs
-    # before the training loss flattens.
+    # A measurement for comparison arms, never a criterion: every row spent here
+    # is a row the model does not learn from, so the shipped fit spends none.
     # THE HELD-ASIDE DRAW AND THE INITIALIZATION ARE SEPARABLE. One seed drives
     # both by default, which is right for production but conflates two things in
     # a comparison: two runs at different seeds differ in the fit AND in the rows
@@ -697,6 +698,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         is_stop = rng.random(len(df)) < stop_row_frac
     tr = torch.tensor(np.where(~is_stop)[0], device=device)
     i_stop = torch.tensor(np.where(is_stop)[0], device=device)
+    has_stop = bool(is_stop.any())
     print(f"  stop signal: {int(is_stop.sum())} rows held aside", flush=True)
 
     bank_tgt, bank_ok, bank_spec = load_bank(key_idx, k_axes)
@@ -942,9 +944,9 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
                 bce_tr = float(torch.nn.functional.binary_cross_entropy(
                     pr[tr], ty[tr]))
                 bce_st = float(torch.nn.functional.binary_cross_entropy(
-                    pr[i_stop], ty[i_stop]))
-            print(f"  epoch {ep + 1:4d}/{epochs}  train {bce_tr:.4f}  "
-                  f"stop {bce_st:.4f}", flush=True)
+                    pr[i_stop], ty[i_stop])) if has_stop else None
+            print(f"  epoch {ep + 1:4d}/{epochs}  train {bce_tr:.4f}"
+                  + (f"  stop {bce_st:.4f}" if has_stop else ""), flush=True)
             trace.append({"epoch": ep + 1, "train_bce": bce_tr,
                           "stop_bce": bce_st})
 
@@ -960,44 +962,47 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
     # absorb more residual, so it is a diagnostic beside the combined score and
     # never a criterion for choosing the count.
     m.train(False)
+    bce_stop_no_axes, slope_sweep = None, []
     with torch.no_grad():
-        b_s, a_s, c_s, _ = m.problem_params(tfeat[tp[i_stop]])
-        th_s = m.theta(tu[i_stop]).squeeze(-1)
-        lam_s = m.lapse()
-        z_s = (a_s * (th_s - b_s)).clamp(-35, 35)
-        p_noax = (c_s + (1.0 - c_s - lam_s) * torch.sigmoid(z_s)).clamp(
-            EPS, 1 - EPS)
-        bce_stop_no_axes = float(torch.nn.functional.binary_cross_entropy(
-            p_noax, ty[i_stop]))
-
-        # WHAT A GLOBAL SLOPE MULTIPLIER WOULD BUY (1.10), swept here because
-        # the sweep is a rescoring of this fit rather than a fit of its own.
-        # The multiplier PIVOTS AT THE RATING, so the 80%-clear anchor is held
-        # and only the steepness around it moves — at s=1 the expression is
-        # algebraically the model's own, which is what makes the curve's
-        # minimum comparable to the shipped value.
-        #
-        # Scored on the same held-aside rows as everything else: those rows are
-        # out of the fit entirely, while the abilities they are scored with come
-        # from each user's OTHER attempts, which is the position the client is
-        # in when it predicts an attempt from a history. Reported, never applied.
-        g_s = m.user_axis(tu[i_stop])
-        _, _, _, gl_s = m.problem_params(tfeat[tp[i_stop]])
-        ax_s = (gl_s * g_s).sum(-1)
-        kap_s = torch.log(
-            ((CALIBRATION_P - c_s) / (1.0 - c_s - lam_s)).clamp(EPS, 1 - EPS)
-            / (1.0 - ((CALIBRATION_P - c_s) / (1.0 - c_s - lam_s)).clamp(
-                EPS, 1 - EPS)))
-        rat_s = b_s + kap_s / a_s.clamp(min=1e-6)
-        slope_sweep = []
-        for mult in [round(0.60 + 0.05 * i, 2) for i in range(17)]:
-            z = ((a_s * mult) * (th_s - rat_s) + kap_s + ax_s).clamp(-35, 35)
-            pz = (c_s + (1.0 - c_s - lam_s) * torch.sigmoid(z)).clamp(
+        # Scored only where rows were held aside; the shipped fit holds none.
+        if has_stop:
+            b_s, a_s, c_s, _ = m.problem_params(tfeat[tp[i_stop]])
+            th_s = m.theta(tu[i_stop]).squeeze(-1)
+            lam_s = m.lapse()
+            z_s = (a_s * (th_s - b_s)).clamp(-35, 35)
+            p_noax = (c_s + (1.0 - c_s - lam_s) * torch.sigmoid(z_s)).clamp(
                 EPS, 1 - EPS)
-            slope_sweep.append(
-                {"mult": mult,
-                 "stop_bce": float(torch.nn.functional.binary_cross_entropy(
-                     pz, ty[i_stop]))})
+            bce_stop_no_axes = float(torch.nn.functional.binary_cross_entropy(
+                p_noax, ty[i_stop]))
+
+            # WHAT A GLOBAL SLOPE MULTIPLIER WOULD BUY (1.10), swept here because
+            # the sweep is a rescoring of this fit rather than a fit of its own.
+            # The multiplier PIVOTS AT THE RATING, so the 80%-clear anchor is held
+            # and only the steepness around it moves — at s=1 the expression is
+            # algebraically the model's own, which is what makes the curve's
+            # minimum comparable to the shipped value.
+            #
+            # Scored on the same held-aside rows as everything else: those rows are
+            # out of the fit entirely, while the abilities they are scored with come
+            # from each user's OTHER attempts, which is the position the client is
+            # in when it predicts an attempt from a history. Reported, never applied.
+            g_s = m.user_axis(tu[i_stop])
+            _, _, _, gl_s = m.problem_params(tfeat[tp[i_stop]])
+            ax_s = (gl_s * g_s).sum(-1)
+            kap_s = torch.log(
+                ((CALIBRATION_P - c_s) / (1.0 - c_s - lam_s)).clamp(EPS, 1 - EPS)
+                / (1.0 - ((CALIBRATION_P - c_s) / (1.0 - c_s - lam_s)).clamp(
+                    EPS, 1 - EPS)))
+            rat_s = b_s + kap_s / a_s.clamp(min=1e-6)
+            slope_sweep = []
+            for mult in [round(0.60 + 0.05 * i, 2) for i in range(17)]:
+                z = ((a_s * mult) * (th_s - rat_s) + kap_s + ax_s).clamp(-35, 35)
+                pz = (c_s + (1.0 - c_s - lam_s) * torch.sigmoid(z)).clamp(
+                    EPS, 1 - EPS)
+                slope_sweep.append(
+                    {"mult": mult,
+                     "stop_bce": float(torch.nn.functional.binary_cross_entropy(
+                         pz, ty[i_stop]))})
 
     # THE SPREAD HOLDOUT'S ROWS, for the producer that reads them. The full
     # prediction, axes included, and its derivative in the logit — a problem
