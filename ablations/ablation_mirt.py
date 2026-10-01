@@ -222,12 +222,13 @@ def main(argv=None):
                          f"utils.rating.features names them (production "
                          f"{PRODUCTION_BLOCKS!r}; 'all' adds the "
                          f"answer-derived blocks)")
-    ap.add_argument("--act-source", choices=("encoded", "last_block"),
+    ap.add_argument("--act-source", choices=("encoded", "trunk_final", "last_block"),
                     default=None,
                     help="which correct-cell activation roll-up the joint PCA "
                          "reduces (production 'encoded': every residual block "
-                         "through the frozen encoder). 'last_block' is the "
-                         "final block's raw channels alone, and needs "
+                         "through the frozen encoder). 'trunk_final' is the "
+                         "trunk state the heads read and 'last_block' the "
+                         "final block's increment alone; both need "
                          "auxiliary/rating_dev/extract_last_block.py run "
                          "first; with --pca-dim 0 they enter unrotated")
     ap.add_argument("--k-axes", type=int, default=None,

@@ -55,12 +55,15 @@ CACHE_DIR = os.path.join(PROJECT_ROOT, "activations", "_signal_cache")
 
 
 # WHICH correct-cell vectors the joint PCA reduces. "encoded" is the store every
-# production step reads; "last_block" is a comparison arm's own roll-up — the final
-# residual block's raw channels alone, written by
-# auxiliary/rating_dev/extract_last_block.py over the SAME id list — and exists so
-# the layer question is asked through this one assembly rather than a copy of it.
+# production step reads. The others are comparison arms' own roll-ups, written by
+# auxiliary/rating_dev/extract_last_block.py over the SAME id list, and exist so
+# the layer question is asked through this one assembly rather than a copy of it:
+# "trunk_final" is the trunk state the heads read (every block's increment summed,
+# then the final norm and activation), "last_block" is the final block's increment
+# alone — one of the eighteen the encoded store concatenates.
 ACT_SOURCE_DIRS = {
     "encoded": CACHE_DIR,
+    "trunk_final": os.path.join(PROJECT_ROOT, "activations", "_signal_cache_trunk_final"),
     "last_block": os.path.join(PROJECT_ROOT, "activations", "_signal_cache_last_block"),
 }
 
