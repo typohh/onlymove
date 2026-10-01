@@ -1,6 +1,6 @@
 {
   "panel": "last_block",
-  "description": "Whether the trunk needs every residual block's activations or the last layer's alone. `shipped` is the production input (all 18 block increments through the frozen encoder, joint PCA to 128). `final384` is the final trunk state at the correct cell \u2014 the 384 channels the engine's own heads read \u2014 standardized and unrotated (act_source=trunk_final, pca_dim=0); `final128` is the same channels through the joint PCA at the shipped width. `resid384`/`resid128` are the last block's INCREMENT alone, the other reading of 'last layer' and one of the eighteen pieces the shipped input concatenates; they run last and at four seeds. The single-layer arms need auxiliary/rating_dev/extract_last_block.py run first. EVERY ARM HOLDS OUT WHOLE PROBLEMS, since this is a feature-side question and a held-out problem's parameters come from the trunk alone. The three main arms run at EIGHT SEEDS, listed seed by seed so a partly run panel is a whole number of paired triples: within a seed the arms hold aside the same problems and their delta is paired, across seeds nothing may be subtracted. THE SHIPPED ARMS ARE ALSO THE BASELINE FOR A LATER ENGINE-NETWORK COMPARISON: an arm added to this manifest under the same seeds, on the same machine, before the next fetch_database, holds aside the same problems and pairs against them without the shipped arms being re-run. The panel reaches the held-out likelihood only \u2014 it re-maps no ranks and projects no per-cell vectors, so it says nothing about declared-rank agreement or the motif readings, both of which a change of activation source would also move.",
+  "description": "Whether the trunk needs every residual block's activations or the last layer's alone. `shipped` is the production input (all 18 block increments through the frozen encoder, joint PCA to 128). `final384` is the final trunk state at the correct cell \u2014 the 384 channels the engine's own heads read \u2014 standardized and unrotated (act_source=trunk_final, pca_dim=0); `final128` is the same channels through the joint PCA at the shipped width. The single-layer arms need auxiliary/rating_dev/extract_last_block.py run first. EVERY ARM HOLDS OUT WHOLE PROBLEMS, since this is a feature-side question and a held-out problem's parameters come from the trunk alone. The arms run at EIGHT SEEDS, listed seed by seed so a partly run panel is a whole number of paired triples: within a seed the arms hold aside the same problems and their delta is paired, across seeds nothing may be subtracted. THE SHIPPED ARMS ARE ALSO THE BASELINE FOR A LATER ENGINE-NETWORK COMPARISON: an arm added to this manifest under the same seeds, on the same machine, before the next fetch_database, holds aside the same problems and pairs against them without the shipped arms being re-run. The panel reaches the held-out likelihood only \u2014 it re-maps no ranks and projects no per-cell vectors, so it says nothing about declared-rank agreement or the motif readings, both of which a change of activation source would also move.",
   "arms": {
     "shipped_s0": {
       "stop_unit": "problem",
@@ -129,54 +129,6 @@
       "pca_dim": 128,
       "stop_unit": "problem",
       "seed": 7
-    },
-    "resid384_s0": {
-      "act_source": "last_block",
-      "pca_dim": 0,
-      "stop_unit": "problem",
-      "seed": 0
-    },
-    "resid128_s0": {
-      "act_source": "last_block",
-      "pca_dim": 128,
-      "stop_unit": "problem",
-      "seed": 0
-    },
-    "resid384_s1": {
-      "act_source": "last_block",
-      "pca_dim": 0,
-      "stop_unit": "problem",
-      "seed": 1
-    },
-    "resid128_s1": {
-      "act_source": "last_block",
-      "pca_dim": 128,
-      "stop_unit": "problem",
-      "seed": 1
-    },
-    "resid384_s2": {
-      "act_source": "last_block",
-      "pca_dim": 0,
-      "stop_unit": "problem",
-      "seed": 2
-    },
-    "resid128_s2": {
-      "act_source": "last_block",
-      "pca_dim": 128,
-      "stop_unit": "problem",
-      "seed": 2
-    },
-    "resid384_s3": {
-      "act_source": "last_block",
-      "pca_dim": 0,
-      "stop_unit": "problem",
-      "seed": 3
-    },
-    "resid128_s3": {
-      "act_source": "last_block",
-      "pca_dim": 128,
-      "stop_unit": "problem",
-      "seed": 3
     }
   }
 }
