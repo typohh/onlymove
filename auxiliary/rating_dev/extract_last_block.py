@@ -48,6 +48,12 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
+# The transformer blocks' fused Triton kernels are a training-speed path that
+# compiles against the Python headers at first use; the plain PyTorch path they
+# replace computes the same forward pass and needs nothing built.
+os.environ.setdefault("KATAGO_FUSED_ROPE_BACKWARD", "0")
+os.environ.setdefault("KATAGO_FUSED_SWIGLU_KERNEL", "0")
+
 from pipeline.extract_activations import (  # noqa: E402
     BATCH, DEFAULT_CKPT, PARSE_WORKERS, batch_forward, prepare_problem)
 from katago.train.load_model import load_model  # noqa: E402
