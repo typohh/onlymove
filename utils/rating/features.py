@@ -253,6 +253,50 @@ def build_correct_vec_cache(size, workers=None, force=False):
         json.dump(ids, f)
 
 
+def _legal_cells_path(size):
+    return os.path.join(CACHE_DIR, f"legal_cells_{size}.json")
+
+
+def _legal_cells_chunk(task):
+    act_dir, tids = task
+    out = {}
+    for t in tids:
+        with np.load(os.path.join(act_dir, t + ".npz")) as d:
+            out[t] = int(d["xys"].shape[0])
+    return out
+
+
+def load_legal_cell_counts(sizes, tids_by_size, workers=None):
+    """{(size, tid): how many legal cells the solver chooses among} — the row
+    count of the problem's activation npz, which enumerates exactly those cells.
+    One over it is the chance a uniformly random move is the answer.
+
+    Rolled up into legal_cells_<size>.json and reconciled by id in both
+    directions: a count is a pure function of its problem, so only ids the cache
+    lacks are read, and ids the corpus dropped leave the cache. A corpus problem
+    with no activation file aborts, like every other block."""
+    out = {}
+    for size in sizes:
+        path = _legal_cells_path(size)
+        cached = json.load(open(path)) if os.path.exists(path) else {}
+        want = tids_by_size[size]
+        missing = [t for t in want if t not in cached]
+        if missing or len(cached) != len(want):
+            act_dir = os.path.join(PROJECT_ROOT, "activations", str(size))
+            chunks = [(act_dir, missing[i:i + 2048])
+                      for i in range(0, len(missing), 2048)]
+            with ProcessPoolExecutor(max_workers=workers or os.cpu_count() or 1) as ex:
+                for part in ex.map(_legal_cells_chunk, chunks):
+                    cached.update(part)
+            cached = {t: cached[t] for t in want}
+            tmp = path + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump(cached, f)
+            os.replace(tmp, path)
+        out.update({(size, t): cached[t] for t in want})
+    return out
+
+
 def _cache_alt_vecs_path(size):
     return os.path.join(CACHE_DIR, f"alt_vecs_{size}.npy")
 

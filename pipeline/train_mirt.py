@@ -126,7 +126,7 @@ from utils.rating.model_constants import (  # noqa: E402
     K_AXES, PCA_DIM, PRODUCTION_BLOCKS, SEED, SIZES, SLOPE_FLOOR,
     clear_logit_vec)
 from utils.rating.features import (  # noqa: E402
-    load_first_time_attempts, load_joint_mirt_features)
+    load_first_time_attempts, load_joint_mirt_features, load_legal_cell_counts)
 # The trunk's layer stack, stated once — pipeline.write_mirt_per_cell rebuilds it
 # to project every legal cell, and a stack that matches by shape while differing
 # in its activation loads cleanly and projects through the wrong function.
@@ -240,6 +240,20 @@ ORTHO_AXES_DETACH = True
 # at all; anything above it is a judgement about how WELL, which the likelihood
 # already makes by giving a thin record few terms.
 MIN_BOTH_OUTCOMES = 1
+# THE RANDOM USER: a synthetic player who has answered EVERY corpus problem by
+# picking uniformly among its legal moves, so right with probability one over
+# their count. It is what tells the floor apart from the difficulty where no
+# weak player has tried a problem: attempted only by players who solve it, an
+# easy problem and a high floor explain the outcomes equally, nothing in the
+# likelihood breaks the tie, and the floor is free to run up to where the
+# 80%-clear rating stops existing. The player's ability is PINNED infinitely
+# low and it has no axis position, so its predicted success is the floor itself
+# and its rows act on the floor alone — a fitted ability would explain its
+# failures on easy problems by raising their difficulty and bend the bottom of
+# the scale around a player who does not exist. Its outcomes enter as their
+# EXPECTATION, not as sampled answers. The weight is one of its rows against one
+# real row; it carries no rank and reaches nothing outside this loss.
+RANDOM_USER_WEIGHT = 0.0
 STOP_ROW_FRAC = 0.0              # the shipped fit trains on every row: the budget
                                  # is fixed, so a held-aside split decides nothing
                                  # and only withholds data. Comparison arms pass
@@ -321,6 +335,12 @@ class JointMIRT(nn.Module):
 
     def lapse(self):
         return LAPSE_CAP * torch.sigmoid(self.lapse_raw)
+
+    def floor(self, feat):
+        """The floor alone, as problem_params states it — what the random
+        user's rows read."""
+        return (1.0 - 2.0 * self.lapse()) * torch.sigmoid(
+            self.head(self.trunk(feat))[:, 2])
 
     def user_axis(self, uid):
         """Per-user axis positions, CENTRED over the population.
@@ -588,6 +608,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         v_ridge=V_RIDGE, ortho_rating=ORTHO_RATING, ortho_mode="per_tail",
         shallow_tau=SHALLOW_TAU,
         shallow_w=SHALLOW_W, shallow_samples=SHALLOW_SAMPLES,
+        random_user_weight=RANDOM_USER_WEIGHT,
         teach_weight=TEACH_WEIGHT, stop_row_frac=STOP_ROW_FRAC,
         pca_dim=PCA_DIM, blocks=PRODUCTION_BLOCKS, act_source="store",
         stop_unit="row",
@@ -647,6 +668,12 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
           flush=True)
 
     tfeat = torch.tensor(feat, device=device)
+    t_chance = None
+    if random_user_weight > 0:
+        cells = load_legal_cell_counts(SIZES, {
+            s: [t for sz, t in keys if sz == s] for s in SIZES})
+        t_chance = torch.tensor([1.0 / cells[k] for k in keys],
+                                dtype=torch.float32, device=device)
     tu = torch.tensor(user_idx, device=device)
     ty = torch.tensor(y, device=device)
     tp = torch.tensor(prob_idx, device=device)
@@ -933,6 +960,13 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
             short = torch.nn.functional.softplus(
                 o_tau - m.slope_logit(tfeat[si])).pow(2).mean()
             loss = loss + shallow_w * short
+            if t_chance is not None:
+                # The same corpus sample, floor only. Scaled so the weight is
+                # per row: the player holds one row per corpus problem against
+                # the n real rows the likelihood above is averaged over.
+                c_r = m.floor(tfeat[si]).clamp(EPS, 1 - EPS)
+                loss = loss + random_user_weight * (len(tfeat) / n) * (
+                    torch.nn.functional.binary_cross_entropy(c_r, t_chance[si]))
             m.train(True)
             opt.zero_grad(); loss.backward(); opt.step()
 
@@ -1160,6 +1194,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         "lambda": lam, "elapsed_s": round(elapsed, 1),
         "epochs": int(epochs), "trace": trace,
         "k_axes": int(k_axes),
+        "random_user_weight": float(random_user_weight),
         "lr_schedule": str(lr_schedule),
         "lr_warmup_epochs": int(lr_warmup_epochs),
         "ortho_axes": float(ortho_axes),

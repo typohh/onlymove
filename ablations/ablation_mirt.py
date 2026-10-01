@@ -173,6 +173,13 @@ def main(argv=None):
     ap.add_argument("--shallow-tau", type=float, default=None,
                     help="the barrier's pre-softplus threshold (production "
                          f"{train_mirt.SHALLOW_TAU})")
+    ap.add_argument("--random-user-weight", type=float, default=None,
+                    help="weight of the synthetic random user's rows against a "
+                         "real row (production "
+                         f"{train_mirt.RANDOM_USER_WEIGHT}); the player answers "
+                         "every problem at one over its legal moves with its "
+                         "ability pinned infinitely low, so it acts on the "
+                         "floor alone")
     # --- the learning-rate cluster (methodology §1.8) ---
     ap.add_argument("--lr-net", type=float, default=None,
                     help=f"the network's rate (production {train_mirt.LR_NET})")
@@ -299,6 +306,7 @@ def main(argv=None):
 
     cfg = {}
     for flag in ("seed", "epochs", "shallow_w", "shallow_tau", "lr_net",
+                 "random_user_weight",
                  "lr_field", "ortho_rating", "ortho_mode", "ortho_axes",
                  "teach_weight", "teach_detach", "ortho_detach",
                  "ortho_axes_detach", "v_ridge_ladder",
