@@ -23,10 +23,16 @@ are pipeline.extract_activations' own.
 
     ./.venv/bin/python3 -u -m auxiliary.rating_dev.extract_last_block
 
+`--ckpt PATH --tag NAME` reads ANOTHER engine network over the same problems and
+writes its final trunk state as the source `trunk_final_<NAME>` and its global
+vectors under `_signal_cache_global_<NAME>/`; a tagged run writes no last-block
+increment.
+
 A size whose roll-ups all cover the production id list is skipped; a problem
 that fails to prepare aborts the run.
 """
 
+import argparse
 import json
 import logging
 import os
@@ -47,7 +53,7 @@ from pipeline.extract_activations import (  # noqa: E402
 from katago.train.load_model import load_model  # noqa: E402
 from utils.constants import ALL_BOARD_SIZES  # noqa: E402
 from utils.rating.features import (  # noqa: E402
-    ACT_SOURCE_DIRS, _cache_ids_path, _cache_vecs_path)
+    _cache_ids_path, _cache_vecs_path)
 
 GLOBAL_DIR = os.path.join(PROJECT_ROOT, "activations", "_signal_cache_global")
 GLOBALS = ("trunk_mean", "trunk_max", "value_hidden")
@@ -57,30 +63,38 @@ GLOBALS = ("trunk_mean", "trunk_max", "value_hidden")
 CHUNK = BATCH * 16
 
 
-def _paths(size, last_name):
-    cell = {"trunk_final": _cache_vecs_path(size, "trunk_final"),
-            last_name: _cache_vecs_path(size, "last_block")}
-    glob = {g: os.path.join(GLOBAL_DIR, f"{g}_{size}.npy") for g in GLOBALS}
-    ids = [_cache_ids_path(size, "trunk_final"),
-           _cache_ids_path(size, "last_block"),
-           os.path.join(GLOBAL_DIR, f"ids_{size}.json")]
+def _paths(size, last_name, tag):
+    final = "trunk_final" + (f"_{tag}" if tag else "")
+    gdir = GLOBAL_DIR + (f"_{tag}" if tag else "")
+    cell = {"trunk_final": _cache_vecs_path(size, final)}
+    ids = [_cache_ids_path(size, final), os.path.join(gdir, f"ids_{size}.json")]
+    if not tag:
+        cell[last_name] = _cache_vecs_path(size, "last_block")
+        ids.append(_cache_ids_path(size, "last_block"))
+    glob = {g: os.path.join(gdir, f"{g}_{size}.npy") for g in GLOBALS}
     return cell, glob, ids
 
 
 def main():
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap.add_argument("--ckpt", default=DEFAULT_CKPT)
+    ap.add_argument("--tag", default="",
+                    help="names the network when --ckpt is not the shipped one")
+    args = ap.parse_args()
+    if (args.ckpt != DEFAULT_CKPT) != bool(args.tag):
+        raise SystemExit("--ckpt and --tag go together")
     logging.disable(logging.CRITICAL)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    for d in (ACT_SOURCE_DIRS["trunk_final"], ACT_SOURCE_DIRS["last_block"],
-              GLOBAL_DIR):
-        os.makedirs(d, exist_ok=True)
     for size in ALL_BOARD_SIZES:
         ids = json.load(open(_cache_ids_path(size)))
         in_dir = os.path.join(PROJECT_ROOT, "tsumegos", str(size))
-        model, _, _ = load_model(DEFAULT_CKPT, use_swa=False, device=device,
+        model, _, _ = load_model(args.ckpt, use_swa=False, device=device,
                                  pos_len=size, verbose=False)
         model.eval()
         last_name = f"rconv{len(model.blocks)}.out"
-        cell, glob, id_paths = _paths(size, last_name)
+        cell, glob, id_paths = _paths(size, last_name, args.tag)
+        for p in id_paths:
+            os.makedirs(os.path.dirname(p), exist_ok=True)
         outputs = list(cell.values()) + list(glob.values())
         if (all(os.path.exists(p) for p in outputs + id_paths)
                 and all(json.load(open(p)) == ids for p in id_paths)):
@@ -109,15 +123,16 @@ def main():
                 for b in range(0, len(items), BATCH):
                     batch = items[b:b + BATCH]
                     hidden.clear()
-                    final, last = batch_forward(
-                        model, ["trunkfinal", last_name],
+                    final, *last = batch_forward(
+                        model, ["trunkfinal"] + [n for n in cell if n == last_name],
                         [x[0] for x in batch], [x[1] for x in batch])
                     xy = [x[2][x[3]] for x in batch]
                     j = torch.arange(len(batch), device=final.device)
                     xs = torch.tensor([x for x, _ in xy], device=final.device)
                     ys = torch.tensor([y for _, y in xy], device=final.device)
                     put("trunk_final", final[j, :, ys, xs])
-                    put(last_name, last[j, :, ys, xs])
+                    if last:
+                        put(last_name, last[0][j, :, ys, xs])
                     put("trunk_mean", final.float().mean(dim=(2, 3)))
                     put("trunk_max", final.float().amax(dim=(2, 3)))
                     put("value_hidden", hidden[0])

@@ -65,6 +65,10 @@ ACT_SOURCE_DIRS = {
     "encoded": CACHE_DIR,
     "trunk_final": os.path.join(PROJECT_ROOT, "activations", "_signal_cache_trunk_final"),
     "last_block": os.path.join(PROJECT_ROOT, "activations", "_signal_cache_last_block"),
+    # The same final-trunk reading from another engine network (the extractor's
+    # --ckpt/--tag), for a network comparison at a matched layout.
+    "trunk_final_tf3b10c512": os.path.join(
+        PROJECT_ROOT, "activations", "_signal_cache_trunk_final_tf3b10c512"),
 }
 
 

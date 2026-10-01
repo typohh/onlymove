@@ -222,7 +222,8 @@ def main(argv=None):
                          f"utils.rating.features names them (production "
                          f"{PRODUCTION_BLOCKS!r}; 'all' adds the "
                          f"answer-derived blocks)")
-    ap.add_argument("--act-source", choices=("encoded", "trunk_final", "last_block"),
+    ap.add_argument("--act-source", choices=("encoded", "trunk_final", "last_block",
+                             "trunk_final_tf3b10c512"),
                     default=None,
                     help="which correct-cell activation roll-up the joint PCA "
                          "reduces (production 'encoded': every residual block "
