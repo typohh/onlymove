@@ -140,13 +140,16 @@ class HeuristicBot:
 
 
 class KataGo:
-    def __init__(self, weights, board_size, playouts=1, human_rank=None, temperature=1.0):
+    def __init__(self, weights, board_size, playouts=1, human_rank=None, temperature=1.0, temperatures=None):
         self._controller = KatagoController()
         self._controller.start_engine(model=weights, board_size=board_size, verbose=DEBUG, human=human_rank is not None)
         self._query = KatagoQueries(self._controller, board_size)
         self._playouts = playouts
         self._human_rank = human_rank
-        self._temperature = temperature
+        # ONE evaluation serves every temperature: a temperature only reshapes
+        # the policy the engine already returned, so a family of temperature
+        # bots is one query per problem, read at each of its temperatures.
+        self._temperatures = tuple(temperatures) if temperatures else (temperature,)
 
     def get_probability(self, game):
         for i in range(3):
@@ -165,8 +168,10 @@ class KataGo:
                     response = self._query.query(setup_moves_gtp, playouts=self._playouts)
                     policy = response["policy"]
 
-                policy = self._query.adjust_temperature(policy,self._temperature)
-                return self._query.get_move_probability(policy, next_move_gtp)
+                return tuple(
+                    self._query.get_move_probability(
+                        self._query.adjust_temperature(policy, t), next_move_gtp)
+                    for t in self._temperatures)
             except Exception as e:
                 traceback.print_exc()
                 print(f"KataGo attempt {i + 1}/3 failed. Retrying... Error: {e}")
@@ -199,8 +204,10 @@ def get_file_content(filename):
 
 
 def process_file(filename, bot):
+    """One probability per attempts file the bot writes, in that order."""
     game = get_file_content(filename)
-    return bot.get_probability(game)
+    p = bot.get_probability(game)
+    return p if isinstance(p, tuple) else (p,)
 
 
 
@@ -250,22 +257,8 @@ def get_all_tsumego_ids():
     return ids
 
 
-def test_bot(bot, attempts_file, batch_ids):
-    """
-    Process a batch of tsumegos specified by their IDs.
-    
-    Args:
-        bot: The bot to use for processing
-        attempts_file: Path to the file storing attempt results
-        batch_ids: Set of tsumego IDs to process in this batch
-    
-    Returns:
-        None
-    """
-    file_queue = queue.Queue()
-    lock = threading.Lock()
+def _read_attempts(attempts_file):
     probabilities = {}
-    start_time = time.time()
     if os.path.exists(attempts_file):
         with open(attempts_file, 'r') as f:
             for line in f:
@@ -273,20 +266,41 @@ def test_bot(bot, attempts_file, batch_ids):
                 if len(parts) != 2:
                     continue  # skip blank / legacy-truncated lines
                 probabilities[parts[0]] = float(parts[1])
-    
-    # Queue only files from the batch that haven't been processed yet
+    return probabilities
+
+
+def test_bot(bot, attempts_files, batch_ids):
+    """
+    Process a batch of tsumegos specified by their IDs.
+
+    Args:
+        bot: The bot to use for processing
+        attempts_files: The files storing the bot's results, one per probability
+            it answers (a temperature family writes one file per temperature)
+        batch_ids: Set of tsumego IDs to process in this batch
+
+    Returns:
+        None
+    """
+    file_queue = queue.Queue()
+    lock = threading.Lock()
+    probabilities = {}
+    start_time = time.time()
+    stored = [_read_attempts(f) for f in attempts_files]
+
+    # Queue the batch's files that any of the bot's files still lacks
     queued_count = 0
     for tsumego_id in batch_ids:
-        if tsumego_id not in probabilities:
+        if any(tsumego_id not in d for d in stored):
             file_queue.put(tsumego_id + ".sgf")
             queued_count += 1
             if DEBUG and queued_count >= 5000:
                 break
-    
+
     if file_queue.empty():
         return
-    
-    print(f"Generating {file_queue.qsize()} attempts for {attempts_file}")
+
+    print(f"Generating {file_queue.qsize()} attempts for {', '.join(attempts_files)}")
     threads = []
     num_threads = 1 if DEBUG else (bot.get_batch_size() * 2 if isinstance(bot, KataGo) else 8)
     for _ in range(num_threads):
@@ -304,32 +318,39 @@ def test_bot(bot, attempts_file, batch_ids):
         except Exception as e:
             if worker_exc is None:
                 worker_exc = e
-    total_count = len(probabilities)
-    solved_count = sum(probabilities.values())
     elapsed_time = time.time() - start_time
-    print(f"Saving: {attempts_file}")
-    print(f"Processed: {queued_count} new out of {total_count} total")
-    if total_count > 0:
-        print(f"Accuracy: {(100 * solved_count / total_count):.2f}%")
     if elapsed_time > 0:
         print(f"Tsumegos per second: {queued_count / elapsed_time:.2f}")
-    print(f"Time: {time.time() - start_time:.2f} seconds")
-    print()
+    print(f"Time: {elapsed_time:.2f} seconds")
     if DEBUG:
         exit(-1)
-    # Atomic write: a kill mid-write must not truncate the attempts file (a
-    # half-written final line would crash the next run's parse) nor lose the
-    # bot's accumulated results. Write a sibling temp file, then os.replace.
-    tmp_path = f"{attempts_file}.tmp"
-    with open(tmp_path, 'w') as f:
-        for key, value in sorted(probabilities.items()):
-            f.write(f"{key} {value}\n")
-    os.replace(tmp_path, attempts_file)
+    for j, (attempts_file, known) in enumerate(zip(attempts_files, stored)):
+        # A value a file already holds stays; the run only fills what is missing.
+        for tsumego_id, values in probabilities.items():
+            known.setdefault(tsumego_id, values[j])
+        print(f"Saving: {attempts_file}")
+        print(f"Processed: {queued_count} new out of {len(known)} total")
+        if known:
+            print(f"Accuracy: {(100 * sum(known.values()) / len(known)):.2f}%")
+        # Atomic write: a kill mid-write must not truncate the attempts file (a
+        # half-written final line would crash the next run's parse) nor lose the
+        # bot's accumulated results. Write a sibling temp file, then os.replace.
+        tmp_path = f"{attempts_file}.tmp"
+        with open(tmp_path, 'w') as f:
+            for key, value in sorted(known.items()):
+                f.write(f"{key} {value}\n")
+        os.replace(tmp_path, attempts_file)
+    print()
     if worker_exc is not None:
         raise worker_exc
 
 
-def batch_has_missing(attempts_file, batch_ids):
+def batch_has_missing(attempts_files, batch_ids):
+    """True iff any of a bot's attempts files lacks an id of the batch."""
+    return any(_file_has_missing(f, batch_ids) for f in attempts_files)
+
+
+def _file_has_missing(attempts_file, batch_ids):
     """True iff some id in batch_ids is not yet recorded in attempts_file — i.e. this
     bot has work to do for this batch. Lets main() skip the (expensive) engine spin-up
     for batch×bot cells with nothing to benchmark: a no-op test_bot otherwise still
@@ -353,8 +374,9 @@ SKIP_IF_EXISTS = False
 
 def get_bot_configs(board_size):
     """
-    Returns a list of (bot_factory, attempts_filename) tuples.
-    bot_factory is a callable that creates the bot when called.
+    Returns a list of (bot_factory, attempts_filenames) tuples.
+    bot_factory is a callable that creates the bot when called; the bot answers
+    one probability per filename, in order — a temperature family is one bot.
     """
     configs = []
 
@@ -363,37 +385,40 @@ def get_bot_configs(board_size):
         filename = os.path.join(ATTEMPTS_DIRECTORY, f"{get_filename_without_extension(MODEL_HUMAN)}_{get_rank_str(human_rank)}.txt")
         configs.append((
             lambda hr=human_rank: KataGo(get_model(MODEL_BEST_SMALL), board_size, 1, human_rank=hr, temperature=1.0),
-            filename
+            [filename]
         ))
 
     # Model + temperature combinations
+    def temperature_suffix(temperature):
+        return f"_t{format(Decimal(str(temperature)).normalize(), 'f')}.txt"
+
     for model in [MODEL_RESIDUAL, MODEL_TRANSFORMER]:
-        for temperature in [2.0, 1.5, 1.2, 1, 0.8, 0.6, 0.4, 0.2, 0.1, 0.05, 0.02]:
-            model_filename = get_model(model)
-            filename = os.path.join(ATTEMPTS_DIRECTORY, f"{get_filename_without_extension(model_filename)}_t{format(Decimal(str(temperature)).normalize(), 'f')}.txt")
-            configs.append((
-                lambda mf=model_filename, t=temperature: KataGo(mf, board_size, temperature=t),
-                filename
-            ))
+        temperatures = [2.0, 1.5, 1.2, 1, 0.8, 0.6, 0.4, 0.2, 0.1, 0.05, 0.02]
+        model_filename = get_model(model)
+        stem = os.path.join(ATTEMPTS_DIRECTORY, get_filename_without_extension(model_filename))
+        configs.append((
+            lambda mf=model_filename, ts=temperatures: KataGo(mf, board_size, temperatures=ts),
+            [stem + temperature_suffix(t) for t in temperatures]
+        ))
 
     # High temperature variants for 20k rank
-    for temperature in [1.1, 1.2, 1.3, 1.4, 1.5, 1.7, 2, 3, 5, 10, 50]:
-        filename = os.path.join(ATTEMPTS_DIRECTORY, f"{get_filename_without_extension(MODEL_HUMAN)}_20k_t{format(Decimal(str(temperature)).normalize(), 'f')}.txt")
-        configs.append((
-            lambda t=temperature: KataGo(get_model(MODEL_BEST_SMALL), board_size, human_rank=get_all_ranks()[0], temperature=t),
-            filename
-        ))
-    
+    temperatures = [1.1, 1.2, 1.3, 1.4, 1.5, 1.7, 2, 3, 5, 10, 50]
+    stem = os.path.join(ATTEMPTS_DIRECTORY, f"{get_filename_without_extension(MODEL_HUMAN)}_20k")
+    configs.append((
+        lambda ts=temperatures: KataGo(get_model(MODEL_BEST_SMALL), board_size, human_rank=get_all_ranks()[0], temperatures=ts),
+        [stem + temperature_suffix(t) for t in temperatures]
+    ))
+
     # Heuristic bot
     configs.append((
         lambda: HeuristicBot(),
-        os.path.join(ATTEMPTS_DIRECTORY, "heuristic.txt")
+        [os.path.join(ATTEMPTS_DIRECTORY, "heuristic.txt")]
     ))
 
     # SGF Move Bot
     configs.append((
         lambda: SgfMoveBot(),
-        os.path.join(ATTEMPTS_DIRECTORY, "sgf_move.txt")
+        [os.path.join(ATTEMPTS_DIRECTORY, "sgf_move.txt")]
     ))
 
     return configs
@@ -429,7 +454,8 @@ def main():
 
     # Filter out configs where SKIP_IF_EXISTS applies
     if SKIP_IF_EXISTS:
-        bot_configs = [(factory, filename) for factory, filename in bot_configs if not os.path.exists(filename)]
+        bot_configs = [(factory, filenames) for factory, filenames in bot_configs
+                       if not all(os.path.exists(f) for f in filenames)]
 
     if not bot_configs:
         print("All bots already have complete attempt files.")
@@ -456,18 +482,18 @@ def main():
         print(f"{'='*60}\n")
         
         ran = 0
-        for bot_factory, attempts_file in bot_configs:
+        for bot_factory, attempts_files in bot_configs:
             # Skip the engine spin-up when this bot already covers the whole batch.
             # KataGo startup (model load + OpenCL) dominates and is otherwise paid for
             # every batch×bot cell even when test_bot would no-op — so an incremental
             # top-up costs as much as a full rebuild. This makes it proportional to the
             # new work. (See batch_has_missing.)
-            if not batch_has_missing(attempts_file, batch_ids):
+            if not batch_has_missing(attempts_files, batch_ids):
                 continue
             ran += 1
             bot = bot_factory()
             try:
-                test_bot(bot, attempts_file, batch_ids)
+                test_bot(bot, attempts_files, batch_ids)
             finally:
                 bot.stop()
         print(f"  batch {iteration}: {ran}/{len(bot_configs)} bots had new work "
