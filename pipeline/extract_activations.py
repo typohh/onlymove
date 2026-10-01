@@ -50,7 +50,8 @@ import queue
 import sys
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
+import multiprocessing
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 
 import numpy as np
 import sgfmill.sgf
@@ -159,10 +160,15 @@ def vecs_at_cells_gpu(trunk, j, xys) -> np.ndarray:
     return trunk[j][:, ys, xs].T.float().half().cpu().numpy()
 
 
+def _prepare_task(task):
+    return prepare_problem(*task)
+
+
 def prepare_problem(sgf_path: str, model_config, pos_len):
     """The CPU half of one problem — parse, replay, enumerate cells, build the
-    net inputs. Runs in reader threads; the Python-heavy work here overlaps
-    the GPU batch and the zlib writes."""
+    net inputs. Runs in reader PROCESSES: it is pure Python, and as threads the
+    readers hold the interpreter against the forward pass, whose many short
+    calls each wait to take it back."""
     with open(sgf_path, "rb") as f:
         game = sgfmill.sgf.Sgf_game.from_bytes(f.read())
     size = game.get_size()
@@ -204,7 +210,7 @@ def enumerate_legal_cells(board, pla, size):
 
 
 BATCH = 16                       # problems per forward pass
-PARSE_WORKERS = 4                # SGF parse + input-feature threads
+PARSE_WORKERS = 4                # SGF parse + input-feature processes
 WRITE_WORKERS = 4                # compressed-npz writer threads
 PREFETCH = 64                    # prepared problems the readers may run ahead
 
@@ -287,21 +293,25 @@ def main():
               + (" (fingerprints verifying in background)" if verifier else ""),
               flush=True)
 
-        # Reader threads run the CPU half (parse, replay, input features) ahead
-        # of the GPU; a writer pool compresses and renames behind it. Any
+        # Reader processes run the CPU half (parse, replay, input features)
+        # ahead of the GPU, PREFETCH problems at a time so the lookahead stays
+        # bounded; a writer pool compresses and renames behind it. Any
         # failure anywhere is a hard abort, never a skipped problem — a missing
         # id desyncs every downstream cache from the tsumego set.
         q = queue.Queue(maxsize=PREFETCH)
 
         def _read_all():
             try:
-                with ThreadPoolExecutor(max_workers=PARSE_WORKERS) as ex:
-                    for fname, item in zip(todo, ex.map(
-                            lambda f: prepare_problem(
-                                os.path.join(in_dir, f), model.config,
-                                model.pos_len),
-                            todo, chunksize=4)):
-                        q.put((fname, item))
+                with ProcessPoolExecutor(
+                        max_workers=PARSE_WORKERS,
+                        mp_context=multiprocessing.get_context("spawn")) as ex:
+                    for s in range(0, len(todo), PREFETCH):
+                        chunk = todo[s:s + PREFETCH]
+                        tasks = [(os.path.join(in_dir, f), model.config,
+                                  model.pos_len) for f in chunk]
+                        for fname, item in zip(chunk, ex.map(
+                                _prepare_task, tasks, chunksize=4)):
+                            q.put((fname, item))
                 q.put(None)
             except BaseException as e:  # surfaces in the consumer, fail-loud
                 q.put(e)
