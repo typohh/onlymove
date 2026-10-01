@@ -1,0 +1,18 @@
+{
+  "panel": "last_block",
+  "description": "Whether the trunk needs every residual block's activations or the last block's alone. `shipped` is the production input (all 18 blocks through the frozen encoder, joint PCA to 128); `last384` is the final block's 384 raw channels at the correct cell, standardized and unrotated (act_source=last_block, pca_dim=0); `last128` is the same channels through the joint PCA at the shipped width. The last-block arms need auxiliary/rating_dev/extract_last_block.py run first. EVERY ARM HOLDS OUT WHOLE PROBLEMS, since this is a feature-side question and a held-out problem's parameters come from the trunk alone, and EVERY ARM RUNS AT FOUR SEEDS: within a seed the three arms hold aside the same problems and their delta is paired, across seeds nothing may be subtracted. The panel reaches the held-out likelihood only — it re-maps no ranks and projects no per-cell vectors, so it says nothing about declared-rank agreement or about the motif readings, both of which a change of activation source would also move.",
+  "arms": {
+    "shipped_s0": {"stop_unit": "problem", "seed": 0},
+    "last384_s0": {"act_source": "last_block", "pca_dim": 0, "stop_unit": "problem", "seed": 0},
+    "last128_s0": {"act_source": "last_block", "pca_dim": 128, "stop_unit": "problem", "seed": 0},
+    "shipped_s1": {"stop_unit": "problem", "seed": 1},
+    "last384_s1": {"act_source": "last_block", "pca_dim": 0, "stop_unit": "problem", "seed": 1},
+    "last128_s1": {"act_source": "last_block", "pca_dim": 128, "stop_unit": "problem", "seed": 1},
+    "shipped_s2": {"stop_unit": "problem", "seed": 2},
+    "last384_s2": {"act_source": "last_block", "pca_dim": 0, "stop_unit": "problem", "seed": 2},
+    "last128_s2": {"act_source": "last_block", "pca_dim": 128, "stop_unit": "problem", "seed": 2},
+    "shipped_s3": {"stop_unit": "problem", "seed": 3},
+    "last384_s3": {"act_source": "last_block", "pca_dim": 0, "stop_unit": "problem", "seed": 3},
+    "last128_s3": {"act_source": "last_block", "pca_dim": 128, "stop_unit": "problem", "seed": 3}
+  }
+}

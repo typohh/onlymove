@@ -102,6 +102,7 @@ def snapshot_pins(cfg=None):
                                            "motif_proxies.npz")),
         "blocks": str(cfg.get("blocks", PRODUCTION_BLOCKS)),
         "pca_dim": int(cfg.get("pca_dim", PCA_DIM)),
+        "act_source": str(cfg.get("act_source", "encoded")),
         "k_axes": int(cfg.get("k_axes", K_AXES)),
         # THE REGIME: what a baseline change moves. Effective values, so an arm
         # that sweeps either is pinned to what it ran with, and a record written
@@ -221,6 +222,14 @@ def main(argv=None):
                          f"utils.rating.features names them (production "
                          f"{PRODUCTION_BLOCKS!r}; 'all' adds the "
                          f"answer-derived blocks)")
+    ap.add_argument("--act-source", choices=("encoded", "last_block"),
+                    default=None,
+                    help="which correct-cell activation roll-up the joint PCA "
+                         "reduces (production 'encoded': every residual block "
+                         "through the frozen encoder). 'last_block' is the "
+                         "final block's raw channels alone, and needs "
+                         "auxiliary/rating_dev/extract_last_block.py run "
+                         "first; with --pca-dim 0 they enter unrotated")
     ap.add_argument("--k-axes", type=int, default=None,
                     help=f"how many axes the fit carries (production {K_AXES}). "
                          f"The bank is NESTED: a smaller count keeps the first k "
@@ -285,7 +294,7 @@ def main(argv=None):
                  "lr_field", "ortho_rating", "ortho_mode", "ortho_axes",
                  "teach_weight", "teach_detach", "ortho_detach",
                  "ortho_axes_detach", "v_ridge_ladder",
-                 "pca_dim", "blocks", "stop_unit", "k_axes",
+                 "pca_dim", "blocks", "act_source", "stop_unit", "k_axes",
                  "dropout", "input_dropout", "weight_decay",
                  "weight_decay_fields",
                  "lr_schedule", "lr_warmup_epochs", "split_seed", "pca_seed"):

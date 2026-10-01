@@ -54,12 +54,23 @@ N_CONTRAST_BLOCKS = 4
 CACHE_DIR = os.path.join(PROJECT_ROOT, "activations", "_signal_cache")
 
 
-def _cache_vecs_path(size):
-    return os.path.join(CACHE_DIR, f"correct_vecs_{size}.npy")
+# WHICH correct-cell vectors the joint PCA reduces. "encoded" is the store every
+# production step reads; "last_block" is a comparison arm's own roll-up — the final
+# residual block's raw channels alone, written by
+# auxiliary/rating_dev/extract_last_block.py over the SAME id list — and exists so
+# the layer question is asked through this one assembly rather than a copy of it.
+ACT_SOURCE_DIRS = {
+    "encoded": CACHE_DIR,
+    "last_block": os.path.join(PROJECT_ROOT, "activations", "_signal_cache_last_block"),
+}
 
 
-def _cache_ids_path(size):
-    return os.path.join(CACHE_DIR, f"correct_ids_{size}.json")
+def _cache_vecs_path(size, act_source="encoded"):
+    return os.path.join(ACT_SOURCE_DIRS[act_source], f"correct_vecs_{size}.npy")
+
+
+def _cache_ids_path(size, act_source="encoded"):
+    return os.path.join(ACT_SOURCE_DIRS[act_source], f"correct_ids_{size}.json")
 
 
 def _contrastive_cache_path(size):
@@ -881,7 +892,7 @@ def build_profiles(df):
     return pd.DataFrame(out, columns=["profile", "problem", "success"])
 
 
-def _joint_pca_cache_path(sizes, tids_by_size, pca_dim, seed):
+def _joint_pca_cache_path(sizes, tids_by_size, pca_dim, seed, act_source="encoded"):
     """Deterministic cache file for the joint-PCA reduction. Keyed on (sizes, pca_dim, seed),
     the raw activation-cache file fingerprints (basename+size+mtime — so a re-extraction
     invalidates it), AND the exact tid subset requested (a caller fitting on a different subset
@@ -890,15 +901,17 @@ def _joint_pca_cache_path(sizes, tids_by_size, pca_dim, seed):
     h = hashlib.sha256()
     h.update(repr((list(sizes), int(pca_dim), int(seed))).encode())
     for size in sizes:
-        for p in (_cache_ids_path(size), _cache_vecs_path(size)):
+        for p in (_cache_ids_path(size, act_source),
+                  _cache_vecs_path(size, act_source)):
             st = os.stat(p)
             h.update(f"{os.path.basename(p)}:{st.st_size}:{st.st_mtime_ns}".encode())
         h.update("\x00".join(tids_by_size[size]).encode())
-    cdir = os.path.dirname(_cache_vecs_path(sizes[0]))
+    cdir = os.path.dirname(_cache_vecs_path(sizes[0], act_source))
     return os.path.join(cdir, f"joint_pca_{h.hexdigest()[:16]}.npz")
 
 
-def load_joint_activations(sizes, tids_by_size, pca_dim, seed, cache=True):
+def load_joint_activations(sizes, tids_by_size, pca_dim, seed, cache=True,
+                           act_source="encoded"):
     """ONE PCA basis shared across boards (so a pooled model's activation weights mean
     the same thing on 9×9 and 13×13). Loads each board's raw correct-move activation
     cache for its attempted problems, stacks, fits a single StandardScaler+randomized
@@ -908,18 +921,23 @@ def load_joint_activations(sizes, tids_by_size, pca_dim, seed, cache=True):
     The randomized-PCA fit over the stacked ~N×N_FEATS activation matrix is the dominant
     startup cost and is fully determined by its inputs, so the reduced output is memoized to
     joint_pca_<hash>.npz (atomic write, fingerprinted on the raw-cache files). cache=False
-    forces a recompute (e.g. to rebuild a corrupt cache)."""
+    forces a recompute (e.g. to rebuild a corrupt cache).
+
+    `act_source` names which correct-cell roll-up is reduced (ACT_SOURCE_DIRS), and
+    pca_dim=0 skips the rotation: the source's own channels, standardized, at their
+    full width. Both are comparison-arm knobs; every production caller passes neither."""
     import json as _json
     from sklearn.decomposition import PCA
     from sklearn.preprocessing import StandardScaler
-    cpath = _joint_pca_cache_path(sizes, tids_by_size, pca_dim, seed) if cache else None
+    cpath = (_joint_pca_cache_path(sizes, tids_by_size, pca_dim, seed, act_source)
+             if cache else None)
     if cpath and os.path.exists(cpath):
         d = np.load(cpath, allow_pickle=False)
         Z, k = d["Z"], int(d["k"])
         keys = list(zip(d["key_size"].tolist(), d["key_tid"].tolist()))
         print(f"  joint-PCA: cache hit {os.path.basename(cpath)} ({Z.shape[0]} problems, k={k})")
         return {key: Z[i] for i, key in enumerate(keys)}, k
-    return _fit_joint_pca(sizes, tids_by_size, pca_dim, seed, cpath)[:2]
+    return _fit_joint_pca(sizes, tids_by_size, pca_dim, seed, cpath, act_source)[:2]
 
 
 def load_joint_activation_basis(sizes, tids_by_size, pca_dim, seed):
@@ -939,16 +957,16 @@ def load_joint_activation_basis(sizes, tids_by_size, pca_dim, seed):
     return _fit_joint_pca(sizes, tids_by_size, pca_dim, seed, cpath)[2]
 
 
-def _fit_joint_pca(sizes, tids_by_size, pca_dim, seed, cpath):
+def _fit_joint_pca(sizes, tids_by_size, pca_dim, seed, cpath, act_source="encoded"):
     """Fit + cache the joint PCA; returns ({key: vec}, k, basis dict)."""
     import json as _json
     from sklearn.decomposition import PCA
     from sklearn.preprocessing import StandardScaler
     Xparts, keys = [], []
     for size in sizes:
-        ids = _json.load(open(_cache_ids_path(size)))
+        ids = _json.load(open(_cache_ids_path(size, act_source)))
         row = {t: i for i, t in enumerate(ids)}
-        vecs = np.load(_cache_vecs_path(size), mmap_mode="r")
+        vecs = np.load(_cache_vecs_path(size, act_source), mmap_mode="r")
         usable = [t for t in tids_by_size[size] if t in row]
         # Force integer dtype: an empty `usable` yields np.array([]) which is
         # float64, and a float array can't index the memmap (IndexError). With
@@ -963,6 +981,18 @@ def _fit_joint_pca(sizes, tids_by_size, pca_dim, seed, cpath):
     X = np.vstack(Xparts)
     sc1 = StandardScaler().fit(X)
     X = sc1.transform(X)
+    if pca_dim == 0:
+        # No rotation: the standardized channels themselves. Written as the same
+        # chain with an identity basis, so every reader of the basis still holds.
+        k = X.shape[1]
+        Z = X.astype(np.float32)
+        basis = {"m1": sc1.mean_.astype(np.float32),
+                 "s1": sc1.scale_.astype(np.float32),
+                 "C": np.eye(k, dtype=np.float32),
+                 "pca_mean": np.zeros(k, dtype=np.float32),
+                 "m2": np.zeros(k, dtype=np.float32),
+                 "s2": np.ones(k, dtype=np.float32)}
+        return _store_joint_pca(cpath, Z, k, keys, basis)
     k = min(pca_dim, X.shape[1], X.shape[0])
     pca = PCA(n_components=k, random_state=seed, svd_solver="randomized").fit(X)
     P = pca.transform(X)
@@ -976,6 +1006,11 @@ def _fit_joint_pca(sizes, tids_by_size, pca_dim, seed, cpath):
              "pca_mean": pca.mean_.astype(np.float32),
              "m2": sc2.mean_.astype(np.float32),
              "s2": sc2.scale_.astype(np.float32)}
+    return _store_joint_pca(cpath, Z, k, keys, basis)
+
+
+def _store_joint_pca(cpath, Z, k, keys, basis):
+    """Memoize one joint reduction and return it as _fit_joint_pca's triple."""
     if cpath:
         tmp = f"{cpath}.tmp{os.getpid()}.npz"
         np.savez(tmp, Z=Z, k=k,
@@ -1605,7 +1640,8 @@ def joint_feature_tail(key, wide):
     return np.concatenate(parts)
 
 
-def load_joint_mirt_features(sizes, pca_dim, seed, blocks=PRODUCTION_BLOCKS):
+def load_joint_mirt_features(sizes, pca_dim, seed, blocks=PRODUCTION_BLOCKS,
+                             act_source="encoded"):
     """THE per-problem feature matrix the MIRT trunk sees — the joint-PCA activation
     block, the wide blocks `blocks` selects, then the board-size flag — assembled once
     here so every consumer sees the same columns in the same order.
@@ -1639,7 +1675,8 @@ def load_joint_mirt_features(sizes, pca_dim, seed, blocks=PRODUCTION_BLOCKS):
     if blocks not in FEATURE_BLOCKS:
         raise ValueError(f"blocks must be one of {FEATURE_BLOCKS}, got {blocks!r}")
     tids_by_size = corpus_tids_by_size(sizes)
-    act, k_act = load_joint_activations(sizes, tids_by_size, pca_dim, seed)
+    act, k_act = load_joint_activations(sizes, tids_by_size, pca_dim, seed,
+                                        act_source=act_source)
     # pca_dim/seed are passed for the layouts that take a block in the joint-PCA basis
     # (the dev delta arm); every other layout ignores them, so the shipped layouts are
     # assembled exactly as before.

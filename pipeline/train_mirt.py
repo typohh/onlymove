@@ -586,7 +586,8 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         shallow_tau=SHALLOW_TAU,
         shallow_w=SHALLOW_W, shallow_samples=SHALLOW_SAMPLES,
         teach_weight=TEACH_WEIGHT, stop_row_frac=STOP_ROW_FRAC,
-        pca_dim=PCA_DIM, blocks=PRODUCTION_BLOCKS, stop_unit="row",
+        pca_dim=PCA_DIM, blocks=PRODUCTION_BLOCKS, act_source="encoded",
+        stop_unit="row",
         split_seed=None, pca_seed=None, lr_schedule=LR_SCHEDULE,
         lr_warmup_epochs=0, ortho_axes=ORTHO_AXES,
         teach_detach=False, ortho_detach=False,
@@ -614,7 +615,8 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
     # varying three things, and separating them is the only way to say which one
     # a spread between runs comes from.
     feat, keys, key_idx, input_dim = load_joint_mirt_features(
-        SIZES, pca_dim, seed if pca_seed is None else pca_seed, blocks=blocks)
+        SIZES, pca_dim, seed if pca_seed is None else pca_seed, blocks=blocks,
+        act_source=act_source)
     fdim = feat.shape[1]
     print(f"loaded in {time.time() - t0:.0f}s: {len(keys)} problems, "
           f"feat {fdim} (dropout region {input_dim})", flush=True)
