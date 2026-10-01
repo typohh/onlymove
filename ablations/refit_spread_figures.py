@@ -75,6 +75,24 @@ share the fit.
                                      attempts' information about the offset. What
                                      per-problem parameters would buy at the
                                      density the log has.
+  spread.rank_err_median / _p90      the same departure in RANKS: how far a
+                                     problem's true calibration point sits from
+                                     the fitted one, median and 90th percentile
+                                     of its absolute value over the whole set's
+                                     attempts. A logit offset u on a problem of
+                                     slope a moves its difficulty by u/a, worth
+                                     u*M'(theta)/a ranks to the player attempting
+                                     it, M' the shipped curve's local slope at
+                                     that player's time-adjusted rating.
+  spread.tau_<band>                  the departure spread read INSIDE a player
+                                     band — from cross-user pairs whose players
+                                     both sit in it — since a problem's offset
+                                     need not be the same for weak and strong
+                                     players. Each band's rank figures use its
+                                     own spread, never the pooled one.
+  spread.ranks_per_logit_<band>      median M'(theta)/a over the band's attempts.
+  spread.rank_err_median_<band>      per-band median and 90th percentile.
+  spread.rank_err_p90_<band>
 
     ./.venv/bin/python3 -m ablations.refit_spread_figures
 """
@@ -256,6 +274,131 @@ def recoverable(tau, info_per_attempt):
     return float(np.mean(t2i / (1.0 + t2i)))
 
 
+def shipped_rank_scale():
+    """Per user, the internal rank and the ranks one unit of rating is worth there;
+    per problem, its slope — all from the SHIPPED fit and its M curve. Ranks per
+    logit, M'(theta)/slope, is the same in any gauge only when the curve, the
+    abilities and the slopes come from one fit, and the panel's arms ship no curve
+    of their own, so the conversion is the shipped fit's while the departure it
+    converts is the panel's. The rank is read at the time-adjusted rating, as every
+    rank the mapping produces is."""
+    from utils.rating.features import RATINGS_DIR
+    from utils.rating.ratings_io import (load_M, load_size_value_maps,
+                                         load_time_adjust, load_value_map,
+                                         interp_extrap_vec)
+    from pipeline.map_rating_to_rank import load_user_median_solve_minutes
+    mr, mi = load_M(RATINGS_DIR)
+    ta = load_time_adjust(RATINGS_DIR)
+    require(ta is not None, f"no time_adjust in {RATINGS_DIR}/population_constants.json")
+    alpha, center = ta
+    theta = load_value_map(os.path.join(RATINGS_DIR, "user_theta.csv"), "theta")
+    require(theta, f"no fitted abilities in {RATINGS_DIR}/user_theta.csv")
+    med = load_user_median_solve_minutes(DB_SQLITE)
+    users = sorted(theta)
+    t = np.array([theta[u] + (alpha * (np.log10(med[u[:8]]) - center)
+                              if u[:8] in med else 0.0) for u in users])
+    # Central difference through the shipped interpolator itself, so the slope is
+    # the curve's own segment slope, extrapolated past the end knots as it is.
+    h = 1e-6
+    per_rating = (interp_extrap_vec(t + h, mr, mi)
+                  - interp_extrap_vec(t - h, mr, mi)) / (2 * h)
+    rank = interp_extrap_vec(t, mr, mi)
+    slope = {}
+    for size in ("9", "13"):
+        slope.update(load_size_value_maps(RATINGS_DIR, size)[1])
+    return dict(zip(users, rank)), dict(zip(users, per_rating)), slope
+
+
+def abs_quantile(scale, q):
+    """The q-quantile of |u*R| over rows, u ~ N(0, 1) per row and R = `scale`
+    (tau times ranks per logit): the mixture's CDF is the row mean of
+    2*Phi(x/scale) - 1, solved by bisection — exact, no sampling."""
+    from scipy.special import erf
+    lo, hi = 0.0, float(scale.max()) * 10.0
+    for _ in range(100):
+        x = (lo + hi) / 2
+        if np.mean(erf(x / (scale * np.sqrt(2.0)))) < q:
+            lo = x
+        else:
+            hi = x
+    return (lo + hi) / 2
+
+
+def rank_error(per, rng):
+    """How many ranks a problem's true calibration point sits from the fitted one,
+    per player band, on the WHOLE set's rows. The departure's spread is estimated
+    INSIDE each band — from cross-user pairs whose players both sit in it — because
+    a problem's offset need not be the same for a weak and a strong player, and a
+    pooled tau applied to every band would assume it is. Each band's moment sums
+    are pooled over the fits (their problem draws are disjoint samples of one
+    population), so a thin band reads off every pair the panel holds. The row's
+    error is then that band's departure times its own ranks per logit."""
+    rank, per_rating, slope = shipped_rank_scale()
+    rows = []
+    for a in sorted(per):
+        r = per[a]["rows"]
+        sel = r["set"] == 0
+        users, tids = r["user_id"][sel], r["tid"][sel]
+        missing = [t for t in set(tids.tolist()) if t not in slope]
+        require(not missing, f"{a}: {len(missing)} whole-set problems have no "
+                f"shipped slope, e.g. {missing[:3]}")
+        known = np.array([u in rank for u in users])
+        rows.append({
+            "arm": a, "dropped": int((~known).sum()), "rows": int(sel.sum()),
+            "tid": tids[known], "r": (r["y"] - r["p"])[sel][known],
+            "w": r["w"][sel][known],
+            "rank": np.array([rank[u] for u in users[known]]),
+            "rpl": np.array([per_rating[u] / slope[t]
+                             for u, t in zip(users[known], tids[known])]),
+        })
+    dropped = sum(x["dropped"] for x in rows) / sum(x["rows"] for x in rows)
+    bands = []
+    scale_all = []
+    for key, label, lo, hi in RANK_BANDS:
+        nums, dens, scales = [], [], []
+        for x in rows:
+            b = (x["rank"] > lo) & (x["rank"] <= hi)
+            num, den = pair_sums(x["tid"][b], x["r"][b], x["w"][b])
+            nums.append(num); dens.append(den); scales.append(x["rpl"][b])
+        num, den = np.concatenate(nums), np.concatenate(dens)
+        rpl = np.concatenate(scales)
+        require(len(num) > 100, f"band {label}: only {len(num)} problems carry a "
+                f"within-band pair — coarsen the bands")
+        t2 = tau2(num, den)
+        require(t2 > 0, f"band {label}: departure variance {t2:+.3f} is not "
+                f"positive — too few pairs to read a spread from")
+        idx = rng.integers(0, len(num), (BOOTSTRAP, len(num)))
+        boots = num[idx].sum(1) / den[idx].sum(1)
+        tlo, thi = np.percentile(boots, [2.5, 97.5])
+        tau = float(np.sqrt(t2))
+        scale = tau * rpl
+        scale_all.append(scale)
+        bands.append({"key": key, "label": label, "rows": len(rpl),
+                      "problems": len(num), "tau": tau,
+                      "tau_lo": float(np.sqrt(max(tlo, 0.0))),
+                      "tau_hi": float(np.sqrt(max(thi, 0.0))),
+                      "rpl": float(np.median(rpl)),
+                      "median": abs_quantile(scale, 0.5),
+                      "p90": abs_quantile(scale, 0.9)})
+    scale_all = np.concatenate(scale_all)
+    return {"bands": bands, "dropped": dropped,
+            "median": abs_quantile(scale_all, 0.5),
+            "p90": abs_quantile(scale_all, 0.9)}
+
+
+# Player bands on the internal rank scale (0 = the 1k/1d boundary, one unit per
+# rank, integers are band edges), lower edge exclusive. The strongest bands are
+# merged into one because few problems carry two dan players' outcomes.
+RANK_BANDS = (
+    ("k21", "21k and weaker", -np.inf, -20.0),
+    ("k20_16", "20k–16k", -20.0, -15.0),
+    ("k15_11", "15k–11k", -15.0, -10.0),
+    ("k10_6", "10k–6k", -10.0, -5.0),
+    ("k5_1", "5k–1k", -5.0, 0.0),
+    ("dan", "dan", 0.0, np.inf),
+)
+
+
 def measure():
     from pipeline.train_mirt import SPREAD_MIN_ATTEMPTS
     arms, budget, schedule, gpu = load_panel()
@@ -302,12 +445,14 @@ def measure():
         "info_loss": statistics.fmean(i["info_loss"] for i in imp),
         "info_per_attempt": info,
         "recoverable": recoverable(tau_w, info),
+        "rank_error": rank_error(per, np.random.default_rng(2)),
     }
 
 
 def figures():
     m = measure()
     n = len(m["arms"])
+    re_ = m["rank_error"]
     return [
         Figure("spread.seeds", n, "d",
                "fits behind the spread figures, each with its own held-out draw"),
@@ -358,7 +503,25 @@ def figures():
                "attempt-weighted share of a problem's departure variance that a "
                "shrunken per-problem estimate from the other attempts on it "
                "would recover, percent"),
-    ]
+        Figure("spread.rank_err_median", re_["median"], ".1f",
+               "median distance in ranks between a problem's true calibration "
+               "point and the fitted one, over the whole set's attempts, each "
+               "band's own departure spread times the attempt's ranks per logit"),
+        Figure("spread.rank_err_p90", re_["p90"], ".1f",
+               "90th percentile of that distance, ranks"),
+    ] + [f for b in re_["bands"] for f in (
+        Figure(f"spread.tau_{b['key']}", b["tau"], ".2f",
+               f"departure spread on the logit read from pairs of {b['label']} "
+               f"players only, problems held out whole, pooled over fits"),
+        Figure(f"spread.ranks_per_logit_{b['key']}", b["rpl"], ".0f",
+               f"median ranks one logit is worth on {b['label']} players' "
+               f"attempts: the ability-to-rank curve's local slope over the "
+               f"problem's own slope"),
+        Figure(f"spread.rank_err_median_{b['key']}", b["median"], ".1f",
+               f"median rank distance for {b['label']} players' attempts"),
+        Figure(f"spread.rank_err_p90_{b['key']}", b["p90"], ".1f",
+               f"90th percentile rank distance for {b['label']} players' attempts"),
+    )]
 
 
 def main():
@@ -393,6 +556,18 @@ def main():
           f"problem would recover {m['recoverable']:.0%} of its departure "
           f"variance (information per attempt about the offset "
           f"{m['info_per_attempt']:.3f})")
+    re_ = m["rank_error"]
+    print(f"\nrank distance of a problem's true calibration point from the fitted "
+          f"one, whole set, tau read within each band ({re_['dropped']:.1%} of "
+          f"rows dropped: player not in the shipped fit)")
+    print(f"{'band':>16}{'rows':>8}{'problems':>10}{'tau':>7}{'95% boot':>14}"
+          f"{'ranks/logit':>13}{'median':>8}{'p90':>7}")
+    for b in re_["bands"]:
+        print(f"{b['label']:>16}{b['rows']:>8}{b['problems']:>10}{b['tau']:>7.2f}"
+              f"   [{b['tau_lo']:.2f},{b['tau_hi']:.2f}]{b['rpl']:>13.1f}"
+              f"{b['median']:>8.1f}{b['p90']:>7.1f}")
+    print(f"{'all':>16}{'':>8}{'':>10}{'':>7}{'':>14}{'':>13}"
+          f"{re_['median']:>8.1f}{re_['p90']:>7.1f}")
 
 
 if __name__ == "__main__":
