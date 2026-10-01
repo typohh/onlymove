@@ -19,7 +19,11 @@
 // js/hint-bubble.js): every one of these needs a sentence, and four sentences
 // on the page turn a short list of choices into something nobody reads. The
 // values are styled alike because they behave alike — click to change — and the
-// account code is not special among them.
+// account code is special among them in one way only: it is a credential, so it
+// is drawn MASKED until the eye beside it is pressed. The dialog is where the
+// onboarding tip sends a new user, and a user who follows it while streaming or
+// screen-sharing must not have published their account by doing so. The reveal
+// lasts for this opening of the dialog and is never stored.
 //
 // Two things this deliberately does NOT have. There is no Copy button: the code
 // is selectable text and every platform already has a copy gesture for it. And
@@ -76,6 +80,13 @@ import {
 const PENDING = '…';
 const UNKNOWN = '—';
 
+// What stands in for the account code while it is hidden: one dot per character
+// of a code, so the box does not change width when it is revealed.
+const CODE_MASK = '•'.repeat(8);
+
+const EYE_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="2.8"/></svg>';
+const EYE_OFF_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="2.8"/><path d="M4 4l16 16"/></svg>';
+
 // POST /link rejections that name a cause the user can act on. Anything else —
 // 'server', a network failure, an unrecognized body — falls to the generic retry
 // line.
@@ -128,7 +139,9 @@ export function showAccountModal() {
 }
 
 // One row of the overview: a bold label, a clickable value, and its hint.
-function addRow(grid, labelTerm, hintTerm, valueEl) {
+// `extra` is a control that belongs to the value rather than to the row (the
+// code's reveal toggle), so it sits between the value and the hint.
+function addRow(grid, labelTerm, hintTerm, valueEl, extra = null) {
     const label = document.createElement('div');
     label.className = 'modal-rank-label';
     label.textContent = getTerm(labelTerm);
@@ -137,6 +150,7 @@ function addRow(grid, labelTerm, hintTerm, valueEl) {
     const cell = document.createElement('div');
     cell.className = 'account-cell';
     cell.appendChild(valueEl);
+    if (extra) cell.appendChild(extra);
     cell.appendChild(hintButton(getTerm(hintTerm)));
     grid.appendChild(cell);
 }
@@ -170,6 +184,7 @@ class AccountPanel {
         this.alias = undefined;    // undefined = not read yet, null = none
         this.loadFailed = false;
         this.notice = '';          // the overview's one error line, '' when quiet
+        this.codeShown = false;    // the code is masked until asked for
         this.load();
     }
 
@@ -230,7 +245,7 @@ class AccountPanel {
         this.render((host) => {
             const grid = modalRankGrid();
             grid.classList.add('account-grid');
-            addRow(grid, 'accountRowCode', 'accountHint', this.codeValue());
+            addRow(grid, 'accountRowCode', 'accountHint', this.codeValue(), this.codeToggle());
             if (googleSignInAvailable()) {
                 addRow(grid, 'accountRowGoogle', 'accountGoogleHint', this.googleValue());
             }
@@ -247,7 +262,35 @@ class AccountPanel {
 
     // Code: click swaps the value for an input; leaving the input is what asks.
     codeValue() {
-        return valueEl(state.userId, (el) => this.editCode(el));
+        return valueEl(this.codeShown ? state.userId : CODE_MASK, (el) => this.editCode(el));
+    }
+
+    // The eye beside the code. It repaints the value in place rather than the
+    // whole overview, so a notice the user is reading stays where it is. An open
+    // editor has already been swapped back by the blur this press caused, which
+    // is why the value is found in the cell rather than held.
+    codeToggle() {
+        const btn = document.createElement('span');
+        btn.className = 'account-eye';
+        btn.setAttribute('role', 'button');
+        btn.setAttribute('tabindex', '0');
+        const paint = () => {
+            btn.innerHTML = this.codeShown ? EYE_OFF_ICON : EYE_ICON;
+            btn.setAttribute('aria-label', getTerm(this.codeShown ? 'accountCodeHide' : 'accountCodeShow'));
+            btn.setAttribute('aria-pressed', String(this.codeShown));
+        };
+        const toggle = () => {
+            this.codeShown = !this.codeShown;
+            paint();
+            const cell = btn.parentNode;
+            if (cell) cell.replaceChild(this.codeValue(), cell.firstChild);
+        };
+        btn.addEventListener('click', toggle);
+        btn.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+        });
+        paint();
+        return btn;
     }
 
     editCode(current) {
@@ -257,7 +300,10 @@ class AccountPanel {
         input.type = 'text';
         input.className = 'account-value account-input';
         input.maxLength = 8;
-        input.value = state.userId;
+        // The editor starts from the current code only when that code is already
+        // on screen; while it is masked the field opens empty, and leaving it
+        // empty commits nothing.
+        input.value = this.codeShown ? state.userId : '';
         input.autocapitalize = 'off';
         input.autocomplete = 'off';
         input.spellcheck = false;
@@ -280,7 +326,7 @@ class AccountPanel {
         });
         input.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
-            if (e.key === 'Escape') { e.preventDefault(); input.value = state.userId; input.blur(); }
+            if (e.key === 'Escape') { e.preventDefault(); input.value = ''; input.blur(); }
         });
     }
 
