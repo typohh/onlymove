@@ -1036,15 +1036,21 @@ def _store_joint_pca(cpath, Z, k, keys, basis):
 # 20k human profile's, whose temperature-1 member is its plain rank file. "all" ships;
 # the others are comparison arms asking whether the extra temperatures carry anything
 # the first does not. Values are the `_t` suffixes kept, per family kind.
+# "residual" is a different cut: every temperature, but the transformer network's
+# family dropped whole, which separates what that bot adds from what its
+# temperatures add.
 BOT_TEMPERATURES = {
     "all": None,
     "one": {"network": ("1",), "human": ()},
     "two": {"network": ("1", "0.2"), "human": ("3",)},
+    "residual": None,
 }
 
 
 def _keep_bot_file(name, temperatures):
     keep = BOT_TEMPERATURES[temperatures]
+    if temperatures == "residual" and name.startswith("kata1-tf3-"):
+        return False
     m = re.search(r"_t([0-9.]+)\.txt$", name)
     if keep is None or m is None:
         return True
@@ -1486,7 +1492,8 @@ def load_joint_tail_blocks(sizes, tids_by_size):
 # The block LAYOUTS a fit can be assembled on. Which one ships is
 # model_constants.PRODUCTION_BLOCKS; the rest are comparison arms.
 FEATURE_BLOCKS = ("all", "activations", "activations+bot", "activations+bot+delta",
-                  "activations+bot:one", "activations+bot:two")
+                  "activations+bot:one", "activations+bot:two",
+                  "activations+bot:residual")
 
 # Layouts that may be MEASURED but never SHIPPED. A layout lands here when it is
 # answer-derived and the trunk it would feed is fanned out per cell — the fan-out
@@ -1536,7 +1543,8 @@ def load_joint_blocks(blocks, sizes, tids_by_size, pca_dim=None, seed=None):
     if blocks == "activations+bot":
         bw, nb = load_joint_bot_winrate(sizes, tids_by_size)
         return (("bot_winrate", bw),), nb
-    if blocks in ("activations+bot:one", "activations+bot:two"):
+    if blocks in ("activations+bot:one", "activations+bot:two",
+                  "activations+bot:residual"):
         bw, nb = load_joint_bot_winrate(
             sizes, tids_by_size, temperatures=blocks.split(":")[1])
         return (("bot_winrate", bw),), nb
