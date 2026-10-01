@@ -18,6 +18,7 @@ their other callers are unaffected.
 import csv
 import json
 import os
+import re
 import sqlite3
 import time
 from concurrent.futures import ProcessPoolExecutor
@@ -1030,7 +1031,27 @@ def _store_joint_pca(cpath, Z, k, keys, basis):
     return {key: Z[i] for i, key in enumerate(keys)}, k, basis
 
 
-def load_joint_bot_winrate(sizes, tids_by_size, clip=1e-4):
+# How many members of each TEMPERATURE FAMILY the bot block keeps. A family is one
+# policy read at several temperatures — each strong network's `_t<T>` files, and the
+# 20k human profile's, whose temperature-1 member is its plain rank file. "all" ships;
+# the others are comparison arms asking whether the extra temperatures carry anything
+# the first does not. Values are the `_t` suffixes kept, per family kind.
+BOT_TEMPERATURES = {
+    "all": None,
+    "one": {"network": ("1",), "human": ()},
+    "two": {"network": ("1", "0.2"), "human": ("3",)},
+}
+
+
+def _keep_bot_file(name, temperatures):
+    keep = BOT_TEMPERATURES[temperatures]
+    m = re.search(r"_t([0-9.]+)\.txt$", name)
+    if keep is None or m is None:
+        return True
+    return m.group(1) in keep["human" if "humanv0" in name else "network"]
+
+
+def load_joint_bot_winrate(sizes, tids_by_size, clip=1e-4, temperatures="all"):
     """Bot winrate in a shared column layout across boards (the bots are the same;
     a bot's logit pass-rate means the same thing on either board). Common file set =
     intersection across boards; clip→logit→drop pooled-zero-var→pooled z-score.
@@ -1044,7 +1065,8 @@ def load_joint_bot_winrate(sizes, tids_by_size, clip=1e-4):
         adir = os.path.join(PROJECT_ROOT, "attempts", str(size))
         filesets.append({os.path.basename(f)
                          for f in glob.glob(os.path.join(adir, "*.txt"))})
-    common = sorted(set.intersection(*filesets))
+    common = sorted(f for f in set.intersection(*filesets)
+                    if _keep_bot_file(f, temperatures))
     lo, hi = clip, 1.0 - clip
     keys, mat = [], []
     for size in sizes:
@@ -1463,7 +1485,8 @@ def load_joint_tail_blocks(sizes, tids_by_size):
 
 # The block LAYOUTS a fit can be assembled on. Which one ships is
 # model_constants.PRODUCTION_BLOCKS; the rest are comparison arms.
-FEATURE_BLOCKS = ("all", "activations", "activations+bot", "activations+bot+delta")
+FEATURE_BLOCKS = ("all", "activations", "activations+bot", "activations+bot+delta",
+                  "activations+bot:one", "activations+bot:two")
 
 # Layouts that may be MEASURED but never SHIPPED. A layout lands here when it is
 # answer-derived and the trunk it would feed is fanned out per cell — the fan-out
@@ -1504,11 +1527,18 @@ def load_joint_blocks(blocks, sizes, tids_by_size, pca_dim=None, seed=None):
     as per-cell conditioning for the reason just given. `pca_dim` and `seed` exist for
     it — the contrast is taken in the joint-PCA basis, which those two identify — and
     every other layout ignores them.
+
+    "activations+bot:one" / ":two" are comparison arms: the bot block with each
+    temperature family cut to one or two members (BOT_TEMPERATURES).
     """
     if blocks == "all":
         return load_joint_tail_blocks(sizes, tids_by_size)
     if blocks == "activations+bot":
         bw, nb = load_joint_bot_winrate(sizes, tids_by_size)
+        return (("bot_winrate", bw),), nb
+    if blocks in ("activations+bot:one", "activations+bot:two"):
+        bw, nb = load_joint_bot_winrate(
+            sizes, tids_by_size, temperatures=blocks.split(":")[1])
         return (("bot_winrate", bw),), nb
     if blocks == "activations+bot+delta":
         if pca_dim is None or seed is None:

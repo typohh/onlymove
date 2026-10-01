@@ -1,0 +1,62 @@
+{
+  "panel": "bot_temperatures",
+  "description": "Whether the bot block needs every temperature. Each strong network's policy is read at eleven temperatures and the 20k human profile's at twelve, and a temperature only reshapes one policy, so the extra columns are functions of the first plus what the reshaping exposes about the other moves. `all` is the shipped block; `one` keeps one member per family (each network at temperature 1, the 20k profile's plain rank file); `two` adds one more per family (each network at 0.2, the 20k profile at 3). The per-rank human files, the heuristic and the SGF-evaluation column are in every arm. EVERY ARM HOLDS OUT WHOLE PROBLEMS and runs at FOUR SEEDS: within a seed the arms hold aside the same problems and their delta is paired, across seeds nothing may be subtracted. The panel reaches the held-out likelihood and the shipped parameter distributions only \u2014 it re-maps no ranks and projects no per-cell vectors.",
+  "arms": {
+    "all_s0": {
+      "stop_unit": "problem",
+      "seed": 0
+    },
+    "one_s0": {
+      "blocks": "activations+bot:one",
+      "stop_unit": "problem",
+      "seed": 0
+    },
+    "two_s0": {
+      "blocks": "activations+bot:two",
+      "stop_unit": "problem",
+      "seed": 0
+    },
+    "all_s1": {
+      "stop_unit": "problem",
+      "seed": 1
+    },
+    "one_s1": {
+      "blocks": "activations+bot:one",
+      "stop_unit": "problem",
+      "seed": 1
+    },
+    "two_s1": {
+      "blocks": "activations+bot:two",
+      "stop_unit": "problem",
+      "seed": 1
+    },
+    "all_s2": {
+      "stop_unit": "problem",
+      "seed": 2
+    },
+    "one_s2": {
+      "blocks": "activations+bot:one",
+      "stop_unit": "problem",
+      "seed": 2
+    },
+    "two_s2": {
+      "blocks": "activations+bot:two",
+      "stop_unit": "problem",
+      "seed": 2
+    },
+    "all_s3": {
+      "stop_unit": "problem",
+      "seed": 3
+    },
+    "one_s3": {
+      "blocks": "activations+bot:one",
+      "stop_unit": "problem",
+      "seed": 3
+    },
+    "two_s3": {
+      "blocks": "activations+bot:two",
+      "stop_unit": "problem",
+      "seed": 3
+    }
+  }
+}
