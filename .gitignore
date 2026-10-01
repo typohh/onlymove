@@ -83,12 +83,8 @@ models/
 /tsumegos/fixed/
 
 # Pipeline-extracted activations: per-cell trunk vectors, regenerable via
-# pipeline/extract_activations.py. Not for version control — EXCEPT the frozen
-# encoder, which pipeline/fit_activation_encoder.py fits from raw activations
-# that are deleted after conversion: with them gone nothing can regenerate it,
-# so it is tracked the way axes/labels.json and label_anchors.npz are.
-/activations/*
-!/activations/encoder.npz
+# pipeline/extract_activations.py. Not for version control.
+/activations/
 
 # Pre-projected per-cell K-dim axis vectors, one npz per problem. Written by
 # pipeline/build_axes.py, consumed by pipeline/package_for_pwa.py. Reproducible

@@ -26,7 +26,7 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 
-from utils.rating.model_constants import ACT_ENCODER_DIM, PRODUCTION_BLOCKS
+from utils.rating.model_constants import ACT_STORE_DIM, PRODUCTION_BLOCKS
 from utils.rating.ratings_io import FLOOR_CSV, RATINGS_CSV, SLOPE_CSV
 
 from utils.constants import RETIRED_IDS_PATH, read_retired_ids
@@ -35,13 +35,10 @@ from utils.paths import DB_SQL, DB_SQLITE, PROJECT_ROOT
 SQL_PATH = DB_SQL
 SQLITE_PATH = DB_SQLITE
 
-# Raw KataGo trunk activation layout (18 residual blocks × 384 channels), captured at
-# the correct move by pipeline.extract_activations. Feature index = layer*384 + channel.
-# The activation store holds the frozen encoder's output, not raw trunk
-# channels (18 blocks x 384 = 6912 exist only transiently inside extraction —
-# see utils.rating.activation_encoder). Every buffer and shape check below
-# follows this width, so a stale raw-width cache fails validation and rebuilds.
-N_FEATS = ACT_ENCODER_DIM
+# The activation store holds the activation network's final trunk state at each
+# legal cell, one float per trunk channel (pipeline.extract_activations). Every
+# buffer and shape check below follows this width.
+N_FEATS = ACT_STORE_DIM
 
 # Number of contrastive blocks: per-channel [mean, std, max, zscore] aggregates over the
 # OTHER legal moves (N_CONTRAST_BLOCKS × N_FEATS), id-aligned with the correct-vec cache.
@@ -54,15 +51,15 @@ N_CONTRAST_BLOCKS = 4
 CACHE_DIR = os.path.join(PROJECT_ROOT, "activations", "_signal_cache")
 
 
-# WHICH correct-cell vectors the joint PCA reduces. "encoded" is the store every
-# production step reads. The others are comparison arms' own roll-ups, written by
+# WHICH correct-cell vectors the joint reduction reads. "store" is the roll-up of
+# the activation store every production step reads. The others are comparison arms' own roll-ups, written by
 # auxiliary/rating_dev/extract_last_block.py over the SAME id list, and exist so
 # the layer question is asked through this one assembly rather than a copy of it:
 # "trunk_final" is the trunk state the heads read (every block's increment summed,
 # then the final norm and activation), "last_block" is the final block's increment
 # alone — one of the eighteen the encoded store concatenates.
 ACT_SOURCE_DIRS = {
-    "encoded": CACHE_DIR,
+    "store": CACHE_DIR,
     "trunk_final": os.path.join(PROJECT_ROOT, "activations", "_signal_cache_trunk_final"),
     "last_block": os.path.join(PROJECT_ROOT, "activations", "_signal_cache_last_block"),
     # The same final-trunk reading from another engine network (the extractor's
@@ -72,11 +69,11 @@ ACT_SOURCE_DIRS = {
 }
 
 
-def _cache_vecs_path(size, act_source="encoded"):
+def _cache_vecs_path(size, act_source="store"):
     return os.path.join(ACT_SOURCE_DIRS[act_source], f"correct_vecs_{size}.npy")
 
 
-def _cache_ids_path(size, act_source="encoded"):
+def _cache_ids_path(size, act_source="store"):
     return os.path.join(ACT_SOURCE_DIRS[act_source], f"correct_ids_{size}.json")
 
 
@@ -899,7 +896,7 @@ def build_profiles(df):
     return pd.DataFrame(out, columns=["profile", "problem", "success"])
 
 
-def _joint_pca_cache_path(sizes, tids_by_size, pca_dim, seed, act_source="encoded"):
+def _joint_pca_cache_path(sizes, tids_by_size, pca_dim, seed, act_source="store"):
     """Deterministic cache file for the joint-PCA reduction. Keyed on (sizes, pca_dim, seed),
     the raw activation-cache file fingerprints (basename+size+mtime — so a re-extraction
     invalidates it), AND the exact tid subset requested (a caller fitting on a different subset
@@ -918,7 +915,7 @@ def _joint_pca_cache_path(sizes, tids_by_size, pca_dim, seed, act_source="encode
 
 
 def load_joint_activations(sizes, tids_by_size, pca_dim, seed, cache=True,
-                           act_source="encoded"):
+                           act_source="store"):
     """ONE PCA basis shared across boards (so a pooled model's activation weights mean
     the same thing on 9×9 and 13×13). Loads each board's raw correct-move activation
     cache for its attempted problems, stacks, fits a single StandardScaler+randomized
@@ -930,9 +927,10 @@ def load_joint_activations(sizes, tids_by_size, pca_dim, seed, cache=True,
     joint_pca_<hash>.npz (atomic write, fingerprinted on the raw-cache files). cache=False
     forces a recompute (e.g. to rebuild a corrupt cache).
 
-    `act_source` names which correct-cell roll-up is reduced (ACT_SOURCE_DIRS), and
-    pca_dim=0 skips the rotation: the source's own channels, standardized, at their
-    full width. Both are comparison-arm knobs; every production caller passes neither."""
+    A pca_dim at or above the source's width (or 0) means NO ROTATION — the source's
+    own channels, standardized, at their full width — which is what ships. A smaller
+    one is a comparison arm's reduction, and `act_source` names which correct-cell
+    roll-up it reads (ACT_SOURCE_DIRS); every production caller passes the default."""
     import json as _json
     from sklearn.decomposition import PCA
     from sklearn.preprocessing import StandardScaler
@@ -964,7 +962,7 @@ def load_joint_activation_basis(sizes, tids_by_size, pca_dim, seed):
     return _fit_joint_pca(sizes, tids_by_size, pca_dim, seed, cpath)[2]
 
 
-def _fit_joint_pca(sizes, tids_by_size, pca_dim, seed, cpath, act_source="encoded"):
+def _fit_joint_pca(sizes, tids_by_size, pca_dim, seed, cpath, act_source="store"):
     """Fit + cache the joint PCA; returns ({key: vec}, k, basis dict)."""
     import json as _json
     from sklearn.decomposition import PCA
@@ -988,7 +986,7 @@ def _fit_joint_pca(sizes, tids_by_size, pca_dim, seed, cpath, act_source="encode
     X = np.vstack(Xparts)
     sc1 = StandardScaler().fit(X)
     X = sc1.transform(X)
-    if pca_dim == 0:
+    if pca_dim == 0 or pca_dim >= X.shape[1]:
         # No rotation: the standardized channels themselves. Written as the same
         # chain with an identity basis, so every reader of the basis still holds.
         k = X.shape[1]
@@ -1648,7 +1646,7 @@ def joint_feature_tail(key, wide):
 
 
 def load_joint_mirt_features(sizes, pca_dim, seed, blocks=PRODUCTION_BLOCKS,
-                             act_source="encoded"):
+                             act_source="store"):
     """THE per-problem feature matrix the MIRT trunk sees — the joint-PCA activation
     block, the wide blocks `blocks` selects, then the board-size flag — assembled once
     here so every consumer sees the same columns in the same order.

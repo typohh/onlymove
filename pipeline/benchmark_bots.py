@@ -21,7 +21,7 @@ from utils.katago.coords import sgf_to_gtp, sgfmill_point_to_sgf
 from utils.katago.sgf_parsing import parse_tsumego_sgf
 from utils.katago.controller import KatagoController
 from utils.katago.queries import KatagoQueries, get_all_ranks, get_rank_str
-from utils.katago.models import MODEL_BEST_SMALL, MODEL_FULL, get_model, get_filename_without_extension, MODEL_HUMAN
+from utils.katago.models import MODEL_BEST_SMALL, MODEL_FULL, MODEL_TRANSFORMER, get_model, get_filename_without_extension, MODEL_HUMAN
 
 # Set in main() from the mandatory size arg: tsumegos/<size>/ and attempts/<size>/.
 TSUMEGO_DIR = None
@@ -367,7 +367,7 @@ def get_bot_configs(board_size):
         ))
 
     # Model + temperature combinations
-    for model in [MODEL_FULL]:
+    for model in [MODEL_FULL, MODEL_TRANSFORMER]:
         for temperature in [2.0, 1.5, 1.2, 1, 0.8, 0.6, 0.4, 0.2, 0.1, 0.05, 0.02]:
             model_filename = get_model(model)
             filename = os.path.join(ATTEMPTS_DIRECTORY, f"{get_filename_without_extension(model_filename)}_t{format(Decimal(str(temperature)).normalize(), 'f')}.txt")

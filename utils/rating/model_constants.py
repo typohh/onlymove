@@ -6,11 +6,9 @@ fanout, the rank mapping, the population constants, packaging, and the feature
 loaders themselves. They live here rather than inside any one trainer so that a
 trainer can be replaced without every other stage following it.
 
-`PCA_DIM` = 128 is MEASURED-OPTIMAL and should not be swept again: re-fitting at
-16/64/128/256 and scoring on held-out PROBLEMS, 128 wins from both directions at
-every seed. The memorization signature once quoted alongside that — the widest
-arm carrying the highest median slope — does NOT replicate across seeds, so the
-case rests on the held-out cost alone (`ablations/panels/features.json`).
+`PCA_DIM` equals the store width, which means NO ROTATION: the trunk sees the
+stored channels themselves, standardized. A width below the store's is a
+comparison arm's reduction (`ablations/panels/last_block.json`).
 """
 
 import numpy as np
@@ -34,11 +32,11 @@ PRODUCTION_BLOCKS = "activations+bot"
 EPS = 1e-6
 SIZES = list(ALL_BOARD_SIZES)
 SEED = 0
-PCA_DIM = 128                    # joint-PCA activation feature dimensionality
-ACT_ENCODER_DIM = 512            # frozen activation-encoder width (the stored
-                                 # per-cell encoding); chosen by the M-sweep in
-                                 # ablations/encoder_m_sweep.py — refit parity
-                                 # under a fit-set redesign saturates by here
+ACT_STORE_DIM = 512              # width of a stored per-cell activation vector:
+                                 # the activation network's trunk channels
+PCA_DIM = ACT_STORE_DIM          # activation feature width the trunk sees; at
+                                 # the store width the channels are standardized
+                                 # and not rotated
 DIFF_HIDDEN = (128, 64)          # feature trunk hidden layers
 DROPOUT = 0.3                    # trunk dropout
 INPUT_DROPOUT = 0.3              # COLUMN dropout over the wide input region

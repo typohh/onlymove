@@ -1,4 +1,4 @@
-"""Extract per-block trunk activations at every legal cell for each tsumego.
+"""Extract the activation network's trunk state at every legal cell of each tsumego.
 
 For each SGF in tsumegos/<size>/:
   - Parse SGF, replay setup moves to obtain the board state the solver faces.
@@ -8,27 +8,24 @@ For each SGF in tsumegos/<size>/:
     is independent of SGF document order. Downstream maps cells by (x, y) and the
     correct cell by correct_idx, never by row position — so order need only be
     self-consistent with xys/correct_idx, which scan order guarantees.
-  - Run one forward pass through KataGo's b18 net, under the corpus's own rules
+  - Run one forward pass through the activation network
+    (utils.katago.models.ACTIVATION_NETWORK), under the corpus's own rules
     and komi (utils.constants RULES/KOMI, the values the generator stamps into
     every SGF and queries the analysis engine with). Rules reach the net through
     its global inputs — komi, scoring, ko, suicide and tax — so reading a
     position under rules it was not evaluated with changes the activations
     while leaving every array shape intact, i.e. silently.
-  - Capture post-skip-add output of all 18 residual blocks (rconv1.out..rconv18.out).
-  - Slice each block at every legal cell's (x, y); concatenate blocks
-    -> one 6912-float raw vector per cell.
-  - Project each raw vector through the frozen activation encoder
-    (activations/encoder.npz — see pipeline.fit_activation_encoder) and save
-    to activations/<size>/<id>.npz with:
-      candidates  (n_legal, ACT_ENCODER_DIM) float16 -- encoded per-cell vector,
-                                                        board-scan order
+  - Capture the FINAL TRUNK STATE (`trunkfinal`): every block's increment summed
+    onto the stem, then the final norm and activation — the tensor the
+    network's own heads read. A block's reported output is its increment alone,
+    which is why no single block stands in for it.
+  - Slice it at every legal cell's (x, y) and save to
+    activations/<size>/<id>.npz with:
+      candidates  (n_legal, ACT_STORE_DIM) float16 -- per-cell trunk channels,
+                                                      board-scan order
       xys         (n_legal, 2) int32   -- KataGo (x, y) per row (scan order)
       correct_idx ()           int32   -- scan-order index of the correct cell
-      encoder_fp  ()           uint32  -- the encoder's 4-byte fingerprint
-
-The raw 6912-dim vectors never touch disk in this mode; --raw (which requires
-its own --out-dir, away from the encoded store) writes them unprojected, which
-is how an encoder REFRESH extracts its fitting subset.
+      source_fp   ()           uint32  -- which network and tensor wrote the file
 
 Downstream consumers: pipeline.train_mirt reads the correct-cell row (through utils.rating.features) via
 candidates[correct_idx]; package_for_pwa re-parses the SGF and remaps cells into
@@ -36,12 +33,17 @@ SGF-variation order by (x, y) (the npz being a superset of the SGF's non-pass
 variations is what makes that remap total).
 
 Resumable: skips problems where the output .npz already exists (--force overrides).
+A CHANGE OF NETWORK IS TOTAL: every reader trusts the directory to be one
+source's output, a resumed run aborts on a file stamped by another, and the
+id-keyed caches downstream cannot see a same-width change — so it ends with
+`cache_rating_features --rebuild-activation-cache`.
 Fail-loud: a problem that fails to process is a hard error that aborts the run,
 never skipped — a missing id would silently desync every downstream cache from
 the tsumego set.
 """
 
 import argparse
+import hashlib
 import logging
 import os
 import queue
@@ -69,14 +71,16 @@ from katago.train.model_pytorch import ExtraOutputs
 from utils.katago.sgf_parsing import parse_tsumego_sgf
 from utils.constants import ALL_BOARD_SIZES, KOMI, RULES
 from utils.katago.coords import gtp_to_xy, sgf_to_gtp
-from utils.rating.activation_encoder import (
-    ENCODER_PATH, fingerprint, load_encoder)
+from utils.katago.models import ACTIVATION_NETWORK, get_checkpoint
+from utils.rating.model_constants import ACT_STORE_DIM
 
-DEFAULT_CKPT = os.path.join(
-    PROJECT_ROOT, "models",
-    "kata1-b18c384nbt-s9996604416-d4316597426",
-    "model.ckpt",
-)
+TRUNK_OUTPUT = "trunkfinal"
+
+
+def source_fingerprint(network=ACTIVATION_NETWORK, tensor=TRUNK_OUTPUT) -> int:
+    """What a stored file was read from, as a uint32: the network and the tensor."""
+    return int.from_bytes(
+        hashlib.sha256(f"{network}:{tensor}".encode()).digest()[:4], "big")
 
 
 # The vendored net takes rules as a dict, while the rest of the pipeline names
@@ -124,7 +128,7 @@ def batch_forward(model, block_names, bins, globs):
     """One forward pass for a BATCH of problems; returns the captured block
     outputs as device tensors, (B, C, H, W) each. Batching is the first of the
     three things that make extraction GPU-bound instead of CPU-bound (with
-    on-device slicing/projection and threaded parse/write): a b18 forward is
+    on-device slicing and threaded parse/write): a b18 forward is
     milliseconds, so per-problem calls spend the run in Python overhead."""
     extra = ExtraOutputs(block_names)
     with torch.no_grad():
@@ -145,20 +149,14 @@ def batch_forward(model, block_names, bins, globs):
     return [extra.returned[name] for name in block_names]
 
 
-def vecs_at_cells_gpu(block_acts, j, xys, enc_t) -> np.ndarray:
-    """Problem j's per-cell vectors, sliced and (when enc_t is set) projected
-    ON DEVICE, so what crosses to the CPU is the stored row width rather than
-    the full trunk. Returns float16 (n_cells, N) in the same block-concat
-    layout as always. fp16 precision loss is well below the z-scoring noise
-    in pipeline.train_mirt."""
-    dev = block_acts[0].device
+def vecs_at_cells_gpu(trunk, j, xys) -> np.ndarray:
+    """Problem j's per-cell vectors, sliced ON DEVICE so only the legal cells
+    cross to the CPU. Returns float16 (n_cells, channels). fp16 precision loss
+    is well below the z-scoring noise in pipeline.train_mirt."""
+    dev = trunk.device
     xs = torch.tensor([x for x, _ in xys], dtype=torch.long, device=dev)
     ys = torch.tensor([y for _, y in xys], dtype=torch.long, device=dev)
-    X = torch.cat([a[j][:, ys, xs] for a in block_acts], dim=0).T.float()
-    if enc_t is not None:
-        m1, s1, pmean, Ct = enc_t
-        X = ((X - m1) / s1 - pmean) @ Ct
-    return X.half().cpu().numpy()
+    return trunk[j][:, ys, xs].T.float().half().cpu().numpy()
 
 
 def prepare_problem(sgf_path: str, model_config, pos_len):
@@ -219,45 +217,21 @@ def main():
                         help="Re-extract even if the output .npz exists.")
     parser.add_argument("--device", default=None,
                         help="cuda or cpu (default: cuda if available).")
-    parser.add_argument("--ckpt", default=DEFAULT_CKPT,
-                        help="Path to KataGo PyTorch checkpoint.")
-    parser.add_argument("--raw", action="store_true",
-                        help="Store unprojected 6912-dim trunk vectors (an encoder "
-                             "refresh extracting its fitting subset). Requires "
-                             "--out-dir pointing away from the encoded store.")
     parser.add_argument("--out-dir", default=os.path.join(PROJECT_ROOT, "activations"),
                         help="Root to write <size>/<id>.npz under.")
     args = parser.parse_args()
 
-    if args.raw:
-        if os.path.realpath(args.out_dir) == os.path.realpath(
-                os.path.join(PROJECT_ROOT, "activations")):
-            raise SystemExit(
-                "--raw writes unprojected vectors and must not target the encoded "
-                "store; pass --out-dir somewhere else")
-        enc, enc_fp = None, None
-    else:
-        # Fail loud rather than quietly writing raw vectors into a store every
-        # reader expects to be one encoder's output.
-        enc = load_encoder(ENCODER_PATH)
-        enc_fp = fingerprint(enc)
-        print(f"encoder {ENCODER_PATH}: fingerprint {enc_fp:08x}, "
-              f"M={enc['C'].shape[0]}", flush=True)
+    ckpt = get_checkpoint(ACTIVATION_NETWORK)
+    src_fp = source_fingerprint()
+    print(f"activation network {ACTIVATION_NETWORK}, {TRUNK_OUTPUT}: "
+          f"fingerprint {src_fp:08x}", flush=True)
 
     logging.disable(logging.CRITICAL)  # silence KataGo's verbose config dump
 
     device = torch.device(args.device) if args.device else torch.device(
         "cuda" if torch.cuda.is_available() else "cpu")
-    # The encoder as device tensors, once: slicing and projection happen on
-    # the GPU so only the stored row width crosses back to the host.
-    enc_t = None
-    if enc is not None:
-        enc_t = tuple(torch.tensor(enc[k], dtype=torch.float32, device=device)
-                      for k in ("m1", "s1", "pca_mean")) + (
-            torch.tensor(enc["C"].T.copy(), dtype=torch.float32, device=device),)
 
-    block_names = [f"rconv{i}.out" for i in range(1, 19)]
-    print(f"Capturing {len(block_names)} block outputs (rconv1..rconv18)", flush=True)
+    block_names = [TRUNK_OUTPUT]
     print(f"Processing sizes: {list(ALL_BOARD_SIZES)}", flush=True)
 
     totals = {"done": 0, "skipped": 0}
@@ -274,17 +248,16 @@ def main():
             sgf_files = sgf_files[: args.limit]
         print(f"\n[size {size}] Found {len(sgf_files)} SGFs in {in_dir}", flush=True)
 
-        print(f"[size {size}] Loading model on {device}: {args.ckpt}", flush=True)
-        model, _, _ = load_model(args.ckpt, use_swa=False, device=device,
+        print(f"[size {size}] Loading model on {device}: {ckpt}", flush=True)
+        model, _, _ = load_model(ckpt, use_swa=False, device=device,
                                  pos_len=size, verbose=False)
         model.eval()
 
         # Split the worklist by existence up front, then fingerprint-verify the
         # existing files in a background thread WHILE extraction runs: a
-        # resumed encoded run must never leave a file from another encoder (or
-        # a raw leftover) in the store — every reader trusts the directory to
-        # be ONE encoder's output — but the check is pure reading and need not
-        # serialize with the GPU.
+        # resumed run must never leave a file from another network in the
+        # store — every reader trusts the directory to be ONE source's output
+        # — but the check is pure reading and need not serialize with the GPU.
         todo, existing = [], []
         for fname in sgf_files:
             out_path = os.path.join(out_dir, fname[:-4] + ".npz")
@@ -297,17 +270,17 @@ def main():
         def _verify_existing():
             for path in existing:
                 with np.load(path) as d:
-                    old_fp = int(d["encoder_fp"]) if "encoder_fp" in d.files else None
-                if old_fp != enc_fp:
+                    old_fp = int(d["source_fp"]) if "source_fp" in d.files else None
+                if old_fp != src_fp:
                     verify_err.append(
-                        f"{path}: written under encoder "
-                        f"{'none (raw)' if old_fp is None else f'{old_fp:08x}'}, "
-                        f"current is {enc_fp:08x} — re-encode or remove the "
-                        f"stale store before resuming")
+                        f"{path}: written from source "
+                        f"{'unstamped' if old_fp is None else f'{old_fp:08x}'}, "
+                        f"current is {src_fp:08x} — remove the stale store "
+                        f"before resuming")
                     return
 
         verifier = None
-        if enc is not None and existing:
+        if existing:
             verifier = threading.Thread(target=_verify_existing, daemon=True)
             verifier.start()
         print(f"[size {size}] {len(todo)} to extract, {len(existing)} existing"
@@ -341,12 +314,11 @@ def main():
             pending = []
 
             def _write(out_path, vecs, xys, correct_idx):
-                extras = ({"encoder_fp": np.uint32(enc_fp)}
-                          if enc is not None else {})
                 tmp = out_path + ".tmp.npz"
                 np.savez_compressed(tmp, candidates=vecs,
                                     xys=np.array(xys, dtype=np.int32),
-                                    correct_idx=np.int32(correct_idx), **extras)
+                                    correct_idx=np.int32(correct_idx),
+                                    source_fp=np.uint32(src_fp))
                 os.replace(tmp, out_path)
 
             batch = []
@@ -364,11 +336,15 @@ def main():
                         continue
                 if not batch:
                     break
-                acts = batch_forward(
+                trunk = batch_forward(
                     model, block_names,
-                    [b[1][0] for b in batch], [b[1][1] for b in batch])
+                    [b[1][0] for b in batch], [b[1][1] for b in batch])[0]
+                if trunk.shape[1] != ACT_STORE_DIM:
+                    raise RuntimeError(
+                        f"{TRUNK_OUTPUT} has {trunk.shape[1]} channels, the "
+                        f"store is {ACT_STORE_DIM} wide")
                 for j, (fname, (_, _, xys, ci)) in enumerate(batch):
-                    vecs = vecs_at_cells_gpu(acts, j, xys, enc_t)
+                    vecs = vecs_at_cells_gpu(trunk, j, xys)
                     out_path = os.path.join(out_dir, fname[:-4] + ".npz")
                     pending.append(writers.submit(_write, out_path, vecs, xys, ci))
                     n_done += 1

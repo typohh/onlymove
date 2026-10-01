@@ -48,20 +48,18 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-# The transformer blocks' fused Triton kernels and compiled flex-attention are
-# speed paths that build against the Python headers at first use; the plain
-# PyTorch paths they replace compute the same forward pass and need nothing built.
-os.environ.setdefault("KATAGO_FUSED_ROPE_BACKWARD", "0")
-os.environ.setdefault("KATAGO_FUSED_SWIGLU_KERNEL", "0")
-os.environ.setdefault("KATAGO_FLEX_ATTENTION", "0")
-
 from pipeline.extract_activations import (  # noqa: E402
-    BATCH, DEFAULT_CKPT, PARSE_WORKERS, batch_forward, prepare_problem)
+    BATCH, PARSE_WORKERS, batch_forward, prepare_problem)
 from katago.train.load_model import load_model  # noqa: E402
 from utils.constants import ALL_BOARD_SIZES  # noqa: E402
 from utils.rating.features import (  # noqa: E402
     _cache_ids_path, _cache_vecs_path)
 
+# The network these comparison roll-ups default to: the residual net the
+# activation store was read from before the transformer's trunk replaced it.
+DEFAULT_CKPT = os.path.join(
+    PROJECT_ROOT, "models", "kata1-b18c384nbt-s9996604416-d4316597426",
+    "model.ckpt")
 GLOBAL_DIR = os.path.join(PROJECT_ROOT, "activations", "_signal_cache_global")
 GLOBALS = ("trunk_mean", "trunk_max", "value_hidden")
 # Problems the readers prepare before the GPU takes them. The two alternate
