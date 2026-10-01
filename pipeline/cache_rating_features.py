@@ -117,7 +117,7 @@ N_CONT = 2 * (CONT_PLIES * CONT_MOVES + CONT_TRIES * CONT_ANSWERS) + CONT_COUNTS
 # Every array in the cache is one row per tid, and a row counts as cached only when ALL of them
 # are present — so adding an array here re-extracts the corpus rather than leaving half-filled
 # rows that nothing downstream can detect.
-CACHE_ARRAYS = ("feats", "cont", "alt_xy")
+CACHE_ARRAYS = ("feats", "cont", "alt_xy", "answer_q")
 
 
 def _cache_path(size):
@@ -350,6 +350,29 @@ def best_alternative_xy(game):
     return ranked[1][1]                               # rank 0 is the answer
 
 
+def answer_choice_probability(game):
+    """How likely a chooser reading the stored evaluations is to play the answer:
+    a softmax, at temperature 1, of the mover's logit win-probability over the
+    evaluated first moves. Near 1 where the answer alone wins; lower where the
+    search itself left the answer uncertain or an alternative close.
+
+    The answer is variation 0 — its POSITION, never the best-evaluated move —
+    and an answer with no evaluation raises: every other move's weight would
+    then be read against nothing."""
+    _setup, vnodes = parse_tsumego_sgf(game)
+    us = []
+    for k, c in enumerate(_evaluated_children_of(vnodes)):
+        e = _node_eval(c)
+        if e is None:
+            if k == 0:
+                raise ValueError("the answer carries no evaluation comment")
+            continue
+        wp = e[0] if c.get_raw_move()[0] == "b" else 1.0 - e[0]
+        us.append(_logit(wp))
+    u = np.array(us, dtype=np.float64)
+    return float(np.exp(u[0] - np.logaddexp.reduce(u)))
+
+
 def _process_chunk(task):
     """Worker: feature vectors for a chunk of tids (module scope so it pickles).
 
@@ -363,6 +386,7 @@ def _process_chunk(task):
     out = np.empty((len(tids), N_FEATS), dtype=np.float32)
     cont = np.empty((len(tids), N_CONT), dtype=np.float32)
     axy = np.empty((len(tids), 2), dtype=np.int32)
+    aq = np.empty(len(tids), dtype=np.float32)
     for i, tid in enumerate(tids):
         # ONE parse feeds both blocks — the sgfmill parse dominates this step, so the
         # continuation costs essentially nothing on top of the root evaluations.
@@ -372,6 +396,7 @@ def _process_chunk(task):
             f = extract_move_features(game)
             c = extract_continuation_features(game)
             a = best_alternative_xy(game)
+            aq[i] = answer_choice_probability(game)
         except Exception as e:
             raise RuntimeError(f"size {size}: failed to read/parse {tid}.sgf") from e
         if f is None or c is None:
@@ -381,7 +406,7 @@ def _process_chunk(task):
         out[i] = f
         cont[i] = c
         axy[i] = a
-    return tids, out, cont, axy
+    return tids, out, cont, axy, aq
 
 
 def build_size(size, workers, force, rebuild_activations=False):
@@ -449,7 +474,8 @@ def build_size(size, workers, force, rebuild_activations=False):
     idx = {t: i for i, t in enumerate(to_extract)}
     new = {"feats": np.full((len(to_extract), N_FEATS), np.nan, dtype=np.float32),
            "cont": np.full((len(to_extract), N_CONT), np.nan, dtype=np.float32),
-           "alt_xy": np.full((len(to_extract), 2), -1, dtype=np.int32)}
+           "alt_xy": np.full((len(to_extract), 2), -1, dtype=np.int32),
+           "answer_q": np.full(len(to_extract), np.nan, dtype=np.float32)}
     chunks = [(size, to_extract[i:i + CHUNK]) for i in range(0, len(to_extract), CHUNK)]
     t0 = time.time()
     done = 0
@@ -461,11 +487,12 @@ def build_size(size, workers, force, rebuild_activations=False):
         with ProcessPoolExecutor(max_workers=workers) as ex:
             futs = [ex.submit(_process_chunk, c) for c in chunks]
             for k, fu in enumerate(as_completed(futs)):
-                ctids, cout, ccont, caxy = fu.result()
-                for t, row, crow, arow in zip(ctids, cout, ccont, caxy):
+                ctids, cout, ccont, caxy, caq = fu.result()
+                for t, row, crow, arow, qrow in zip(ctids, cout, ccont, caxy, caq):
                     new["feats"][idx[t]] = row
                     new["cont"][idx[t]] = crow
                     new["alt_xy"][idx[t]] = arow
+                    new["answer_q"][idx[t]] = qrow
                 done += len(ctids)
                 if (k + 1) % 50 == 0 or done == len(to_extract):
                     print(f"  {done}/{len(to_extract)} "
@@ -481,7 +508,8 @@ def build_size(size, workers, force, rebuild_activations=False):
     out_tids = list(tids)
     out = {name: np.array([cached[name][t] for t in tids]) for name in CACHE_ARRAYS}
     bad = [t for i, t in enumerate(tids)
-           if not (np.isfinite(out["feats"][i]).all() and np.isfinite(out["cont"][i]).all())]
+           if not (np.isfinite(out["feats"][i]).all() and np.isfinite(out["cont"][i]).all()
+                   and np.isfinite(out["answer_q"][i]))]
     if bad:
         raise RuntimeError(
             f"size {size}: {len(bad)} non-finite feature rows (e.g. {bad[:5]}); "

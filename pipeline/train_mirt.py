@@ -126,7 +126,8 @@ from utils.rating.model_constants import (  # noqa: E402
     K_AXES, PCA_DIM, PRODUCTION_BLOCKS, SEED, SIZES, SLOPE_FLOOR,
     clear_logit_vec)
 from utils.rating.features import (  # noqa: E402
-    load_first_time_attempts, load_joint_mirt_features, load_legal_cell_counts)
+    load_answer_choice, load_first_time_attempts, load_joint_mirt_features,
+    load_legal_cell_counts)
 # The trunk's layer stack, stated once — pipeline.write_mirt_per_cell rebuilds it
 # to project every legal cell, and a stack that matches by shape while differing
 # in its activation loads cleanly and projects through the wrong function.
@@ -165,7 +166,7 @@ LR_FIELD = 1e-2
 # hand so the split cannot fall out of step with the module's own parameters:
 # anything not listed here is "the net" and gets the slow rate, so a parameter
 # added and forgotten lands on the safe side.
-FIELD_PARAMS = ("theta.weight", "v", "lapse_raw")
+FIELD_PARAMS = ("theta.weight", "v", "lapse_raw", "theta_strong")
 V_RIDGE = 0.5                    # not binding: 0.05/0.15/0.5 score alike
 ORTHO_RATING = 0.5               # keeps each TAIL off rating, slope and floor
 # ONE barrier, on the slope, one-sided, acting on the PRE-SOFTPLUS output. The
@@ -254,6 +255,19 @@ MIN_BOTH_OUTCOMES = 1
 # EXPECTATION, not as sampled answers. The weight is one of its rows against one
 # real row; it carries no rank and reaches nothing outside this loss.
 RANDOM_USER_WEIGHT = 0.0
+# THE STRONG USER, the random user's counterpart at the other end: a synthetic
+# player who has also answered every corpus problem, right with the probability
+# a chooser reading the stored evaluations plays the answer (the move-eval
+# cache's `answer_q`) — near certain where the answer alone wins, lower where the
+# search itself left it unclear. Where every real attempt on a problem failed, a
+# hard problem and an unboundedly hard one explain the outcomes equally and the
+# difficulty is free to run; this player's success on it is what bounds it.
+# Its ability is ONE FITTED NUMBER, not a pin — it is finite, and the uncertain
+# problems are what locate it — and it has no axis position. Its target is scaled
+# by the fit's own ceiling, (1 - lapse) * q with the lapse held as a constant
+# there, because a target above the ceiling cannot be met by any ability and
+# would be spent pushing the lapse down instead. Same per-row weight convention.
+STRONG_USER_WEIGHT = 0.0
 STOP_ROW_FRAC = 0.0              # the shipped fit trains on every row: the budget
                                  # is fixed, so a held-aside split decides nothing
                                  # and only withholds data. Comparison arms pass
@@ -302,6 +316,9 @@ class JointMIRT(nn.Module):
         # make this feature reuse rather than a joint fit.
         self.g_lin = nn.Linear(d, self.k_axes, bias=False)
         self.v = nn.Parameter(torch.zeros(n_users, self.k_axes))
+        # The strong synthetic user's ability (STRONG_USER_WEIGHT); it receives
+        # no gradient, and so never moves, in a fit that does not inject it.
+        self.theta_strong = nn.Parameter(torch.tensor(3.0))
         li = float(np.clip(LAPSE_INIT / LAPSE_CAP, EPS, 1.0 - EPS))
         self.lapse_raw = nn.Parameter(
             torch.tensor(float(np.log(li / (1.0 - li)))))
@@ -609,6 +626,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         shallow_tau=SHALLOW_TAU,
         shallow_w=SHALLOW_W, shallow_samples=SHALLOW_SAMPLES,
         random_user_weight=RANDOM_USER_WEIGHT,
+        strong_user_weight=STRONG_USER_WEIGHT,
         teach_weight=TEACH_WEIGHT, stop_row_frac=STOP_ROW_FRAC,
         pca_dim=PCA_DIM, blocks=PRODUCTION_BLOCKS, act_source="store",
         stop_unit="row",
@@ -673,6 +691,12 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         cells = load_legal_cell_counts(SIZES, {
             s: [t for sz, t in keys if sz == s] for s in SIZES})
         t_chance = torch.tensor([1.0 / cells[k] for k in keys],
+                                dtype=torch.float32, device=device)
+    t_answer = None
+    if strong_user_weight > 0:
+        aq = load_answer_choice(SIZES, {
+            s: [t for sz, t in keys if sz == s] for s in SIZES})
+        t_answer = torch.tensor([aq[k] for k in keys],
                                 dtype=torch.float32, device=device)
     tu = torch.tensor(user_idx, device=device)
     ty = torch.tensor(y, device=device)
@@ -967,6 +991,15 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
                 c_r = m.floor(tfeat[si]).clamp(EPS, 1 - EPS)
                 loss = loss + random_user_weight * (len(tfeat) / n) * (
                     torch.nn.functional.binary_cross_entropy(c_r, t_chance[si]))
+            if t_answer is not None:
+                b_q, a_q, c_q, _ = m.problem_params(tfeat[si])
+                lam_q = m.lapse()
+                p_q = (c_q + (1.0 - c_q - lam_q) * torch.sigmoid(
+                    (a_q * (m.theta_strong - b_q)).clamp(-35, 35))).clamp(
+                        EPS, 1 - EPS)
+                y_q = (1.0 - lam_q.detach()) * t_answer[si]
+                loss = loss + strong_user_weight * (len(tfeat) / n) * (
+                    torch.nn.functional.binary_cross_entropy(p_q, y_q))
             m.train(True)
             opt.zero_grad(); loss.backward(); opt.step()
 
@@ -1195,6 +1228,8 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         "epochs": int(epochs), "trace": trace,
         "k_axes": int(k_axes),
         "random_user_weight": float(random_user_weight),
+        "strong_user_weight": float(strong_user_weight),
+        "theta_strong": float(m.theta_strong),
         "lr_schedule": str(lr_schedule),
         "lr_warmup_epochs": int(lr_warmup_epochs),
         "ortho_axes": float(ortho_axes),

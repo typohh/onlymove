@@ -253,6 +253,28 @@ def build_correct_vec_cache(size, workers=None, force=False):
         json.dump(ids, f)
 
 
+def load_answer_choice(sizes, tids_by_size):
+    """{(size, tid): the stored-evaluation chooser's probability of playing the
+    answer} — the move-eval cache's `answer_q` column
+    (pipeline.cache_rating_features.answer_choice_probability). A corpus problem
+    without a row aborts, like every other block."""
+    out = {}
+    for size in sizes:
+        path = os.path.join(CACHE_DIR, f"move_evals_{size}.npz")
+        with np.load(path) as d:
+            if "answer_q" not in d.files:
+                raise SystemExit(
+                    f"{path} has no answer_q — re-run "
+                    f"`python -m pipeline.cache_rating_features`")
+            q = dict(zip(d["tids"].tolist(), d["answer_q"].tolist()))
+        for t in tids_by_size[size]:
+            try:
+                out[(size, t)] = float(q[t])
+            except KeyError:
+                raise _missing_block_error("answer_q", (size, t)) from None
+    return out
+
+
 def _legal_cells_path(size):
     return os.path.join(CACHE_DIR, f"legal_cells_{size}.json")
 
