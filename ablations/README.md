@@ -54,12 +54,6 @@ Producers: **`corpus_figures.py`** (the published index, `pwa/lookup.txt`, whole
 - **`skill_drift_fit.py`** — what each term of the Rank tab's career skill smoother (`pwa/js/skill-smoother.js`) is worth: three nested arms — the random walk alone, with the per-session form offset, and with the step variance saturating at a cap — each fitted by population maximum likelihood of every first-time attempt's outcome given the same player's earlier attempts, beside the shipped constants' own log-likelihood. Runs the shipped smoother under node (`skill_drift_fit.mjs`). The shipped constants are fitted by `pipeline.fit_population_constants`, not here.
 - **`eval_recall_model.py`** — validates the shipped retention model against the attempt log: per-rung realized retention against the window ceiling, within-user contrasts, delivery. Produces every figure in `docs/methodology.md` §2.8's closing subsection; `recall_figures` reads its returned statistics into the ledger, so a refresh is one ledger run.
 
-## The activation encoder
-
-Both read RAW per-problem npz, which the shipped store no longer holds — a re-run needs `extract_activations --raw --out-dir` in place of it.
-
-- **`encoder_m_sweep.py`** — chooses `ACT_ENCODER_DIM` by measurement: an M-spectrum scan, plus a simulated future refit (encoder fitted on half the problems, downstream 128-PCA fitted inside that M-space, scored on rows the encoder never saw) against the counterfactual full-space PCA.
-- **`encoder_altstats_gate.py`** — whether encoder truncation moves the availability null, by running the SAME fitted chain twice per cell (raw vector vs the encoded store's vector reconstructed back to raw space) with no refit anywhere. The gate passes when the flip rate sits at or below the cross-projection reference rate `emit_alt_stats` already records.
 
 ## The refit tier: panels
 
