@@ -99,15 +99,20 @@ def _reader(tasks, act_dirs, q):
     run."""
     from concurrent.futures import ThreadPoolExecutor
     batch = []
+    # The pool is handed READ_AHEAD batches of problems at a time. Mapping it
+    # over the whole worklist submits every read at once, and the pool then runs
+    # ahead of the bounded queue with nothing holding it back: the loaded store
+    # piles up in memory until the process is killed.
+    step = PROBLEM_BATCH * READ_AHEAD
     with ThreadPoolExecutor(max_workers=READ_WORKERS) as ex:
-        for r in ex.map(_load_one,
-                        ((s, t, act_dirs[s]) for s, t in tasks),
-                        chunksize=32):
-            if r is None:
-                continue
-            batch.append(r)
-            if len(batch) >= PROBLEM_BATCH:
-                q.put(batch); batch = []
+        for i in range(0, len(tasks), step):
+            for r in ex.map(_load_one,
+                            [(s, t, act_dirs[s]) for s, t in tasks[i:i + step]]):
+                if r is None:
+                    continue
+                batch.append(r)
+                if len(batch) >= PROBLEM_BATCH:
+                    q.put(batch); batch = []
     if batch:
         q.put(batch)
     q.put(None)
