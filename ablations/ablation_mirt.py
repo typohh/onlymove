@@ -174,9 +174,10 @@ def main(argv=None):
                     help="the barrier's pre-softplus threshold (production "
                          f"{train_mirt.SHALLOW_TAU})")
     ap.add_argument("--idiocy", type=int, default=None,
-                    help="1 = the global step from the floor down to chance "
-                         f"(production {int(train_mirt.IDIOCY)}); 0 leaves the "
-                         "floor as the curve's flat bottom, the 4PL")
+                    help="1 = the second slope from the floor down to chance "
+                         "at one fitted global ability (production "
+                         f"{int(train_mirt.IDIOCY)}); 0 leaves the floor as the "
+                         "curve's flat bottom, the 4PL")
     ap.add_argument("--random-user-weight", type=float, default=None,
                     help="share of the synthetic RANDOM user's rows drawn into "
                          "each epoch (production "
