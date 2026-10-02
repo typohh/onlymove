@@ -287,6 +287,9 @@ MOTIF_PROXIES = os.path.join(AXES_DIR, "motif_proxies.npz")
 LABELS = os.path.join(AXES_DIR, "labels.json")
 
 
+RAMP_SHARPNESS = 10.0
+
+
 class JointMIRT(nn.Module):
     """Compensatory M4PL with per-problem parameters from a shared trunk.
 
@@ -296,7 +299,8 @@ class JointMIRT(nn.Module):
     """
 
     def __init__(self, fdim, n_users, input_dim, seed, k_axes=K_AXES,
-                 dropout=DROPOUT, input_dropout=INPUT_DROPOUT, link_power=False):
+                 dropout=DROPOUT, input_dropout=INPUT_DROPOUT, link_power=False,
+                 link="sigmoid"):
         super().__init__()
         self.k_axes = int(k_axes)
         # The two dropout sites are separate parameters because they suppress
@@ -327,6 +331,14 @@ class JointMIRT(nn.Module):
         # prediction reads it; the written rating and the held-out diagnostics
         # still assume the symmetric curve.
         self.link_power = bool(link_power)
+        # EXPERIMENT (sigmoid as shipped): the main slope's shape between the
+        # floor and the ceiling. The two ramps are the sigmoid's tangent at its
+        # centre, a straight line in probability: "ramp_hard" clamps it at both
+        # levels, so the levels are truly flat and pass no gradient; "ramp_soft"
+        # rounds the two corners over a tenth of the ramp.
+        if link not in ("sigmoid", "ramp_soft", "ramp_hard"):
+            raise ValueError(f"unknown link {link!r}")
+        self.link = link
         if self.link_power:
             self.link_power_raw = nn.Parameter(
                 torch.tensor(float(np.log(np.expm1(1.0)))))
@@ -475,7 +487,16 @@ class JointMIRT(nn.Module):
         # the rating's units.
         q = ((CALIBRATION_P - c) / (1.0 - c - lam)).clamp(EPS, 1.0 - EPS)
         r = b + torch.log(q / (1.0 - q)) / a.clamp(min=1e-6)
-        sz = torch.sigmoid(z)
+        if self.link == "sigmoid":
+            sz = torch.sigmoid(z)
+        else:
+            u = 0.5 + z / 4.0
+            if self.link == "ramp_hard":
+                sz = u.clamp(0.0, 1.0)
+            else:
+                sz = (nn.functional.softplus(RAMP_SHARPNESS * u)
+                      - nn.functional.softplus(RAMP_SHARPNESS * (u - 1.0))
+                      ) / RAMP_SHARPNESS
         if self.link_power:
             sz = sz ** nn.functional.softplus(self.link_power_raw)
         return (c + (1.0 - c - lam) * sz, g,
@@ -641,7 +662,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         ortho_axes_detach=ORTHO_AXES_DETACH,
         v_ridge_ladder=1.0,
         k_axes=K_AXES, dropout=DROPOUT, input_dropout=INPUT_DROPOUT,
-        link_power=False,
+        link_power=False, link="sigmoid",
         weight_decay=0.0, weight_decay_fields=None,
         out_dir=OUT_DIR, axes_dir=AXES_DIR):
     """The shipped fit, callable. Every keyword defaults to the production
@@ -786,7 +807,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
 
     m = JointMIRT(fdim, n_users + len(synthetic), input_dim, seed, k_axes,
                   dropout=dropout, input_dropout=input_dropout,
-                  link_power=link_power).to(device)
+                  link_power=link_power, link=link).to(device)
     # Adam with no decay is what ships; the decay knob exists so 1.5's claim
     # that a norm penalty does not substitute for dropout can be re-measured,
     # and at 0 this is the same optimizer it always was.
