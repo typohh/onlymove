@@ -277,6 +277,10 @@ IDIOCY_FORM = "own_slope"
 # line for every problem, so a main-curve rating placed there describes a
 # descent no player is on; the difficulty is held up so the rating stops at it.
 RATING_MIN = False
+# ABILITY_MIN: no player is placed below the idiocy rating. Under it the second
+# slope has nothing further to say, so a player parked there is out of the
+# model's sight; held at it, they pull on the idiocy rating instead.
+ABILITY_MIN = False
 IDIOCY_SLOPE_INIT = 1.0
 IDIOCY_INIT = -10.0
 IDIOCY_SHARPNESS = 10.0          # the ramp's corners round over 1/this of its length
@@ -336,7 +340,8 @@ class JointMIRT(nn.Module):
 
     def __init__(self, fdim, n_users, input_dim, seed, k_axes=K_AXES,
                  dropout=DROPOUT, input_dropout=INPUT_DROPOUT, idiocy=IDIOCY,
-                 idiocy_form=IDIOCY_FORM, rating_min=RATING_MIN):
+                 idiocy_form=IDIOCY_FORM, rating_min=RATING_MIN,
+                 ability_min=ABILITY_MIN):
         super().__init__()
         self.idiocy = bool(idiocy)
         if idiocy_form not in ("own_slope", "sigmoid"):
@@ -345,6 +350,9 @@ class JointMIRT(nn.Module):
         if rating_min and not (idiocy and idiocy_form == "own_slope"):
             raise ValueError("rating_min needs the own_slope second slope")
         self.rating_min = bool(rating_min)
+        if ability_min and not idiocy:
+            raise ValueError("ability_min needs the second slope")
+        self.ability_min = bool(ability_min)
         self.k_axes = int(k_axes)
         # The two dropout sites are separate parameters because they suppress
         # different failure modes and are reasoned about separately (1.5); the
@@ -404,6 +412,13 @@ class JointMIRT(nn.Module):
 
     def lapse(self):
         return LAPSE_CAP * torch.sigmoid(self.lapse_raw)
+
+    def ability(self, uid=None):
+        """Abilities as the curve reads them (every user's when `uid` is None)."""
+        th = (self.theta.weight if uid is None else self.theta(uid)).squeeze(-1)
+        if self.ability_min:
+            th = torch.maximum(th, self.idiocy_rating)
+        return th
 
     def low(self, c, th, chance):
         """The curve's lower part at ability `th`: `chance` far below the
@@ -530,7 +545,7 @@ class JointMIRT(nn.Module):
 
     def forward(self, uid, feat, chance):
         b, a, c, g = self.problem_params(feat, chance=chance)
-        th = self.theta(uid).squeeze(-1)
+        th = self.ability(uid)
         lam = self.lapse()
         z = (a * (th - b) + (g * self.user_axis(uid)).sum(-1)).clamp(-35, 35)
         # The SHIPPED per-problem triple, returned DETACHED for the rating-
@@ -711,7 +726,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         k_axes=K_AXES, dropout=DROPOUT, input_dropout=INPUT_DROPOUT,
         idiocy=IDIOCY, idiocy_form=IDIOCY_FORM,
         idiocy_init=IDIOCY_INIT,
-        rating_min=RATING_MIN,
+        rating_min=RATING_MIN, ability_min=ABILITY_MIN,
         weight_decay=0.0, weight_decay_fields=None,
         out_dir=OUT_DIR, axes_dir=AXES_DIR):
     """The shipped fit, callable. Every keyword defaults to the production
@@ -860,7 +875,8 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
     m = JointMIRT(fdim, n_users + len(synthetic), input_dim, seed, k_axes,
                   dropout=dropout, input_dropout=input_dropout,
                   idiocy=idiocy, idiocy_form=idiocy_form,
-                  rating_min=rating_min).to(device)
+                  rating_min=rating_min,
+                  ability_min=ability_min).to(device)
     with torch.no_grad():
         m.idiocy_rating.fill_(float(idiocy_init))
     # Adam with no decay is what ships; the decay knob exists so 1.5's claim
@@ -1139,7 +1155,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         if has_stop:
             b_s, a_s, c_s, _ = m.problem_params(
                 tfeat[tp[i_stop]], chance=t_chance[tp[i_stop]])
-            th_s = m.theta(tu[i_stop]).squeeze(-1)
+            th_s = m.ability(tu[i_stop])
             lam_s = m.lapse()
             z_s = (a_s * (th_s - b_s)).clamp(-35, 35)
             ch_s = t_chance[tp[i_stop]]
@@ -1191,7 +1207,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
             b_h, a_h, c_h, g_h = m.problem_params(
                 tfeat[tp[i_stop]], chance=t_chance[tp[i_stop]])
             lam_h = m.lapse()
-            th_h = m.theta(tu[i_stop]).squeeze(-1)
+            th_h = m.ability(tu[i_stop])
             z_h = (a_h * (th_h - b_h)
                    + (g_h * m.user_axis(tu[i_stop])).sum(-1)).clamp(-35, 35)
             sg_h = torch.sigmoid(z_h)
@@ -1229,7 +1245,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
     # distinguishes a real difficulty from a collapsed slope is the SLOPE
     # distribution and the share at the clamp, printed below.
     rating = b_np + clear_logit_vec(c_np, lam) / np.maximum(a_np, 1e-6)
-    theta_all = m.theta.weight.detach().cpu().numpy().ravel()
+    theta_all = m.ability().detach().cpu().numpy().ravel()
     theta = theta_all[:n_users]
     theta_synthetic = {("strong" if first == strong_from else "random"):
                        float(theta_all[uid]) for _w, first, uid in synthetic}
