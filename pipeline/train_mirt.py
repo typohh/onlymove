@@ -190,13 +190,14 @@ SHALLOW_W = 0.3
 # sits well under BATCH, and moving it trades one number against the other in
 # the obvious direction: more samples, steadier barrier gradient, slower epoch.
 SHALLOW_SAMPLES = 20000
-# FLOOR_BARRIER_W (off at 0; needs the second slope): the floor divides a
-# problem's range between its two slopes, and at either end of its own range one
-# of them has no height left — at chance the second slope, at the ceiling the
-# main one, whose rating and slope then describe nothing. With the barrier on
-# the floor is placed BETWEEN chance and its cap by construction, and a log
-# barrier on that position, -log(f) - log(1 - f), prices each end. It reads the
-# same corpus sample the slope barrier does.
+# FLOOR_BARRIER_W (off at 0; needs the second slope): a floor at chance leaves
+# the second slope no height, and no position is so blank that a player who
+# cannot read it is picking among ALL legal moves. With the barrier on the floor
+# is placed ABOVE chance by construction, and priced directly against chance:
+# -log(1 - chance / floor). Chance is its own scale, so the price is steep within
+# a few multiples of it and fades above, leaving a high floor alone — the top is
+# bounded by the cap, not by this. It reads the same corpus sample the slope
+# barrier does.
 FLOOR_BARRIER_W = 0.0
 # ONE SCHEDULE, and the loop is uniform because of it. Holding the per-user axis
 # positions at zero for an opening span is the obvious companion to teaching —
@@ -1165,10 +1166,11 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
             short = torch.nn.functional.softplus(o_tau - o_slope).pow(2).mean()
             loss = loss + shallow_w * short
             if floor_barrier_w > 0:
-                # -log(f) - log(1 - f) with f = sigmoid(o_floor).
-                loss = loss + floor_barrier_w * (
-                    torch.nn.functional.softplus(o_floor)
-                    + torch.nn.functional.softplus(-o_floor)).mean()
+                ch_b = t_chance[si]
+                c_b = ch_b + torch.relu(1.0 - 2.0 * m.lapse() - ch_b) \
+                    * torch.sigmoid(o_floor)
+                loss = loss - floor_barrier_w * torch.log(
+                    (1.0 - ch_b / c_b).clamp(min=EPS)).mean()
             m.train(True)
             opt.zero_grad(); loss.backward()
             opt.step()
