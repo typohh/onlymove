@@ -166,7 +166,8 @@ LR_FIELD = 1e-2
 # hand so the split cannot fall out of step with the module's own parameters:
 # anything not listed here is "the net" and gets the slow rate, so a parameter
 # added and forgotten lands on the safe side.
-FIELD_PARAMS = ("theta.weight", "v", "lapse_raw", "link_power_raw")
+FIELD_PARAMS = ("theta.weight", "v", "lapse_raw", "link_power_raw",
+                "floor_prior_mu", "floor_prior_logsd")
 V_RIDGE = 0.5                    # not binding: 0.05/0.15/0.5 score alike
 ORTHO_RATING = 0.5               # keeps each TAIL off rating, slope and floor
 # ONE barrier, on the slope, one-sided, acting on the PRE-SOFTPLUS output. The
@@ -300,7 +301,8 @@ class JointMIRT(nn.Module):
 
     def __init__(self, fdim, n_users, input_dim, seed, k_axes=K_AXES,
                  dropout=DROPOUT, input_dropout=INPUT_DROPOUT, link_power=False,
-                 link="sigmoid", lapse_fixed=None, gauge="sd"):
+                 link="sigmoid", lapse_fixed=None, gauge="sd",
+                 floor_prior=False):
         super().__init__()
         self.k_axes = int(k_axes)
         # The two dropout sites are separate parameters because they suppress
@@ -331,6 +333,15 @@ class JointMIRT(nn.Module):
         # prediction reads it; the written rating and the held-out diagnostics
         # still assume the symmetric curve.
         self.link_power = bool(link_power)
+        # EXPERIMENT (off as shipped): an EMPIRICAL-BAYES prior on the floor's
+        # raw output, normal with a FITTED mean and spread. A floor only the
+        # weakest players' attempts can inform is otherwise set by wherever the
+        # trunk drifts; the prior draws it toward the population's floors by as
+        # much as the population's own spread says, with nothing tuned.
+        self.floor_prior = bool(floor_prior)
+        if self.floor_prior:
+            self.floor_prior_mu = nn.Parameter(torch.zeros(()))
+            self.floor_prior_logsd = nn.Parameter(torch.zeros(()))
         # EXPERIMENT ("sd" as shipped): what the difficulty gauge holds at one.
         # A standard deviation can be met by a few far outliers while the bulk
         # collapses; "iqr" holds the interquartile range, on the scale where a
@@ -679,6 +690,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         v_ridge_ladder=1.0,
         k_axes=K_AXES, dropout=DROPOUT, input_dropout=INPUT_DROPOUT,
         link_power=False, link="sigmoid", lapse_fixed=None, gauge="sd",
+        floor_prior=False,
         weight_decay=0.0, weight_decay_fields=None,
         out_dir=OUT_DIR, axes_dir=AXES_DIR):
     """The shipped fit, callable. Every keyword defaults to the production
@@ -824,7 +836,9 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
     m = JointMIRT(fdim, n_users + len(synthetic), input_dim, seed, k_axes,
                   dropout=dropout, input_dropout=input_dropout,
                   link_power=link_power, link=link,
-                  lapse_fixed=lapse_fixed, gauge=gauge).to(device)
+                  lapse_fixed=lapse_fixed, gauge=gauge,
+                  floor_prior=floor_prior).to(device)
+    prior_ratio = len(keys) / len(df)
     # Adam with no decay is what ships; the decay knob exists so 1.5's claim
     # that a norm penalty does not substitute for dropout can be re-measured,
     # and at 0 this is the same optimizer it always was.
@@ -1061,8 +1075,20 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
                     (gz[mk] - t_tgt[tp_all[bi]][mk]) ** 2).mean()
             m.train(False)          # the barrier reads corpus rows, dropout off
             si = torch.randint(len(tfeat), (shallow_samples,), device=device)
-            short = torch.nn.functional.softplus(
-                o_tau - m.slope_logit(tfeat[si])).pow(2).mean()
+            if m.floor_prior:
+                o_s = m.head(m.trunk(tfeat[si]))
+                short = torch.nn.functional.softplus(
+                    o_tau - o_s[:, 1]).pow(2).mean()
+                # Negative log prior per problem, weighted problems-to-rows so
+                # that over an epoch the prior counts each problem once against
+                # each row's likelihood counting once.
+                zf = (o_s[:, 2] - m.floor_prior_mu) * torch.exp(
+                    -m.floor_prior_logsd)
+                loss = loss + prior_ratio * (
+                    0.5 * zf.pow(2) + m.floor_prior_logsd).mean()
+            else:
+                short = torch.nn.functional.softplus(
+                    o_tau - m.slope_logit(tfeat[si])).pow(2).mean()
             loss = loss + shallow_w * short
             m.train(True)
             opt.zero_grad(); loss.backward()
@@ -1299,6 +1325,9 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         "lambda": lam, "elapsed_s": round(elapsed, 1),
         "link_power": (float(nn.functional.softplus(m.link_power_raw))
                        if link_power else None),
+        "floor_prior": ([float(m.floor_prior_mu),
+                         float(torch.exp(m.floor_prior_logsd))]
+                        if floor_prior else None),
         "epochs": int(epochs), "trace": trace,
         "k_axes": int(k_axes),
         "random_user_weight": float(random_user_weight),
