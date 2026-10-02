@@ -166,7 +166,7 @@ LR_FIELD = 1e-2
 # hand so the split cannot fall out of step with the module's own parameters:
 # anything not listed here is "the net" and gets the slow rate, so a parameter
 # added and forgotten lands on the safe side.
-FIELD_PARAMS = ("theta.weight", "v", "lapse_raw")
+FIELD_PARAMS = ("theta.weight", "v", "lapse_raw", "link_power_raw")
 V_RIDGE = 0.5                    # not binding: 0.05/0.15/0.5 score alike
 ORTHO_RATING = 0.5               # keeps each TAIL off rating, slope and floor
 # ONE barrier, on the slope, one-sided, acting on the PRE-SOFTPLUS output. The
@@ -296,7 +296,7 @@ class JointMIRT(nn.Module):
     """
 
     def __init__(self, fdim, n_users, input_dim, seed, k_axes=K_AXES,
-                 dropout=DROPOUT, input_dropout=INPUT_DROPOUT):
+                 dropout=DROPOUT, input_dropout=INPUT_DROPOUT, link_power=False):
         super().__init__()
         self.k_axes = int(k_axes)
         # The two dropout sites are separate parameters because they suppress
@@ -321,6 +321,15 @@ class JointMIRT(nn.Module):
         li = float(np.clip(LAPSE_INIT / LAPSE_CAP, EPS, 1.0 - EPS))
         self.lapse_raw = nn.Parameter(
             torch.tensor(float(np.log(li / (1.0 - li)))))
+        # EXPERIMENT (off as shipped): the main slope as sigmoid(z) ** power,
+        # one fitted global exponent starting at 1. Above 1 the curve leaves the
+        # floor more slowly than it reaches the ceiling. Only the training
+        # prediction reads it; the written rating and the held-out diagnostics
+        # still assume the symmetric curve.
+        self.link_power = bool(link_power)
+        if self.link_power:
+            self.link_power_raw = nn.Parameter(
+                torch.tensor(float(np.log(np.expm1(1.0)))))
         # THE TWO GAUGES, both the same shape: batch statistics while training,
         # an EMA of them at eval. BUFFERS, so they travel with the weights
         # wherever the weights go — mirt_model.pt, which write_mirt_per_cell
@@ -466,7 +475,10 @@ class JointMIRT(nn.Module):
         # the rating's units.
         q = ((CALIBRATION_P - c) / (1.0 - c - lam)).clamp(EPS, 1.0 - EPS)
         r = b + torch.log(q / (1.0 - q)) / a.clamp(min=1e-6)
-        return (c + (1.0 - c - lam) * torch.sigmoid(z), g,
+        sz = torch.sigmoid(z)
+        if self.link_power:
+            sz = sz ** nn.functional.softplus(self.link_power_raw)
+        return (c + (1.0 - c - lam) * sz, g,
                 torch.stack([r, a, c], dim=1).detach())
 
 
@@ -629,6 +641,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         ortho_axes_detach=ORTHO_AXES_DETACH,
         v_ridge_ladder=1.0,
         k_axes=K_AXES, dropout=DROPOUT, input_dropout=INPUT_DROPOUT,
+        link_power=False,
         weight_decay=0.0, weight_decay_fields=None,
         out_dir=OUT_DIR, axes_dir=AXES_DIR):
     """The shipped fit, callable. Every keyword defaults to the production
@@ -772,7 +785,8 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
           flush=True)
 
     m = JointMIRT(fdim, n_users + len(synthetic), input_dim, seed, k_axes,
-                  dropout=dropout, input_dropout=input_dropout).to(device)
+                  dropout=dropout, input_dropout=input_dropout,
+                  link_power=link_power).to(device)
     # Adam with no decay is what ships; the decay knob exists so 1.5's claim
     # that a norm penalty does not substitute for dropout can be re-measured,
     # and at 0 this is the same optimizer it always was.
@@ -1245,6 +1259,8 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         "base_rate": float(y.mean()), "stop_rows": int(is_stop.sum()),
         "bank_taught": int(bank_ok.sum()), "bank_spec": list(bank_spec),
         "lambda": lam, "elapsed_s": round(elapsed, 1),
+        "link_power": (float(nn.functional.softplus(m.link_power_raw))
+                       if link_power else None),
         "epochs": int(epochs), "trace": trace,
         "k_axes": int(k_axes),
         "random_user_weight": float(random_user_weight),
