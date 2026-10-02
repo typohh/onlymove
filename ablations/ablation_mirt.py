@@ -173,6 +173,10 @@ def main(argv=None):
     ap.add_argument("--shallow-tau", type=float, default=None,
                     help="the barrier's pre-softplus threshold (production "
                          f"{train_mirt.SHALLOW_TAU})")
+    ap.add_argument("--idiocy", type=int, default=None,
+                    help="1 = the global step from the floor down to chance "
+                         f"(production {int(train_mirt.IDIOCY)}); 0 leaves the "
+                         "floor as the curve's flat bottom, the 4PL")
     ap.add_argument("--random-user-weight", type=float, default=None,
                     help="share of the synthetic RANDOM user's rows drawn into "
                          "each epoch (production "
@@ -309,7 +313,7 @@ def main(argv=None):
 
     cfg = {}
     for flag in ("seed", "epochs", "shallow_w", "shallow_tau", "lr_net",
-                 "random_user_weight", "strong_user_weight",
+                 "random_user_weight", "strong_user_weight", "idiocy",
                  "lr_field", "ortho_rating", "ortho_mode", "ortho_axes",
                  "teach_weight", "teach_detach", "ortho_detach",
                  "ortho_axes_detach", "v_ridge_ladder",

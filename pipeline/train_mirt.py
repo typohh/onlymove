@@ -166,7 +166,7 @@ LR_FIELD = 1e-2
 # hand so the split cannot fall out of step with the module's own parameters:
 # anything not listed here is "the net" and gets the slow rate, so a parameter
 # added and forgotten lands on the safe side.
-FIELD_PARAMS = ("theta.weight", "v", "lapse_raw")
+FIELD_PARAMS = ("theta.weight", "v", "lapse_raw", "idiocy_t", "idiocy_s_raw")
 V_RIDGE = 0.5                    # not binding: 0.05/0.15/0.5 score alike
 ORTHO_RATING = 0.5               # keeps each TAIL off rating, slope and floor
 # ONE barrier, on the slope, one-sided, acting on the PRE-SOFTPLUS output. The
@@ -241,6 +241,28 @@ ORTHO_AXES_DETACH = True
 # at all; anything above it is a judgement about how WELL, which the likelihood
 # already makes by giving a thin record few terms.
 MIN_BOTH_OUTCOMES = 1
+# THE FLOOR IS A PLATEAU, NOT THE BOTTOM. A problem's floor is what a player
+# still gets right when the reading is beyond them — the answer being one of the
+# few moves anyone considers — and it holds across a wide range of abilities. It
+# does not hold all the way down: below some ability every legal move is a
+# candidate, and success falls on to pure chance, one over the legal moves.
+# Without that second step a floor has to stand for both, and a player at chance
+# can only be explained by dragging every plateau down to meet them.
+#
+# The step is GLOBAL, as the lapse is: one ability `t` below which play turns
+# random and one rate `s`, fitted, shared by every problem,
+#
+#   P = chance + (c - chance)*sigmoid(s*(theta - t)) + (1 - c - lambda)*sigmoid(z)
+#
+# so above `t` the curve is the 4PL exactly and the floor keeps its meaning.
+# Chance is known per problem and never fitted, and a floor already below it
+# does not step. The step also hands the floor a gradient where a flat bottom
+# gave none. Nothing published reads `t` or `s`: the rating, slope and floor are
+# the 4PL's, exact for every ability above the step.
+IDIOCY = True
+IDIOCY_T_INIT = -4.0             # where the step starts, on the ability scale
+IDIOCY_S_INIT = 1.0
+
 # TWO SYNTHETIC USERS, each holding one row on EVERY corpus problem, at the two
 # extremes real players do not reach. They are ordinary users in every respect —
 # rows in the same shuffled stream, a fitted ability, fitted axis positions, the
@@ -295,8 +317,9 @@ class JointMIRT(nn.Module):
     """
 
     def __init__(self, fdim, n_users, input_dim, seed, k_axes=K_AXES,
-                 dropout=DROPOUT, input_dropout=INPUT_DROPOUT):
+                 dropout=DROPOUT, input_dropout=INPUT_DROPOUT, idiocy=IDIOCY):
         super().__init__()
+        self.idiocy = bool(idiocy)
         self.k_axes = int(k_axes)
         # The two dropout sites are separate parameters because they suppress
         # different failure modes and are reasoned about separately (1.5); the
@@ -327,6 +350,12 @@ class JointMIRT(nn.Module):
         # rides on b's whitening and every shipped axis vector on g's divisor, so
         # weights beside a gauge from a different epoch price both by statistics
         # belonging to a different network.
+        # The global step from the plateau to chance (IDIOCY above). Created
+        # either way so a checkpoint's keys do not depend on the switch; unused
+        # they receive no gradient and never move.
+        self.idiocy_t = nn.Parameter(torch.tensor(float(IDIOCY_T_INIT)))
+        self.idiocy_s_raw = nn.Parameter(
+            torch.tensor(float(np.log(np.expm1(IDIOCY_S_INIT)))))
         self.register_buffer("b_mu", torch.zeros(()))
         self.register_buffer("b_sd", torch.ones(()))
         self.register_buffer("g_rms", torch.ones(1, self.k_axes))
@@ -350,6 +379,18 @@ class JointMIRT(nn.Module):
 
     def lapse(self):
         return LAPSE_CAP * torch.sigmoid(self.lapse_raw)
+
+    def idiocy_slope(self):
+        return nn.functional.softplus(self.idiocy_s_raw)
+
+    def low(self, c, th, chance):
+        """The curve's lower asymptote at ability `th`: the floor `c` above the
+        global step, falling to `chance` below it. A floor at or under chance
+        has nowhere to fall."""
+        if not self.idiocy:
+            return c
+        gone = 1.0 - torch.sigmoid(self.idiocy_slope() * (th - self.idiocy_t))
+        return c - torch.relu(c - chance) * gone
 
     def user_axis(self, uid):
         """Per-user axis positions, CENTRED over the population.
@@ -448,7 +489,7 @@ class JointMIRT(nn.Module):
         does reach the trunk, and both are measured to need it."""
         return self.g_lin(self._last_h.detach()) / self._last_rms
 
-    def forward(self, uid, feat):
+    def forward(self, uid, feat, chance):
         b, a, c, g = self.problem_params(feat)
         th = self.theta(uid).squeeze(-1)
         lam = self.lapse()
@@ -465,7 +506,7 @@ class JointMIRT(nn.Module):
         # the rating's units.
         q = ((CALIBRATION_P - c) / (1.0 - c - lam)).clamp(EPS, 1.0 - EPS)
         r = b + torch.log(q / (1.0 - q)) / a.clamp(min=1e-6)
-        return (c + (1.0 - c - lam) * torch.sigmoid(z), g,
+        return (self.low(c, th, chance) + (1.0 - c - lam) * torch.sigmoid(z), g,
                 torch.stack([r, a, c], dim=1).detach())
 
 
@@ -628,6 +669,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         ortho_axes_detach=ORTHO_AXES_DETACH,
         v_ridge_ladder=1.0,
         k_axes=K_AXES, dropout=DROPOUT, input_dropout=INPUT_DROPOUT,
+        idiocy=IDIOCY,
         weight_decay=0.0, weight_decay_fields=None,
         out_dir=OUT_DIR, axes_dir=AXES_DIR):
     """The shipped fit, callable. Every keyword defaults to the production
@@ -686,6 +728,10 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
     # strong user's rows marked for the ceiling scaling.
     synthetic = []
     tids_by_size = {s: [t for sz, t in keys if sz == s] for s in SIZES}
+    cells = load_legal_cell_counts(SIZES, tids_by_size)
+    # One over each problem's legal moves: what a uniformly random move scores.
+    t_chance = torch.tensor([1.0 / cells[k] for k in keys],
+                            dtype=torch.float32, device=device)
     every = torch.arange(len(keys), device=device)
     tu_all, tp_all, ty_all = [tu], [tp], [ty]
     strong_from = None
@@ -697,7 +743,6 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
             target = [aq[k] for k in keys]
             strong_from = sum(len(t) for t in tu_all)
         else:
-            cells = load_legal_cell_counts(SIZES, tids_by_size)
             target = [1.0 / cells[k] for k in keys]
         uid = n_users + len(synthetic)
         synthetic.append((float(weight), sum(len(t) for t in tu_all), uid))
@@ -771,7 +816,8 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
           flush=True)
 
     m = JointMIRT(fdim, n_users + len(synthetic), input_dim, seed, k_axes,
-                  dropout=dropout, input_dropout=input_dropout).to(device)
+                  dropout=dropout, input_dropout=input_dropout,
+                  idiocy=idiocy).to(device)
     # Adam with no decay is what ships; the decay knob exists so 1.5's claim
     # that a norm penalty does not substitute for dropout can be re-measured,
     # and at 0 this is the same optimizer it always was.
@@ -849,7 +895,8 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         # nothing but the row count modulo the batch size.
         for i in range(0, (n // batch) * batch or n, batch):
             bi = perm[i:i + batch]
-            pred, gh, rsf = m(tu_all[bi], tfeat[tp_all[bi]])
+            pred, gh, rsf = m(tu_all[bi], tfeat[tp_all[bi]],
+                              t_chance[tp_all[bi]])
             pred = pred.clamp(EPS, 1 - EPS)
             yb = ty_all[bi]
             if strong_from is not None:
@@ -1017,7 +1064,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         if (ep + 1) % check_every == 0:
             m.train(False)
             with torch.no_grad():
-                pr, _, _ = m(tu, tfeat[tp])
+                pr, _, _ = m(tu, tfeat[tp], t_chance[tp])
                 pr = pr.clamp(EPS, 1 - EPS)
                 bce_tr = float(torch.nn.functional.binary_cross_entropy(
                     pr[tr], ty[tr]))
@@ -1048,7 +1095,8 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
             th_s = m.theta(tu[i_stop]).squeeze(-1)
             lam_s = m.lapse()
             z_s = (a_s * (th_s - b_s)).clamp(-35, 35)
-            p_noax = (c_s + (1.0 - c_s - lam_s) * torch.sigmoid(z_s)).clamp(
+            low_s = m.low(c_s, th_s, t_chance[tp[i_stop]])
+            p_noax = (low_s + (1.0 - c_s - lam_s) * torch.sigmoid(z_s)).clamp(
                 EPS, 1 - EPS)
             bce_stop_no_axes = float(torch.nn.functional.binary_cross_entropy(
                 p_noax, ty[i_stop]))
@@ -1075,7 +1123,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
             slope_sweep = []
             for mult in [round(0.60 + 0.05 * i, 2) for i in range(17)]:
                 z = ((a_s * mult) * (th_s - rat_s) + kap_s + ax_s).clamp(-35, 35)
-                pz = (c_s + (1.0 - c_s - lam_s) * torch.sigmoid(z)).clamp(
+                pz = (low_s + (1.0 - c_s - lam_s) * torch.sigmoid(z)).clamp(
                     EPS, 1 - EPS)
                 slope_sweep.append(
                     {"mult": mult,
@@ -1092,10 +1140,11 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         with torch.no_grad():
             b_h, a_h, c_h, g_h = m.problem_params(tfeat[tp[i_stop]])
             lam_h = m.lapse()
-            z_h = (a_h * (m.theta(tu[i_stop]).squeeze(-1) - b_h)
+            th_h = m.theta(tu[i_stop]).squeeze(-1)
+            z_h = (a_h * (th_h - b_h)
                    + (g_h * m.user_axis(tu[i_stop])).sum(-1)).clamp(-35, 35)
             sg_h = torch.sigmoid(z_h)
-            p_h = c_h + (1.0 - c_h - lam_h) * sg_h
+            p_h = m.low(c_h, th_h, t_chance[tp[i_stop]]) + (1.0 - c_h - lam_h) * sg_h
             w_h = (1.0 - c_h - lam_h) * sg_h * (1.0 - sg_h)
         stop_np = i_stop.cpu().numpy()
         spread_rows = {"set": spread_set[stop_np],
@@ -1166,7 +1215,10 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
                  ).to_csv(os.path.join(out_dir, "user_theta.csv"), index=False)
     with open(os.path.join(out_dir, "rating_constants.json"), "w") as f:
         json.dump({"fat_finger_rate": round(lam, 4), "slope_scale": 1.0,
-                   "scale_fit": "none_shipped_as_fitted"}, f, indent=2)
+                   "scale_fit": "none_shipped_as_fitted",
+                   "idiocy": ({"threshold": round(float(m.idiocy_t), 4),
+                               "slope": round(float(m.idiocy_slope()), 4)}
+                              if idiocy else None)}, f, indent=2)
 
     os.makedirs(axes_dir, exist_ok=True)
     rows = {"tsumego_id": [k[1] for k in keys], "size": [k[0] for k in keys]}
@@ -1247,6 +1299,8 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         "random_user_weight": float(random_user_weight),
         "strong_user_weight": float(strong_user_weight),
         "theta_synthetic": theta_synthetic,
+        "idiocy": ({"threshold": float(m.idiocy_t),
+                    "slope": float(m.idiocy_slope())} if idiocy else None),
         "lr_schedule": str(lr_schedule),
         "lr_warmup_epochs": int(lr_warmup_epochs),
         "ortho_axes": float(ortho_axes),
