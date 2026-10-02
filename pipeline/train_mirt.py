@@ -251,8 +251,14 @@ MIN_BOTH_OUTCOMES = 1
 # the idiocy rating, fitted and shared by every problem as the lapse is.
 #
 #   onset   = the ability at which the main slope's logit is -IDIOCY_ONSET_LOGIT
-#   low(th) = c - (c - chance) * clamp((onset - th) / (onset - idiocy), 0, 1)
+#   low(th) = c - (c - chance) * ramp((onset - th) / (onset - idiocy))
 #   P       = low(th) + (1 - c - lambda) * sigmoid(z)
+#
+# `ramp` runs 0 to 1 with ROUNDED corners rather than a hard clamp: a clamp is
+# flat on both sides, so a player under the idiocy rating would hand it no
+# gradient at all and it could never move to meet them. The rounding is a tenth
+# of the slope's length (IDIOCY_SHARPNESS), and the far tails are exponentially
+# flat rather than exactly so.
 #
 # Above the onset the curve is the 4PL exactly. Chance is known per problem and
 # never fitted; a floor already at or under it has nowhere to fall. Without the
@@ -263,6 +269,7 @@ MIN_BOTH_OUTCOMES = 1
 IDIOCY = True
 IDIOCY_INIT = -6.0               # where the second slope starts out ending
 IDIOCY_ONSET_LOGIT = 4.0         # the main slope has let go: sigmoid(-4) < 2%
+IDIOCY_SHARPNESS = 10.0          # the ramp's corners round over 1/this of its length
 
 # TWO SYNTHETIC USERS, each holding one row on EVERY corpus problem, at the two
 # extremes real players do not reach. They are ordinary users in every respect —
@@ -389,8 +396,9 @@ class JointMIRT(nn.Module):
         # is that far above `th`.
         depth = (-IDIOCY_ONSET_LOGIT - z) / a.clamp(min=1e-6)
         span = (th + depth - self.idiocy_rating).clamp(min=1e-6)
-        frac = torch.where(depth > 0, (depth / span).clamp(max=1.0),
-                           torch.zeros_like(depth))
+        x = (depth / span).clamp(-10.0, 10.0) * IDIOCY_SHARPNESS
+        frac = (nn.functional.softplus(x)
+                - nn.functional.softplus(x - IDIOCY_SHARPNESS)) / IDIOCY_SHARPNESS
         return c - torch.relu(c - chance) * frac
 
     def user_axis(self, uid):
