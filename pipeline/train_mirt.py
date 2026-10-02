@@ -166,7 +166,7 @@ LR_FIELD = 1e-2
 # hand so the split cannot fall out of step with the module's own parameters:
 # anything not listed here is "the net" and gets the slow rate, so a parameter
 # added and forgotten lands on the safe side.
-FIELD_PARAMS = ("theta.weight", "v", "lapse_raw", "theta_strong", "theta_random")
+FIELD_PARAMS = ("theta.weight", "v", "lapse_raw")
 V_RIDGE = 0.5                    # not binding: 0.05/0.15/0.5 score alike
 ORTHO_RATING = 0.5               # keeps each TAIL off rating, slope and floor
 # ONE barrier, on the slope, one-sided, acting on the PRE-SOFTPLUS output. The
@@ -241,31 +241,32 @@ ORTHO_AXES_DETACH = True
 # at all; anything above it is a judgement about how WELL, which the likelihood
 # already makes by giving a thin record few terms.
 MIN_BOTH_OUTCOMES = 1
-# THE RANDOM USER: a synthetic player who has answered EVERY corpus problem by
-# picking uniformly among its legal moves, so right with probability one over
-# their count. It is what tells the floor apart from the difficulty where no
-# weak player has tried a problem: attempted only by players who solve it, an
-# easy problem and a high floor explain the outcomes equally, nothing in the
-# likelihood breaks the tie, and the floor is free to run up to where the
-# 80%-clear rating stops existing. Its ability is ONE FITTED NUMBER, like any
-# user's, and it has no axis position — the axes are read off real players'
-# residuals, and a player holding a row on every problem would be the largest
-# single voice in what they mean. Its outcomes enter as their EXPECTATION, not
-# as sampled answers. The weight is one of its rows against one real row; it
-# carries no rank and reaches nothing outside this loss.
+# TWO SYNTHETIC USERS, each holding one row on EVERY corpus problem, at the two
+# extremes real players do not reach. They are ordinary users in every respect —
+# rows in the same shuffled stream, a fitted ability, fitted axis positions, the
+# same dropout, counted in the same batch statistics — and differ from a real
+# user only in where their outcomes come from, which enter as an EXPECTATION
+# rather than as sampled answers.
+#   THE RANDOM USER picks uniformly among a problem's legal moves, so is right
+#   with probability one over their count. It is what tells the floor apart
+#   from the difficulty where no weak player has tried a problem: attempted
+#   only by players who solve it, an easy problem and a high floor explain the
+#   outcomes equally, nothing in the likelihood breaks the tie, and the floor
+#   is free to run up to where the 80%-clear rating stops existing.
+#   THE STRONG USER is right with the probability a chooser reading the stored
+#   evaluations plays the answer (the move-eval cache's `answer_q`) — near
+#   certain where the answer alone wins, lower where the search itself left it
+#   unclear. Where every real attempt on a problem failed, a hard problem and
+#   an unboundedly hard one explain the outcomes equally; this user's success
+#   is what bounds it. Its outcome is scaled by the fit's own ceiling,
+#   (1 - lapse) * q with the lapse held as a constant there, because an outcome
+#   above the ceiling cannot be met by any ability.
+# A WEIGHT is the share of the user's rows drawn into each epoch, afresh each
+# time: 1 is the user as stated, less is the same user having answered that
+# fraction of the corpus. Neither carries a rank or reaches anything outside
+# the fit: they are left out of user_theta.csv and of every row the fit is
+# scored on.
 RANDOM_USER_WEIGHT = 0.0
-# THE STRONG USER, the random user's counterpart at the other end: a synthetic
-# player who has also answered every corpus problem, right with the probability
-# a chooser reading the stored evaluations plays the answer (the move-eval
-# cache's `answer_q`) — near certain where the answer alone wins, lower where the
-# search itself left it unclear. Where every real attempt on a problem failed, a
-# hard problem and an unboundedly hard one explain the outcomes equally and the
-# difficulty is free to run; this player's success on it is what bounds it.
-# Its ability is ONE FITTED NUMBER, not a pin — it is finite, and the uncertain
-# problems are what locate it — and it has no axis position. Its target is scaled
-# by the fit's own ceiling, (1 - lapse) * q with the lapse held as a constant
-# there, because a target above the ceiling cannot be met by any ability and
-# would be spent pushing the lapse down instead. Same per-row weight convention.
 STRONG_USER_WEIGHT = 0.0
 STOP_ROW_FRAC = 0.0              # the shipped fit trains on every row: the budget
                                  # is fixed, so a held-aside split decides nothing
@@ -315,11 +316,6 @@ class JointMIRT(nn.Module):
         # make this feature reuse rather than a joint fit.
         self.g_lin = nn.Linear(d, self.k_axes, bias=False)
         self.v = nn.Parameter(torch.zeros(n_users, self.k_axes))
-        # The two synthetic users' abilities (RANDOM_USER_WEIGHT,
-        # STRONG_USER_WEIGHT); one that is not injected receives no gradient
-        # and never moves.
-        self.theta_strong = nn.Parameter(torch.tensor(3.0))
-        self.theta_random = nn.Parameter(torch.tensor(-3.0))
         li = float(np.clip(LAPSE_INIT / LAPSE_CAP, EPS, 1.0 - EPS))
         self.lapse_raw = nn.Parameter(
             torch.tensor(float(np.log(li / (1.0 - li)))))
@@ -681,21 +677,33 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
           flush=True)
 
     tfeat = torch.tensor(feat, device=device)
-    t_chance = None
-    if random_user_weight > 0:
-        cells = load_legal_cell_counts(SIZES, {
-            s: [t for sz, t in keys if sz == s] for s in SIZES})
-        t_chance = torch.tensor([1.0 / cells[k] for k in keys],
-                                dtype=torch.float32, device=device)
-    t_answer = None
-    if strong_user_weight > 0:
-        aq = load_answer_choice(SIZES, {
-            s: [t for sz, t in keys if sz == s] for s in SIZES})
-        t_answer = torch.tensor([aq[k] for k in keys],
-                                dtype=torch.float32, device=device)
     tu = torch.tensor(user_idx, device=device)
     ty = torch.tensor(y, device=device)
     tp = torch.tensor(prob_idx, device=device)
+    # The synthetic users' rows, appended after the real ones so a real row's
+    # index never moves: (weight, first row, user index) per injected user, the
+    # strong user's rows marked for the ceiling scaling.
+    synthetic = []
+    tids_by_size = {s: [t for sz, t in keys if sz == s] for s in SIZES}
+    every = torch.arange(len(keys), device=device)
+    tu_all, tp_all, ty_all = [tu], [tp], [ty]
+    strong_from = None
+    for weight, strong in ((random_user_weight, False), (strong_user_weight, True)):
+        if weight <= 0:
+            continue
+        if strong:
+            aq = load_answer_choice(SIZES, tids_by_size)
+            target = [aq[k] for k in keys]
+            strong_from = sum(len(t) for t in tu_all)
+        else:
+            cells = load_legal_cell_counts(SIZES, tids_by_size)
+            target = [1.0 / cells[k] for k in keys]
+        uid = n_users + len(synthetic)
+        synthetic.append((float(weight), sum(len(t) for t in tu_all), uid))
+        tu_all.append(torch.full((len(keys),), uid, device=device))
+        tp_all.append(every)
+        ty_all.append(torch.tensor(target, dtype=torch.float32, device=device))
+    tu_all, tp_all, ty_all = (torch.cat(t) for t in (tu_all, tp_all, ty_all))
 
     # A measurement for comparison arms, never a criterion: every row spent here
     # is a row the model does not learn from, so the shipped fit spends none.
@@ -715,7 +723,8 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         # what a claim about the FEATURE side has to be scored on; the row split
         # below, which ships, is a convergence detector and leaves every problem
         # partly trained.
-        is_stop = (rng.random(len(keys)) < stop_row_frac)[prob_idx]
+        held_problem = rng.random(len(keys)) < stop_row_frac
+        is_stop = held_problem[prob_idx]
     elif stop_unit == "spread":
         # TWO DISJOINT HELD-OUT SETS, both among problems attempted often
         # enough that several different users' outcomes on one problem can be
@@ -740,8 +749,14 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
             r = rows_by_p.get_group(p).to_numpy()
             spread_set[rng.choice(r, len(r) // 2, replace=False)] = 1
         is_stop = spread_set >= 0
+        held_problem = np.zeros(len(keys), bool)
+        held_problem[whole] = True
     else:
         is_stop = rng.random(len(df)) < stop_row_frac
+        held_problem = np.zeros(len(keys), bool)
+    # A problem held out WHOLE is held out of the synthetic users too: one row
+    # of theirs on it and its parameters are no longer the trunk's alone.
+    seen = torch.tensor(np.where(~held_problem)[0], device=device)
     tr = torch.tensor(np.where(~is_stop)[0], device=device)
     i_stop = torch.tensor(np.where(is_stop)[0], device=device)
     has_stop = bool(is_stop.any())
@@ -754,7 +769,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
           f"directions, taught at a constant weight of {teach_weight}",
           flush=True)
 
-    m = JointMIRT(fdim, n_users, input_dim, seed, k_axes,
+    m = JointMIRT(fdim, n_users + len(synthetic), input_dim, seed, k_axes,
                   dropout=dropout, input_dropout=input_dropout).to(device)
     # Adam with no decay is what ships; the decay knob exists so 1.5's claim
     # that a norm penalty does not substitute for dropout can be re-measured,
@@ -818,7 +833,13 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
             grp["lr"] = base * scale
         lr_epochs += scale
         m.train(True)
-        perm = tr[torch.randperm(n, device=device)]
+        rows = [tr]
+        for weight, first, _uid in synthetic:
+            take = int(round(weight * len(seen)))
+            rows.append(first + seen[torch.randperm(len(seen), device=device)[:take]])
+        perm = torch.cat(rows)
+        perm = perm[torch.randperm(len(perm), device=device)]
+        n = len(perm)
         # THE REMAINDER IS DROPPED, after the shuffle, so every step is a full
         # batch and a different handful of rows sits out each epoch. The gauges
         # and several penalties are this batch's own statistics and every step
@@ -827,10 +848,14 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         # nothing but the row count modulo the batch size.
         for i in range(0, (n // batch) * batch or n, batch):
             bi = perm[i:i + batch]
-            pred, gh, rsf = m(tu[bi], tfeat[tp[bi]])
+            pred, gh, rsf = m(tu_all[bi], tfeat[tp_all[bi]])
             pred = pred.clamp(EPS, 1 - EPS)
+            yb = ty_all[bi]
+            if strong_from is not None:
+                yb = torch.where(bi >= strong_from,
+                                 (1.0 - m.lapse().detach()) * yb, yb)
             loss = torch.nn.functional.binary_cross_entropy(
-                pred, ty[bi], reduction="none").sum() / len(bi)
+                pred, yb, reduction="none").sum() / len(bi)
             # SHRINK WHAT THE LIKELIHOOD READS. user_axis, not the raw
             # parameter: the two differ by the population mean, which is a
             # direction no prediction depends on, so a ridge on raw v spends
@@ -846,7 +871,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
             # ~0.002-0.009 over a full run against a per-axis spread an order of
             # magnitude larger.
             if v_ridge_ladder == 1.0:
-                loss = loss + v_ridge * (m.user_axis(tu[bi]) ** 2).sum() / len(bi)
+                loss = loss + v_ridge * (m.user_axis(tu_all[bi]) ** 2).sum() / len(bi)
             else:
                 # ANISOTROPIC, an ablation path: a distinct ridge per axis,
                 # geometric in the axis index, breaks the objective's
@@ -858,7 +883,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
                 # unless their ridges differ threefold.
                 ladder = v_ridge * v_ridge_ladder ** torch.arange(
                     k_axes, device=device, dtype=torch.float32)
-                loss = loss + (ladder * m.user_axis(tu[bi]) ** 2).sum() / len(bi)
+                loss = loss + (ladder * m.user_axis(tu_all[bi]) ** 2).sum() / len(bi)
             # DECORRELATE THE AXES FROM DIFFICULTY. Nothing else does: centring
             # v (user_axis) removes only the POPULATION mean, which blocks an
             # axis acting as a global difficulty shift but not one tracking
@@ -964,7 +989,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
             # previous fit's extrapolation into a region that never carried
             # signal, so teaching them would spend trunk capacity, in competition
             # with the rating, reproducing an arbitrary guess.
-            mk = t_ok[tp[bi]]
+            mk = t_ok[tp_all[bi]]
             if bool(mk.any()):
                 # Both sides standardized, because the bank's scale is
                 # arbitrary and gh carries this fit's own — only direction is
@@ -979,35 +1004,12 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
                 # anything reads a loading, and v absorbs the rest.
                 gz = (gh_t - gh_t.mean(0)) / (gh_t.std(0) + 1e-6)
                 loss = loss + teach_weight * (
-                    (gz[mk] - t_tgt[tp[bi]][mk]) ** 2).mean()
+                    (gz[mk] - t_tgt[tp_all[bi]][mk]) ** 2).mean()
             m.train(False)          # the barrier reads corpus rows, dropout off
             si = torch.randint(len(tfeat), (shallow_samples,), device=device)
             short = torch.nn.functional.softplus(
                 o_tau - m.slope_logit(tfeat[si])).pow(2).mean()
             loss = loss + shallow_w * short
-            if t_chance is not None or t_answer is not None:
-                # The synthetic users, on the same corpus sample: the model's
-                # own curve at each one's fitted ability, no axis term. Scaled
-                # so a weight is per row — each holds one row per corpus
-                # problem against the n real rows the likelihood is averaged
-                # over. The strong user's target is scaled by the fit's own
-                # ceiling, the lapse held as a constant there.
-                b_q, a_q, c_q, _ = m.problem_params(tfeat[si])
-                lam_q = m.lapse()
-                for th_q, y_q, w_q in (
-                        (m.theta_random,
-                         None if t_chance is None else t_chance[si],
-                         random_user_weight),
-                        (m.theta_strong,
-                         None if t_answer is None else
-                         (1.0 - lam_q.detach()) * t_answer[si],
-                         strong_user_weight)):
-                    if y_q is None:
-                        continue
-                    p_q = (c_q + (1.0 - c_q - lam_q) * torch.sigmoid(
-                        (a_q * (th_q - b_q)).clamp(-35, 35))).clamp(EPS, 1 - EPS)
-                    loss = loss + w_q * (len(tfeat) / n) * (
-                        torch.nn.functional.binary_cross_entropy(p_q, y_q))
             m.train(True)
             opt.zero_grad(); loss.backward(); opt.step()
 
@@ -1124,7 +1126,10 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
     # distinguishes a real difficulty from a collapsed slope is the SLOPE
     # distribution and the share at the clamp, printed below.
     rating = b_np + clear_logit_vec(c_np, lam) / np.maximum(a_np, 1e-6)
-    theta = m.theta.weight.detach().cpu().numpy().ravel()
+    theta_all = m.theta.weight.detach().cpu().numpy().ravel()
+    theta = theta_all[:n_users]
+    theta_synthetic = {("strong" if first == strong_from else "random"):
+                       float(theta_all[uid]) for _w, first, uid in synthetic}
 
     print(f"  lambda {lam:.5f} | slope p[1,50,99] "
           f"{np.percentile(a_np, [1, 50, 99]).round(3)} | at floor "
@@ -1237,8 +1242,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         "k_axes": int(k_axes),
         "random_user_weight": float(random_user_weight),
         "strong_user_weight": float(strong_user_weight),
-        "theta_strong": float(m.theta_strong),
-        "theta_random": float(m.theta_random),
+        "theta_synthetic": theta_synthetic,
         "lr_schedule": str(lr_schedule),
         "lr_warmup_epochs": int(lr_warmup_epochs),
         "ortho_axes": float(ortho_axes),

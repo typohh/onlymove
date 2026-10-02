@@ -174,17 +174,15 @@ def main(argv=None):
                     help="the barrier's pre-softplus threshold (production "
                          f"{train_mirt.SHALLOW_TAU})")
     ap.add_argument("--random-user-weight", type=float, default=None,
-                    help="weight of the synthetic random user's rows against a "
-                         "real row (production "
-                         f"{train_mirt.RANDOM_USER_WEIGHT}); the player answers "
-                         "every problem at one over its legal moves, with one "
-                         "fitted ability and no axis position")
+                    help="share of the synthetic RANDOM user's rows drawn into "
+                         "each epoch (production "
+                         f"{train_mirt.RANDOM_USER_WEIGHT}): an ordinary user "
+                         "who answers every problem at one over its legal moves")
     ap.add_argument("--strong-user-weight", type=float, default=None,
-                    help="weight of the synthetic strong user's rows against a "
-                         "real row (production "
-                         f"{train_mirt.STRONG_USER_WEIGHT}); the player answers "
-                         "every problem at the stored evaluations' probability "
-                         "of choosing the answer, with one fitted ability")
+                    help="the same for the synthetic STRONG user (production "
+                         f"{train_mirt.STRONG_USER_WEIGHT}), who answers every "
+                         "problem at the stored evaluations' probability of "
+                         "choosing the answer")
     # --- the learning-rate cluster (methodology §1.8) ---
     ap.add_argument("--lr-net", type=float, default=None,
                     help=f"the network's rate (production {train_mirt.LR_NET})")
