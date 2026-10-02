@@ -166,7 +166,8 @@ LR_FIELD = 1e-2
 # hand so the split cannot fall out of step with the module's own parameters:
 # anything not listed here is "the net" and gets the slow rate, so a parameter
 # added and forgotten lands on the safe side.
-FIELD_PARAMS = ("theta.weight", "v", "lapse_raw", "idiocy_rating")
+FIELD_PARAMS = ("theta.weight", "v", "lapse_raw", "idiocy_rating",
+                "idiocy_slope_raw")
 V_RIDGE = 0.5                    # not binding: 0.05/0.15/0.5 score alike
 ORTHO_RATING = 0.5               # keeps each TAIL off rating, slope and floor
 # ONE barrier, on the slope, one-sided, acting on the PRE-SOFTPLUS output. The
@@ -280,6 +281,17 @@ IDIOCY = True
 # the start the fit raises the floors and lets it do the falling. Out of reach,
 # the curve is the 4PL for those epochs and the floor settles as a floor; the
 # rating is then released to find the players it describes.
+# WHERE THE SECOND SLOPE STARTS has two readings, kept side by side while they
+# are being compared:
+#   "floor_onset"  it starts where the MAIN slope meets the floor, so its length
+#                  — and with it its steepness — is each problem's own;
+#   "own_slope"    it has ONE fitted steepness of its own, global like the
+#                  idiocy rating, and starts wherever that line, drawn up from
+#                  chance at the idiocy rating, reaches the problem's floor. The
+#                  main slope does not enter, so the two slopes cannot stand in
+#                  for each other.
+IDIOCY_FORM = "floor_onset"
+IDIOCY_SLOPE_INIT = 1.0
 IDIOCY_INIT = -100.0
 IDIOCY_FREE_EPOCH = 1000         # epochs the idiocy rating is held at its start
 IDIOCY_SHARPNESS = 10.0          # the ramp's corners round over 1/this of its length
@@ -338,9 +350,13 @@ class JointMIRT(nn.Module):
     """
 
     def __init__(self, fdim, n_users, input_dim, seed, k_axes=K_AXES,
-                 dropout=DROPOUT, input_dropout=INPUT_DROPOUT, idiocy=IDIOCY):
+                 dropout=DROPOUT, input_dropout=INPUT_DROPOUT, idiocy=IDIOCY,
+                 idiocy_form=IDIOCY_FORM):
         super().__init__()
         self.idiocy = bool(idiocy)
+        if idiocy_form not in ("floor_onset", "own_slope"):
+            raise ValueError(f"unknown idiocy_form {idiocy_form!r}")
+        self.idiocy_form = idiocy_form
         self.k_axes = int(k_axes)
         # The two dropout sites are separate parameters because they suppress
         # different failure modes and are reasoned about separately (1.5); the
@@ -375,6 +391,8 @@ class JointMIRT(nn.Module):
         # way so a checkpoint's keys do not depend on the switch; unused it
         # receives no gradient and never moves.
         self.idiocy_rating = nn.Parameter(torch.tensor(float(IDIOCY_INIT)))
+        self.idiocy_slope_raw = nn.Parameter(
+            torch.tensor(float(np.log(np.expm1(IDIOCY_SLOPE_INIT)))))
         self.register_buffer("b_mu", torch.zeros(()))
         self.register_buffer("b_sd", torch.ones(()))
         self.register_buffer("g_rms", torch.ones(1, self.k_axes))
@@ -406,15 +424,23 @@ class JointMIRT(nn.Module):
         at the idiocy rating."""
         if not self.idiocy:
             return c
-        # How far below the onset this row sits, in ability; the onset itself
-        # is that far above `th`.
         lc = torch.logit(c.clamp(EPS, 1 - EPS))
-        depth = (lc - z) / a.clamp(min=1e-6)
-        span = (th + depth - self.idiocy_rating).clamp(min=1e-6)
-        x = (depth / span).clamp(-10.0, 10.0) * IDIOCY_SHARPNESS
+        fall = torch.relu(lc - torch.logit(chance.clamp(EPS, 1 - EPS)))
+        if self.idiocy_form == "own_slope":
+            # The line up from chance at the idiocy rating, at the global
+            # steepness; the share of the fall still ahead of it at `th`.
+            climbed = (nn.functional.softplus(self.idiocy_slope_raw)
+                       * (th - self.idiocy_rating)) / fall.clamp(min=1e-6)
+            x = 1.0 - climbed
+        else:
+            # How far below the onset this row sits, in ability; the onset
+            # itself is that far above `th`.
+            depth = (lc - z) / a.clamp(min=1e-6)
+            span = (th + depth - self.idiocy_rating).clamp(min=1e-6)
+            x = depth / span
+        x = x.clamp(-10.0, 10.0) * IDIOCY_SHARPNESS
         frac = (nn.functional.softplus(x)
                 - nn.functional.softplus(x - IDIOCY_SHARPNESS)) / IDIOCY_SHARPNESS
-        fall = torch.relu(lc - torch.logit(chance.clamp(EPS, 1 - EPS)))
         return torch.sigmoid(lc - fall * frac)
 
     def user_axis(self, uid):
@@ -695,7 +721,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         ortho_axes_detach=ORTHO_AXES_DETACH,
         v_ridge_ladder=1.0,
         k_axes=K_AXES, dropout=DROPOUT, input_dropout=INPUT_DROPOUT,
-        idiocy=IDIOCY,
+        idiocy=IDIOCY, idiocy_form=IDIOCY_FORM,
         weight_decay=0.0, weight_decay_fields=None,
         out_dir=OUT_DIR, axes_dir=AXES_DIR):
     """The shipped fit, callable. Every keyword defaults to the production
@@ -843,7 +869,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
 
     m = JointMIRT(fdim, n_users + len(synthetic), input_dim, seed, k_axes,
                   dropout=dropout, input_dropout=input_dropout,
-                  idiocy=idiocy).to(device)
+                  idiocy=idiocy, idiocy_form=idiocy_form).to(device)
     # Adam with no decay is what ships; the decay knob exists so 1.5's claim
     # that a norm penalty does not substitute for dropout can be re-measured,
     # and at 0 this is the same optimizer it always was.
@@ -1086,8 +1112,9 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
             loss = loss + shallow_w * short
             m.train(True)
             opt.zero_grad(); loss.backward()
-            if ep < IDIOCY_FREE_EPOCH:
-                m.idiocy_rating.grad = None      # held: the optimizer skips it
+            if ep < IDIOCY_FREE_EPOCH:           # held: the optimizer skips them
+                m.idiocy_rating.grad = None
+                m.idiocy_slope_raw.grad = None
             opt.step()
 
         if (ep + 1) % check_every == 0:
@@ -1331,6 +1358,9 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         "strong_user_weight": float(strong_user_weight),
         "theta_synthetic": theta_synthetic,
         "idiocy_rating": float(m.idiocy_rating) if idiocy else None,
+        "idiocy_form": idiocy_form if idiocy else None,
+        "idiocy_slope": (float(nn.functional.softplus(m.idiocy_slope_raw))
+                         if idiocy and idiocy_form == "own_slope" else None),
         "lr_schedule": str(lr_schedule),
         "lr_warmup_epochs": int(lr_warmup_epochs),
         "ortho_axes": float(ortho_axes),
