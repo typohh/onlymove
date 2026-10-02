@@ -190,6 +190,14 @@ SHALLOW_W = 0.3
 # sits well under BATCH, and moving it trades one number against the other in
 # the obvious direction: more samples, steadier barrier gradient, slower epoch.
 SHALLOW_SAMPLES = 20000
+# FLOOR_BARRIER_W (off at 0; needs the second slope): the floor divides a
+# problem's range between its two slopes, and at either end of its own range one
+# of them has no height left — at chance the second slope, at the ceiling the
+# main one, whose rating and slope then describe nothing. With the barrier on
+# the floor is placed BETWEEN chance and its cap by construction, and a log
+# barrier on that position, -log(f) - log(1 - f), prices each end. It reads the
+# same corpus sample the slope barrier does.
+FLOOR_BARRIER_W = 0.0
 # ONE SCHEDULE, and the loop is uniform because of it. Holding the per-user axis
 # positions at zero for an opening span is the obvious companion to teaching —
 # while they are zero the likelihood's gradient with respect to the loadings is
@@ -350,7 +358,7 @@ class JointMIRT(nn.Module):
     def __init__(self, fdim, n_users, input_dim, seed, k_axes=K_AXES,
                  dropout=DROPOUT, input_dropout=INPUT_DROPOUT, idiocy=IDIOCY,
                  idiocy_form=IDIOCY_FORM, rating_min=RATING_MIN,
-                 ability_min=ABILITY_MIN):
+                 ability_min=ABILITY_MIN, floor_between=False):
         super().__init__()
         self.idiocy = bool(idiocy)
         if idiocy_form not in ("own_slope", "sigmoid"):
@@ -362,6 +370,9 @@ class JointMIRT(nn.Module):
         if ability_min and not idiocy:
             raise ValueError("ability_min needs the second slope")
         self.ability_min = bool(ability_min)
+        if floor_between and not idiocy:
+            raise ValueError("the floor barrier needs the second slope")
+        self.floor_between = bool(floor_between)
         self.k_axes = int(k_axes)
         # The two dropout sites are separate parameters because they suppress
         # different failure modes and are reasoned about separately (1.5); the
@@ -490,6 +501,12 @@ class JointMIRT(nn.Module):
         penalty falls away properly for healthy slopes."""
         return self.head(self.trunk(feat))[:, 1]
 
+    def barrier_logits(self, feat):
+        """The slope's and the floor's raw outputs from ONE trunk pass, for the
+        two barriers."""
+        o = self.head(self.trunk(feat))
+        return o[:, 1], o[:, 2]
+
     def problem_params(self, feat, pin_gauge=False, chance=None):
         """(difficulty b, discrimination a, floor c, axis loadings g).
 
@@ -514,7 +531,10 @@ class JointMIRT(nn.Module):
         a = nn.functional.softplus(o[:, 1]).clamp(min=SLOPE_FLOOR)
         lam = self.lapse()
         cap = 1.0 - 2.0 * lam
-        c = cap * torch.sigmoid(o[:, 2])
+        if self.floor_between:
+            c = chance + torch.relu(cap - chance) * torch.sigmoid(o[:, 2])
+        else:
+            c = cap * torch.sigmoid(o[:, 2])
         if self.rating_min and self.idiocy_form == "sigmoid":
             # The two slopes do not overlap: the main slope's lower reach stays
             # above the second slope's upper reach. Approached, not cut, on the
@@ -750,6 +770,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         idiocy=IDIOCY, idiocy_form=IDIOCY_FORM,
         idiocy_init=IDIOCY_INIT,
         rating_min=RATING_MIN, ability_min=ABILITY_MIN,
+        floor_barrier_w=FLOOR_BARRIER_W,
         weight_decay=0.0, weight_decay_fields=None,
         out_dir=OUT_DIR, axes_dir=AXES_DIR):
     """The shipped fit, callable. Every keyword defaults to the production
@@ -899,7 +920,8 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
                   dropout=dropout, input_dropout=input_dropout,
                   idiocy=idiocy, idiocy_form=idiocy_form,
                   rating_min=rating_min,
-                  ability_min=ability_min).to(device)
+                  ability_min=ability_min,
+                  floor_between=floor_barrier_w > 0).to(device)
     with torch.no_grad():
         m.idiocy_rating.fill_(float(idiocy_init))
     # Adam with no decay is what ships; the decay knob exists so 1.5's claim
@@ -1139,9 +1161,14 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
                     (gz[mk] - t_tgt[tp_all[bi]][mk]) ** 2).mean()
             m.train(False)          # the barrier reads corpus rows, dropout off
             si = torch.randint(len(tfeat), (shallow_samples,), device=device)
-            short = torch.nn.functional.softplus(
-                o_tau - m.slope_logit(tfeat[si])).pow(2).mean()
+            o_slope, o_floor = m.barrier_logits(tfeat[si])
+            short = torch.nn.functional.softplus(o_tau - o_slope).pow(2).mean()
             loss = loss + shallow_w * short
+            if floor_barrier_w > 0:
+                # -log(f) - log(1 - f) with f = sigmoid(o_floor).
+                loss = loss + floor_barrier_w * (
+                    torch.nn.functional.softplus(o_floor)
+                    + torch.nn.functional.softplus(-o_floor)).mean()
             m.train(True)
             opt.zero_grad(); loss.backward()
             opt.step()
