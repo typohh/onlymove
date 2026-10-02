@@ -291,6 +291,11 @@ IDIOCY = True
 #                  main slope does not enter, so the two slopes cannot stand in
 #                  for each other.
 IDIOCY_FORM = "floor_onset"
+# RATING_MIN (own_slope only): no problem is rated below where the second slope
+# meets its floor. Under that point the curve is the second slope's, the same
+# line for every problem, so a main-curve rating placed there describes a
+# descent no player is on; the difficulty is held up so the rating stops at it.
+RATING_MIN = False
 IDIOCY_SLOPE_INIT = 1.0
 IDIOCY_INIT = -100.0
 IDIOCY_FREE_EPOCH = 1000         # epochs the idiocy rating is held at its start
@@ -351,12 +356,15 @@ class JointMIRT(nn.Module):
 
     def __init__(self, fdim, n_users, input_dim, seed, k_axes=K_AXES,
                  dropout=DROPOUT, input_dropout=INPUT_DROPOUT, idiocy=IDIOCY,
-                 idiocy_form=IDIOCY_FORM):
+                 idiocy_form=IDIOCY_FORM, rating_min=RATING_MIN):
         super().__init__()
         self.idiocy = bool(idiocy)
         if idiocy_form not in ("floor_onset", "own_slope"):
             raise ValueError(f"unknown idiocy_form {idiocy_form!r}")
         self.idiocy_form = idiocy_form
+        if rating_min and not (idiocy and idiocy_form == "own_slope"):
+            raise ValueError("rating_min needs the own_slope second slope")
+        self.rating_min = bool(rating_min)
         self.k_axes = int(k_axes)
         # The two dropout sites are separate parameters because they suppress
         # different failure modes and are reasoned about separately (1.5); the
@@ -480,7 +488,7 @@ class JointMIRT(nn.Module):
         penalty falls away properly for healthy slopes."""
         return self.head(self.trunk(feat))[:, 1]
 
-    def problem_params(self, feat, pin_gauge=False):
+    def problem_params(self, feat, pin_gauge=False, chance=None):
         """(difficulty b, discrimination a, floor c, axis loadings g).
 
         THE GAUGE MUST SIT ON DIFFICULTY, NOT ON AN INTERCEPT. Two freedoms have
@@ -505,6 +513,14 @@ class JointMIRT(nn.Module):
         lam = self.lapse()
         cap = 1.0 - 2.0 * lam
         c = cap * torch.sigmoid(o[:, 2])
+        if self.rating_min:
+            # The rating is b + kappa(c)/a; hold it at or above the onset.
+            lc = torch.logit(c.clamp(EPS, 1 - EPS))
+            fall = torch.relu(lc - torch.logit(chance.clamp(EPS, 1 - EPS)))
+            onset = (self.idiocy_rating
+                     + fall / nn.functional.softplus(self.idiocy_slope_raw))
+            q = ((CALIBRATION_P - c) / (1.0 - c - lam)).clamp(EPS, 1.0 - EPS)
+            b = torch.maximum(b, onset - torch.log(q / (1.0 - q)) / a)
         g = self.g_lin(h)
         # Kept for `detached_loadings`: the same representation and, below, the
         # same divisor this batch's loadings use, so a detached readout is the
@@ -541,7 +557,7 @@ class JointMIRT(nn.Module):
         return self.g_lin(self._last_h.detach()) / self._last_rms
 
     def forward(self, uid, feat, chance):
-        b, a, c, g = self.problem_params(feat)
+        b, a, c, g = self.problem_params(feat, chance=chance)
         th = self.theta(uid).squeeze(-1)
         lam = self.lapse()
         z = (a * (th - b) + (g * self.user_axis(uid)).sum(-1)).clamp(-35, 35)
@@ -723,6 +739,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         k_axes=K_AXES, dropout=DROPOUT, input_dropout=INPUT_DROPOUT,
         idiocy=IDIOCY, idiocy_form=IDIOCY_FORM,
         idiocy_init=IDIOCY_INIT, idiocy_free_epoch=IDIOCY_FREE_EPOCH,
+        rating_min=RATING_MIN,
         weight_decay=0.0, weight_decay_fields=None,
         out_dir=OUT_DIR, axes_dir=AXES_DIR):
     """The shipped fit, callable. Every keyword defaults to the production
@@ -870,7 +887,8 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
 
     m = JointMIRT(fdim, n_users + len(synthetic), input_dim, seed, k_axes,
                   dropout=dropout, input_dropout=input_dropout,
-                  idiocy=idiocy, idiocy_form=idiocy_form).to(device)
+                  idiocy=idiocy, idiocy_form=idiocy_form,
+                  rating_min=rating_min).to(device)
     with torch.no_grad():
         m.idiocy_rating.fill_(float(idiocy_init))
     # Adam with no decay is what ships; the decay knob exists so 1.5's claim
@@ -1150,7 +1168,8 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
     with torch.no_grad():
         # Scored only where rows were held aside; the shipped fit holds none.
         if has_stop:
-            b_s, a_s, c_s, _ = m.problem_params(tfeat[tp[i_stop]])
+            b_s, a_s, c_s, _ = m.problem_params(
+                tfeat[tp[i_stop]], chance=t_chance[tp[i_stop]])
             th_s = m.theta(tu[i_stop]).squeeze(-1)
             lam_s = m.lapse()
             z_s = (a_s * (th_s - b_s)).clamp(-35, 35)
@@ -1173,7 +1192,8 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
             # from each user's OTHER attempts, which is the position the client is
             # in when it predicts an attempt from a history. Reported, never applied.
             g_s = m.user_axis(tu[i_stop])
-            _, _, _, gl_s = m.problem_params(tfeat[tp[i_stop]])
+            _, _, _, gl_s = m.problem_params(
+                tfeat[tp[i_stop]], chance=t_chance[tp[i_stop]])
             ax_s = (gl_s * g_s).sum(-1)
             kap_s = torch.log(
                 ((CALIBRATION_P - c_s) / (1.0 - c_s - lam_s)).clamp(EPS, 1 - EPS)
@@ -1199,7 +1219,8 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
     spread_rows = None
     if stop_unit == "spread":
         with torch.no_grad():
-            b_h, a_h, c_h, g_h = m.problem_params(tfeat[tp[i_stop]])
+            b_h, a_h, c_h, g_h = m.problem_params(
+                tfeat[tp[i_stop]], chance=t_chance[tp[i_stop]])
             lam_h = m.lapse()
             th_h = m.theta(tu[i_stop]).squeeze(-1)
             z_h = (a_h * (th_h - b_h)
@@ -1228,7 +1249,8 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         # what carries the same divisor to the fanout. The scale itself is
         # arbitrary (v absorbs it), so what matters is that both ends agree and
         # that the number is stated rather than left over from the last call.
-        b_all, a_all, c_all, g_all = m.problem_params(tfeat, pin_gauge=True)
+        b_all, a_all, c_all, g_all = m.problem_params(
+            tfeat, pin_gauge=True, chance=t_chance)
         lam = float(m.lapse())
     b_np, a_np = b_all.cpu().numpy(), a_all.cpu().numpy()
     c_np, g_np = c_all.cpu().numpy(), g_all.cpu().numpy()
