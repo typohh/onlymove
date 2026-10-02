@@ -300,7 +300,7 @@ class JointMIRT(nn.Module):
 
     def __init__(self, fdim, n_users, input_dim, seed, k_axes=K_AXES,
                  dropout=DROPOUT, input_dropout=INPUT_DROPOUT, link_power=False,
-                 link="sigmoid", lapse_fixed=None):
+                 link="sigmoid", lapse_fixed=None, gauge="sd"):
         super().__init__()
         self.k_axes = int(k_axes)
         # The two dropout sites are separate parameters because they suppress
@@ -331,6 +331,13 @@ class JointMIRT(nn.Module):
         # prediction reads it; the written rating and the held-out diagnostics
         # still assume the symmetric curve.
         self.link_power = bool(link_power)
+        # EXPERIMENT ("sd" as shipped): what the difficulty gauge holds at one.
+        # A standard deviation can be met by a few far outliers while the bulk
+        # collapses; "iqr" holds the interquartile range, on the scale where a
+        # normal's would equal its standard deviation, and centres on the median.
+        if gauge not in ("sd", "iqr"):
+            raise ValueError(f"unknown gauge {gauge!r}")
+        self.gauge = gauge
         # EXPERIMENT (None as shipped: the lapse is fitted): hold it at a value.
         self.lapse_fixed = None if lapse_fixed is None else float(lapse_fixed)
         # EXPERIMENT (sigmoid as shipped): the main slope's shape between the
@@ -428,7 +435,12 @@ class JointMIRT(nn.Module):
         o = self.head(h)
         b = o[:, 0]
         if self.training:
-            mu, sd = b.mean(), b.std() + EPS
+            if self.gauge == "iqr":
+                q = torch.quantile(b, torch.tensor(
+                    [0.25, 0.5, 0.75], device=b.device, dtype=b.dtype))
+                mu, sd = q[1], (q[2] - q[0]) / 1.349 + EPS
+            else:
+                mu, sd = b.mean(), b.std() + EPS
             with torch.no_grad():
                 self.b_mu.mul_(1 - GAUGE_MOM).add_(GAUGE_MOM * mu)
                 self.b_sd.mul_(1 - GAUGE_MOM).add_(GAUGE_MOM * sd)
@@ -666,7 +678,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         ortho_axes_detach=ORTHO_AXES_DETACH,
         v_ridge_ladder=1.0,
         k_axes=K_AXES, dropout=DROPOUT, input_dropout=INPUT_DROPOUT,
-        link_power=False, link="sigmoid", lapse_fixed=None,
+        link_power=False, link="sigmoid", lapse_fixed=None, gauge="sd",
         weight_decay=0.0, weight_decay_fields=None,
         out_dir=OUT_DIR, axes_dir=AXES_DIR):
     """The shipped fit, callable. Every keyword defaults to the production
@@ -812,7 +824,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
     m = JointMIRT(fdim, n_users + len(synthetic), input_dim, seed, k_axes,
                   dropout=dropout, input_dropout=input_dropout,
                   link_power=link_power, link=link,
-                  lapse_fixed=lapse_fixed).to(device)
+                  lapse_fixed=lapse_fixed, gauge=gauge).to(device)
     # Adam with no decay is what ships; the decay knob exists so 1.5's claim
     # that a norm penalty does not substitute for dropout can be re-measured,
     # and at 0 this is the same optimizer it always was.
