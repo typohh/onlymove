@@ -246,64 +246,39 @@ MIN_BOTH_OUTCOMES = 1
 # when the reading is beyond them — the answer being one of the few moves anyone
 # considers. That holds where the main slope lets go, not all the way down: the
 # weaker the player, the more moves are candidates, until every legal move is
-# one and success is pure chance, one over their count. So below the main slope
-# the curve keeps falling, on a SECOND SLOPE: from the floor, at the ability
-# where the main slope meets it, straight down to chance at ONE GLOBAL ABILITY,
-# the idiocy rating, fitted and shared by every problem as the lapse is.
+# one and success is pure chance, one over their count. So below the floor the
+# curve keeps falling, on a SECOND SLOPE down to chance. It has two fitted
+# numbers, both global as the lapse is: the idiocy rating, where it sits, and
+# its steepness. The main slope does not enter it, so the two slopes cannot
+# stand in for each other.
 #
-# Both ends are points the model already has, in logit space, and the second
-# slope is the straight line between them:
-#   it STARTS where the main slope meets the floor — the ability at which the
-#   main slope's own probability, sigmoid(z), has come down to the floor c, so
-#   at logit(c);
-#   it ENDS at the idiocy rating, at logit(chance).
+#   P = low(th) + (1 - c - lambda) * sigmoid(z)
 #
-#   low(th) = sigmoid( logit(c) - (logit(c) - logit(chance)) * ramp(u) )
-#   u       = (onset - th) / (onset - idiocy)
-#   P       = low(th) + (1 - c - lambda) * sigmoid(z)
-#
-# `ramp` runs 0 to 1 with ROUNDED corners rather than a hard clamp: a clamp is
-# flat on both sides, so a player under the idiocy rating would hand it no
-# gradient at all and it could never move to meet them. The rounding is a tenth
-# of the slope's length (IDIOCY_SHARPNESS), and the far tails are exponentially
-# flat rather than exactly so.
-#
-# Above the onset the curve is the 4PL exactly. Chance is known per problem and
-# never fitted; a floor already at or under it has nowhere to fall. Without the
-# second slope a floor has to stand for the whole bottom, a player at chance can
-# only be explained by dragging every floor down to meet them, and a flat bottom
-# hands the floor no gradient. Nothing published reads the idiocy rating: the
-# rating, slope and floor are the 4PL's.
+# Chance is known per problem and never fitted; a floor already at or under it
+# has nowhere to fall. Without the second slope a floor has to stand for the
+# whole bottom, and a player at chance can only be explained by dragging every
+# floor down to meet them. Nothing published reads the idiocy rating: the
+# rating, slope and floor are the main curve's.
 IDIOCY = True
-# THE IDIOCY RATING STARTS FAR BELOW EVERYONE AND IS HELD THERE while the main
-# curve forms. The two slopes are two ways to draw one descent and the
-# likelihood does not choose between them: with the second slope in reach from
-# the start the fit raises the floors and lets it do the falling. Out of reach,
-# the curve is the 4PL for those epochs and the floor settles as a floor; the
-# rating is then released to find the players it describes.
-# WHERE THE SECOND SLOPE STARTS has two readings, kept side by side while they
-# are being compared:
-#   "floor_onset"  it starts where the MAIN slope meets the floor, so its length
-#                  — and with it its steepness — is each problem's own;
-#   "own_slope"    it has ONE fitted steepness of its own, global like the
-#                  idiocy rating, and starts wherever that line, drawn up from
-#                  chance at the idiocy rating, reaches the problem's floor. The
-#                  main slope does not enter, so the two slopes cannot stand in
-#                  for each other.
-#   "sigmoid"      the same one global steepness, but the second slope is a
-#                  sigmoid in PROBABILITY from chance up to the floor, centred
-#                  on the idiocy rating: it approaches both levels and reaches
-#                  neither, as the main slope does, so there is no corner to
-#                  round and no meeting point to define.
-IDIOCY_FORM = "floor_onset"
+# The second slope's shape has two readings, kept side by side while they are
+# being compared:
+#   "own_slope"  a straight line in LOGIT space up from chance AT the idiocy
+#                rating, ending wherever it reaches the problem's floor. Its
+#                two corners are rounded (IDIOCY_SHARPNESS) rather than
+#                clamped, since a clamp is flat on both sides and a player
+#                under the idiocy rating would hand it no gradient.
+#   "sigmoid"    a sigmoid in PROBABILITY from chance up to the floor, CENTRED
+#                on the idiocy rating: it approaches both levels and reaches
+#                neither, as the main slope does, so there is no corner to
+#                round and no meeting point to define.
+IDIOCY_FORM = "own_slope"
 # RATING_MIN (own_slope only): no problem is rated below where the second slope
 # meets its floor. Under that point the curve is the second slope's, the same
 # line for every problem, so a main-curve rating placed there describes a
 # descent no player is on; the difficulty is held up so the rating stops at it.
 RATING_MIN = False
 IDIOCY_SLOPE_INIT = 1.0
-IDIOCY_INIT = -100.0
-IDIOCY_FREE_EPOCH = 1000         # epochs the idiocy rating is held at its start
+IDIOCY_INIT = -10.0
 IDIOCY_SHARPNESS = 10.0          # the ramp's corners round over 1/this of its length
 
 # TWO SYNTHETIC USERS, each holding one row on EVERY corpus problem, at the two
@@ -364,7 +339,7 @@ class JointMIRT(nn.Module):
                  idiocy_form=IDIOCY_FORM, rating_min=RATING_MIN):
         super().__init__()
         self.idiocy = bool(idiocy)
-        if idiocy_form not in ("floor_onset", "own_slope", "sigmoid"):
+        if idiocy_form not in ("own_slope", "sigmoid"):
             raise ValueError(f"unknown idiocy_form {idiocy_form!r}")
         self.idiocy_form = idiocy_form
         if rating_min and not (idiocy and idiocy_form == "own_slope"):
@@ -430,31 +405,19 @@ class JointMIRT(nn.Module):
     def lapse(self):
         return LAPSE_CAP * torch.sigmoid(self.lapse_raw)
 
-    def low(self, c, th, chance, z, a):
-        """The curve's lower part at ability `th`, for a row whose main-slope
-        logit is `z` and slope `a`: the floor `c` down to where the main slope
-        meets it, then the second slope — a line in logit space — to `chance`
-        at the idiocy rating."""
+    def low(self, c, th, chance):
+        """The curve's lower part at ability `th`: `chance` far below the
+        idiocy rating, the floor `c` far above it, the second slope between."""
         if not self.idiocy:
             return c
+        steep = nn.functional.softplus(self.idiocy_slope_raw)
         if self.idiocy_form == "sigmoid":
             return chance + torch.relu(c - chance) * torch.sigmoid(
-                nn.functional.softplus(self.idiocy_slope_raw)
-                * (th - self.idiocy_rating))
+                steep * (th - self.idiocy_rating))
         lc = torch.logit(c.clamp(EPS, 1 - EPS))
         fall = torch.relu(lc - torch.logit(chance.clamp(EPS, 1 - EPS)))
-        if self.idiocy_form == "own_slope":
-            # The line up from chance at the idiocy rating, at the global
-            # steepness; the share of the fall still ahead of it at `th`.
-            climbed = (nn.functional.softplus(self.idiocy_slope_raw)
-                       * (th - self.idiocy_rating)) / fall.clamp(min=1e-6)
-            x = 1.0 - climbed
-        else:
-            # How far below the onset this row sits, in ability; the onset
-            # itself is that far above `th`.
-            depth = (lc - z) / a.clamp(min=1e-6)
-            span = (th + depth - self.idiocy_rating).clamp(min=1e-6)
-            x = depth / span
+        # The share of the fall still ahead of the line at `th`.
+        x = 1.0 - steep * (th - self.idiocy_rating) / fall.clamp(min=1e-6)
         x = x.clamp(-10.0, 10.0) * IDIOCY_SHARPNESS
         frac = (nn.functional.softplus(x)
                 - nn.functional.softplus(x - IDIOCY_SHARPNESS)) / IDIOCY_SHARPNESS
@@ -582,7 +545,7 @@ class JointMIRT(nn.Module):
         # the rating's units.
         q = ((CALIBRATION_P - c) / (1.0 - c - lam)).clamp(EPS, 1.0 - EPS)
         r = b + torch.log(q / (1.0 - q)) / a.clamp(min=1e-6)
-        return (self.low(c, th, chance, z, a)
+        return (self.low(c, th, chance)
                 + (1.0 - c - lam) * torch.sigmoid(z), g,
                 torch.stack([r, a, c], dim=1).detach())
 
@@ -747,7 +710,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         v_ridge_ladder=1.0,
         k_axes=K_AXES, dropout=DROPOUT, input_dropout=INPUT_DROPOUT,
         idiocy=IDIOCY, idiocy_form=IDIOCY_FORM,
-        idiocy_init=IDIOCY_INIT, idiocy_free_epoch=IDIOCY_FREE_EPOCH,
+        idiocy_init=IDIOCY_INIT,
         rating_min=RATING_MIN,
         weight_decay=0.0, weight_decay_fields=None,
         out_dir=OUT_DIR, axes_dir=AXES_DIR):
@@ -1142,9 +1105,6 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
             loss = loss + shallow_w * short
             m.train(True)
             opt.zero_grad(); loss.backward()
-            if ep < idiocy_free_epoch:           # held: the optimizer skips them
-                m.idiocy_rating.grad = None
-                m.idiocy_slope_raw.grad = None
             opt.step()
 
         if (ep + 1) % check_every == 0:
@@ -1183,7 +1143,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
             lam_s = m.lapse()
             z_s = (a_s * (th_s - b_s)).clamp(-35, 35)
             ch_s = t_chance[tp[i_stop]]
-            p_noax = (m.low(c_s, th_s, ch_s, z_s, a_s)
+            p_noax = (m.low(c_s, th_s, ch_s)
                       + (1.0 - c_s - lam_s) * torch.sigmoid(z_s)).clamp(
                 EPS, 1 - EPS)
             bce_stop_no_axes = float(torch.nn.functional.binary_cross_entropy(
@@ -1212,7 +1172,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
             slope_sweep = []
             for mult in [round(0.60 + 0.05 * i, 2) for i in range(17)]:
                 z = ((a_s * mult) * (th_s - rat_s) + kap_s + ax_s).clamp(-35, 35)
-                pz = (m.low(c_s, th_s, ch_s, z, a_s * mult)
+                pz = (m.low(c_s, th_s, ch_s)
                       + (1.0 - c_s - lam_s) * torch.sigmoid(z)).clamp(
                     EPS, 1 - EPS)
                 slope_sweep.append(
@@ -1235,7 +1195,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
             z_h = (a_h * (th_h - b_h)
                    + (g_h * m.user_axis(tu[i_stop])).sum(-1)).clamp(-35, 35)
             sg_h = torch.sigmoid(z_h)
-            p_h = (m.low(c_h, th_h, t_chance[tp[i_stop]], z_h, a_h)
+            p_h = (m.low(c_h, th_h, t_chance[tp[i_stop]])
                    + (1.0 - c_h - lam_h) * sg_h)
             w_h = (1.0 - c_h - lam_h) * sg_h * (1.0 - sg_h)
         stop_np = i_stop.cpu().numpy()
@@ -1394,7 +1354,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         "idiocy_rating": float(m.idiocy_rating) if idiocy else None,
         "idiocy_form": idiocy_form if idiocy else None,
         "idiocy_slope": (float(nn.functional.softplus(m.idiocy_slope_raw))
-                         if idiocy and idiocy_form != "floor_onset" else None),
+                         if idiocy else None),
         "lr_schedule": str(lr_schedule),
         "lr_warmup_epochs": int(lr_warmup_epochs),
         "ortho_axes": float(ortho_axes),
