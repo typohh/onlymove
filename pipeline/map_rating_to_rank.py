@@ -165,7 +165,7 @@ LAMBDA_TIME = 0.1           # light ridge keeping the learned time slope bounded
 # Rank BANDS (rank_surveys.rank_band): band b spans [b, b+1), so band 0 is 1d and
 # band -1 is 1k, and a band's lower EDGE is the integer b itself. Every threshold
 # below is such an edge.
-EGF_LO, EGF_HI = -31, 9     # consensus-rank band range the curve spans (30k..9d): every anchor inside it
+EGF_LO, EGF_HI = -31, 9     # consensus-rank band range the curve spans (30k..9d); the low end extends itself to cover the lowest anchor
 RANK_PADDING = 2            # extend a server's thresholds past its declared min/max
 EXTEND_TO = 8               # force each server range to cover at least up to 9d
 MIN_SERVER_SAMPLES = 3      # skip a server with less pooled declaration-weight
@@ -662,16 +662,22 @@ def fit_consensus(decls, identity_servers=()):
         xd = tt(np.linspace(r[0], r[-1], 20 * m + 1))
         rd = rank_of(xd, s, rk).cpu().numpy()
     xd, s, rk = xd.cpu().numpy(), s.cpu().numpy(), rk.cpu().numpy()
+    # Past the outermost knots readers extrapolate the end BAND's slope, not the fitted
+    # curve's, so an anchor out there would be scored on one curve and published on
+    # another. The published knots therefore reach down as far as the lowest anchor
+    # does: EGF_LO is where they start, not a limit on the data.
+    x_anchor = (rating + float(x_opt[i_alpha]) * T).cpu().numpy()
+    x_low = float(x_anchor.min())
+    lowest = (float(np.interp(x_low, xd, rd)) if x_low >= xd[0]
+              else float(rd[0] + (x_low - xd[0]) * s[0]))
+    if lowest < ys[0]:
+        egf_thr_ranks = list(range(int(np.floor(lowest)), EGF_HI + 1))
+        ys = np.array([float(g) for g in egf_thr_ranks], dtype=float)
+        print(f"  lowest anchor fits at rank {lowest:.2f}: published knots extended "
+              f"down to {ys[0]:g}")
     a = np.interp(ys, rd, xd)
     a = np.where(ys < rd[0], xd[0] + (ys - rd[0]) / s[0], a)
     a = np.where(ys > rd[-1], xd[-1] + (ys - rd[-1]) / s[-1], a)
-    # Past the outermost knots readers extrapolate the end BAND's slope, not the fitted
-    # curve's, so an anchor out there is scored on one curve and published on another.
-    x_anchor = (rating + float(x_opt[i_alpha]) * T).cpu().numpy()
-    lowest = float(np.interp(x_anchor.min(), xd, rd, left=np.nan))
-    if not lowest >= ys[0]:
-        sys.exit(f"an anchor fits at rank {lowest:.2f}, below the lowest published knot "
-                 f"{ys[0]:g} — lower EGF_LO so the published curve covers it")
     alpha = float(x_opt[i_alpha])
     server_fits = {}
     for server, st, n in srv_layout:
