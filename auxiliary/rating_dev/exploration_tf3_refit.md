@@ -113,3 +113,62 @@ What is questionable: 5,674 problems are rated below the idiocy rating. They are
 ## Still owed after a configuration is settled
 
 Production refit on windtunnel, about-tier ablations, `pwa/about.html` in four languages, docs for the new trainer behaviour, then (after deploy) full ablations and the methodology rewrite. Also deferred: re-tuning `bots/analysis.cfg` for the transformer and moving the analysis server off the b18 net.
+
+## Addendum (2026-10-02, later the same day): the two-sigmoid form, constraints, barriers
+
+This supersedes the status of items 13–18 above. The "floor onset" form and the opening hold are removed from the code. The rank map no longer aborts on a low anchor; its published knots extend down to cover it.
+
+**Board verdicts from the user (EGF 4-dan), which change what counts as a fault in a second-slope fit:**
+
+- Floors above 0.8 are legitimate on problems with one obvious move and no reasonable alternative (checked on `3a3434b2`, `04aba1a0`, `0f98b195`, `0191c252`, `3f72771e`). With a second slope the floor no longer has to cover the weakest players, so it can be high.
+- Floors near chance are never justified. Even on bland positions with several good candidates, many moves are obviously wrong; expect about 0.1–0.2, not under 0.05.
+- Still faults: a floor near 1 (the main slope has no height), and a rating read as a sentinel because the main slope never crosses 80%.
+
+**Forms now in the code** (`idiocy_form`):
+
+- `own_slope`: a straight line in logit space up from chance at the idiocy rating, corners rounded.
+- `sigmoid`: `P = chance + (c − chance)·σ(s(θ − I)) + (1 − c − λ)·σ(a(θ − b) + axes)`. Random + idiocy sigmoid + rating sigmoid + lapse sum to 1; the floor is the split. Three per problem (b, a, c), three global (λ, I, s).
+
+**Switches added:**
+
+- `ability_min`: abilities approach, and never reach, the second slope's bottom (the idiocy rating on the line; `I − 2/s` in the sigmoid form).
+- `rating_min`: on the line, the rating stays above where the second slope meets the floor; in the sigmoid form, `b − 2/a ≥ I + 2/s` (the slopes do not overlap). `2/steepness` is where the tangent at a sigmoid's centre meets its levels.
+- `floor_barrier_w`: the floor is placed between chance and `1 − λ`, with the penalty `−log(1 − chance/floor) − log(1 − floor)`; neither term reads the lapse. An earlier symmetric version (log barrier on the position in the range) squashed all floors to the middle.
+
+**All-rows fits (full rate, seed 0):**
+
+| Fit | Form and switches | Idiocy rating | Steepness | Median floor | Floors > 0.8 | Lowest rating | Training loss | Rank map error |
+|---|---|---|---|---|---|---|---|---|
+| `own_full_s0` | line | −1.90 | 4.08 | 0.335 | 146 | −24.6 | 0.4450 | 2.25 |
+| `min_full_s0` | line, rating min | 0.04 | 9.13 | 0.076 | 0 | 0.04 | 0.4455 | 2.24 |
+| `amin_full_s0` | line, hard ability cut | −2.61 | 3.06 | 0.352 | 0 | −6.03 | 0.4463 | 2.23 |
+| `asoft_full_s0` | line, smooth ability min | −2.10 | 2.71 | 0.262 | 0 | −8.77 | 0.4455 | 2.30 |
+| `sig_full_s0` | sigmoid | 0.44 | 11.75 | 0.223 | 0 | −13.3 | 0.4458 | not rerun |
+| `amin_sig_full_s0` | sigmoid, hard cut at centre | −1.10 | 1.55 | 0.196 | 3,541 | −119.9 | 0.4450 | dead |
+| `two_sig_s0` | sigmoid, both conditions | −4.81 | 0.51 | 0.123 | 556 | −5.31 | 0.4481 | 2.30 |
+
+About 40 users are pinned at the lowest allowed ability in every fit with an ability minimum. Whether they are the same users, and what their attempts look like, is unchecked.
+
+**Fits with 3% of rows held aside** (sigmoid form with both conditions unless stated):
+
+| Fit | Variant | Training | Held-out | Idiocy rating | Steepness | Floors, 1st–99th pct |
+|---|---|---|---|---|---|---|
+| `ho_none` | no second slope, seed 0 | 0.4429 | 0.4926 | – | – | 0.13–0.30 |
+| `ho_sig_free` | sigmoid, no conditions, seed 0 | 0.4434 | 0.4928 | not read | not read | not read |
+| `ho_line_amin` | line, ability min, seed 0 | 0.4419 | 0.4945 | not read | not read | not read |
+| `ho_two_sig` | seed 0 | 0.4476 | 0.4866 | −47.2 | 9.26 | 0.00–0.85 |
+| `ho_fb001` | symmetric barrier 0.01 | 0.4464 | 0.4924 | −72.5 | 10.9 | 0.33–0.61 |
+| `ho_fb01` | symmetric barrier 0.1 | 0.4491 | 0.4908 | −72.2 | 12.1 | 0.43–0.53 |
+| `ho_fb0001` | symmetric barrier 0.001 | 0.4477 | 0.4919 | −71.6 | 12.7 | 0.18–0.57 |
+| `ho_fb00001` | symmetric barrier 0.0001 | 0.4463 | 0.4927 | −54.8 | 9.18 | 0.15–0.46 |
+| `ho_fd001` | chance-and-1 barrier 0.01 | 0.4453 | 0.5016 | −112.6 | 15.8 | 0.08–0.22 |
+| `ho_fd01` | chance-and-1 barrier 0.1 | 0.4423 | 0.5020 | −74.3 | 15.0 | 0.08–0.19 |
+| `ho_none_s1` | no second slope, seed 1 | 0.4427 | 0.4882 | – | – | 0.18–0.33 |
+| `ho_two_sig_s1` | seed 1 | 0.4446 | 0.4912 | −88.8 | 16.2 | 0.16–0.28 |
+
+Readings:
+
+- **In every held-out fit with both conditions on, the idiocy rating fled far below the weakest user** (who sits near −22 to −30), so the second slope was switched off and the fit was functionally the plain model. Candidate cause, not separated: both conditions are bounds above the idiocy rating, so lowering it loosens them for everyone at once.
+- **`ho_two_sig`'s 0.4866 is not evidence for the conditions.** It is the plain model in a different solution (floors split between near-zero and high, lapse 0.043). At seed 1 the same form is 3 millinats worse than the plain model, so the sign does not repeat.
+- **The chance-and-1 barrier is 9 millinats worse on held-out rows** and compresses floors to 0.08–0.22: the `−log(1 − floor)` term has no scale of its own and pulls every floor down.
+- Seeds hold aside different rows, so held-out levels compare only within a seed.
