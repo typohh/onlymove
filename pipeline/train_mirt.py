@@ -250,8 +250,15 @@ MIN_BOTH_OUTCOMES = 1
 # where the main slope meets it, straight down to chance at ONE GLOBAL ABILITY,
 # the idiocy rating, fitted and shared by every problem as the lapse is.
 #
-#   onset   = the ability at which the main slope's logit is -IDIOCY_ONSET_LOGIT
-#   low(th) = c - (c - chance) * ramp((onset - th) / (onset - idiocy))
+# Both ends are points the model already has, in logit space, and the second
+# slope is the straight line between them:
+#   it STARTS where the main slope meets the floor — the ability at which the
+#   main slope's own probability, sigmoid(z), has come down to the floor c, so
+#   at logit(c);
+#   it ENDS at the idiocy rating, at logit(chance).
+#
+#   low(th) = sigmoid( logit(c) - (logit(c) - logit(chance)) * ramp(u) )
+#   u       = (onset - th) / (onset - idiocy)
 #   P       = low(th) + (1 - c - lambda) * sigmoid(z)
 #
 # `ramp` runs 0 to 1 with ROUNDED corners rather than a hard clamp: a clamp is
@@ -268,7 +275,6 @@ MIN_BOTH_OUTCOMES = 1
 # rating, slope and floor are the 4PL's.
 IDIOCY = True
 IDIOCY_INIT = -6.0               # where the second slope starts out ending
-IDIOCY_ONSET_LOGIT = 4.0         # the main slope has let go: sigmoid(-4) < 2%
 IDIOCY_SHARPNESS = 10.0          # the ramp's corners round over 1/this of its length
 
 # TWO SYNTHETIC USERS, each holding one row on EVERY corpus problem, at the two
@@ -388,18 +394,21 @@ class JointMIRT(nn.Module):
 
     def low(self, c, th, chance, z, a):
         """The curve's lower part at ability `th`, for a row whose main-slope
-        logit is `z` and slope `a`: the floor `c` down to the onset, then the
-        second slope to `chance` at the idiocy rating."""
+        logit is `z` and slope `a`: the floor `c` down to where the main slope
+        meets it, then the second slope — a line in logit space — to `chance`
+        at the idiocy rating."""
         if not self.idiocy:
             return c
         # How far below the onset this row sits, in ability; the onset itself
         # is that far above `th`.
-        depth = (-IDIOCY_ONSET_LOGIT - z) / a.clamp(min=1e-6)
+        lc = torch.logit(c.clamp(EPS, 1 - EPS))
+        depth = (lc - z) / a.clamp(min=1e-6)
         span = (th + depth - self.idiocy_rating).clamp(min=1e-6)
         x = (depth / span).clamp(-10.0, 10.0) * IDIOCY_SHARPNESS
         frac = (nn.functional.softplus(x)
                 - nn.functional.softplus(x - IDIOCY_SHARPNESS)) / IDIOCY_SHARPNESS
-        return c - torch.relu(c - chance) * frac
+        fall = torch.relu(lc - torch.logit(chance.clamp(EPS, 1 - EPS)))
+        return torch.sigmoid(lc - fall * frac)
 
     def user_axis(self, uid):
         """Per-user axis positions, CENTRED over the population.
