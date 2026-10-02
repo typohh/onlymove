@@ -300,7 +300,7 @@ class JointMIRT(nn.Module):
 
     def __init__(self, fdim, n_users, input_dim, seed, k_axes=K_AXES,
                  dropout=DROPOUT, input_dropout=INPUT_DROPOUT, link_power=False,
-                 link="sigmoid"):
+                 link="sigmoid", lapse_fixed=None):
         super().__init__()
         self.k_axes = int(k_axes)
         # The two dropout sites are separate parameters because they suppress
@@ -331,6 +331,8 @@ class JointMIRT(nn.Module):
         # prediction reads it; the written rating and the held-out diagnostics
         # still assume the symmetric curve.
         self.link_power = bool(link_power)
+        # EXPERIMENT (None as shipped: the lapse is fitted): hold it at a value.
+        self.lapse_fixed = None if lapse_fixed is None else float(lapse_fixed)
         # EXPERIMENT (sigmoid as shipped): the main slope's shape between the
         # floor and the ceiling. The two ramps are the sigmoid's tangent at its
         # centre, a straight line in probability: "ramp_hard" clamps it at both
@@ -371,6 +373,8 @@ class JointMIRT(nn.Module):
                 {"params": field, "lr": lr_field}]
 
     def lapse(self):
+        if self.lapse_fixed is not None:
+            return self.lapse_raw.detach() * 0.0 + self.lapse_fixed
         return LAPSE_CAP * torch.sigmoid(self.lapse_raw)
 
     def user_axis(self, uid):
@@ -662,7 +666,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         ortho_axes_detach=ORTHO_AXES_DETACH,
         v_ridge_ladder=1.0,
         k_axes=K_AXES, dropout=DROPOUT, input_dropout=INPUT_DROPOUT,
-        link_power=False, link="sigmoid",
+        link_power=False, link="sigmoid", lapse_fixed=None,
         weight_decay=0.0, weight_decay_fields=None,
         out_dir=OUT_DIR, axes_dir=AXES_DIR):
     """The shipped fit, callable. Every keyword defaults to the production
@@ -807,7 +811,8 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
 
     m = JointMIRT(fdim, n_users + len(synthetic), input_dim, seed, k_axes,
                   dropout=dropout, input_dropout=input_dropout,
-                  link_power=link_power, link=link).to(device)
+                  link_power=link_power, link=link,
+                  lapse_fixed=lapse_fixed).to(device)
     # Adam with no decay is what ships; the decay knob exists so 1.5's claim
     # that a norm penalty does not substitute for dropout can be re-measured,
     # and at 0 this is the same optimizer it always was.
