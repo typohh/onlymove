@@ -177,9 +177,8 @@ def main(argv=None):
                     help="weight of the synthetic random user's rows against a "
                          "real row (production "
                          f"{train_mirt.RANDOM_USER_WEIGHT}); the player answers "
-                         "every problem at one over its legal moves with its "
-                         "ability pinned infinitely low, so it acts on the "
-                         "floor alone")
+                         "every problem at one over its legal moves, with one "
+                         "fitted ability and no axis position")
     ap.add_argument("--strong-user-weight", type=float, default=None,
                     help="weight of the synthetic strong user's rows against a "
                          "real row (production "

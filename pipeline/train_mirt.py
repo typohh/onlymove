@@ -166,7 +166,7 @@ LR_FIELD = 1e-2
 # hand so the split cannot fall out of step with the module's own parameters:
 # anything not listed here is "the net" and gets the slow rate, so a parameter
 # added and forgotten lands on the safe side.
-FIELD_PARAMS = ("theta.weight", "v", "lapse_raw", "theta_strong")
+FIELD_PARAMS = ("theta.weight", "v", "lapse_raw", "theta_strong", "theta_random")
 V_RIDGE = 0.5                    # not binding: 0.05/0.15/0.5 score alike
 ORTHO_RATING = 0.5               # keeps each TAIL off rating, slope and floor
 # ONE barrier, on the slope, one-sided, acting on the PRE-SOFTPLUS output. The
@@ -247,13 +247,12 @@ MIN_BOTH_OUTCOMES = 1
 # weak player has tried a problem: attempted only by players who solve it, an
 # easy problem and a high floor explain the outcomes equally, nothing in the
 # likelihood breaks the tie, and the floor is free to run up to where the
-# 80%-clear rating stops existing. The player's ability is PINNED infinitely
-# low and it has no axis position, so its predicted success is the floor itself
-# and its rows act on the floor alone — a fitted ability would explain its
-# failures on easy problems by raising their difficulty and bend the bottom of
-# the scale around a player who does not exist. Its outcomes enter as their
-# EXPECTATION, not as sampled answers. The weight is one of its rows against one
-# real row; it carries no rank and reaches nothing outside this loss.
+# 80%-clear rating stops existing. Its ability is ONE FITTED NUMBER, like any
+# user's, and it has no axis position — the axes are read off real players'
+# residuals, and a player holding a row on every problem would be the largest
+# single voice in what they mean. Its outcomes enter as their EXPECTATION, not
+# as sampled answers. The weight is one of its rows against one real row; it
+# carries no rank and reaches nothing outside this loss.
 RANDOM_USER_WEIGHT = 0.0
 # THE STRONG USER, the random user's counterpart at the other end: a synthetic
 # player who has also answered every corpus problem, right with the probability
@@ -316,9 +315,11 @@ class JointMIRT(nn.Module):
         # make this feature reuse rather than a joint fit.
         self.g_lin = nn.Linear(d, self.k_axes, bias=False)
         self.v = nn.Parameter(torch.zeros(n_users, self.k_axes))
-        # The strong synthetic user's ability (STRONG_USER_WEIGHT); it receives
-        # no gradient, and so never moves, in a fit that does not inject it.
+        # The two synthetic users' abilities (RANDOM_USER_WEIGHT,
+        # STRONG_USER_WEIGHT); one that is not injected receives no gradient
+        # and never moves.
         self.theta_strong = nn.Parameter(torch.tensor(3.0))
+        self.theta_random = nn.Parameter(torch.tensor(-3.0))
         li = float(np.clip(LAPSE_INIT / LAPSE_CAP, EPS, 1.0 - EPS))
         self.lapse_raw = nn.Parameter(
             torch.tensor(float(np.log(li / (1.0 - li)))))
@@ -352,12 +353,6 @@ class JointMIRT(nn.Module):
 
     def lapse(self):
         return LAPSE_CAP * torch.sigmoid(self.lapse_raw)
-
-    def floor(self, feat):
-        """The floor alone, as problem_params states it — what the random
-        user's rows read."""
-        return (1.0 - 2.0 * self.lapse()) * torch.sigmoid(
-            self.head(self.trunk(feat))[:, 2])
 
     def user_axis(self, uid):
         """Per-user axis positions, CENTRED over the population.
@@ -990,22 +985,29 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
             short = torch.nn.functional.softplus(
                 o_tau - m.slope_logit(tfeat[si])).pow(2).mean()
             loss = loss + shallow_w * short
-            if t_chance is not None:
-                # The same corpus sample, floor only. Scaled so the weight is
-                # per row: the player holds one row per corpus problem against
-                # the n real rows the likelihood above is averaged over.
-                c_r = m.floor(tfeat[si]).clamp(EPS, 1 - EPS)
-                loss = loss + random_user_weight * (len(tfeat) / n) * (
-                    torch.nn.functional.binary_cross_entropy(c_r, t_chance[si]))
-            if t_answer is not None:
+            if t_chance is not None or t_answer is not None:
+                # The synthetic users, on the same corpus sample: the model's
+                # own curve at each one's fitted ability, no axis term. Scaled
+                # so a weight is per row — each holds one row per corpus
+                # problem against the n real rows the likelihood is averaged
+                # over. The strong user's target is scaled by the fit's own
+                # ceiling, the lapse held as a constant there.
                 b_q, a_q, c_q, _ = m.problem_params(tfeat[si])
                 lam_q = m.lapse()
-                p_q = (c_q + (1.0 - c_q - lam_q) * torch.sigmoid(
-                    (a_q * (m.theta_strong - b_q)).clamp(-35, 35))).clamp(
-                        EPS, 1 - EPS)
-                y_q = (1.0 - lam_q.detach()) * t_answer[si]
-                loss = loss + strong_user_weight * (len(tfeat) / n) * (
-                    torch.nn.functional.binary_cross_entropy(p_q, y_q))
+                for th_q, y_q, w_q in (
+                        (m.theta_random,
+                         None if t_chance is None else t_chance[si],
+                         random_user_weight),
+                        (m.theta_strong,
+                         None if t_answer is None else
+                         (1.0 - lam_q.detach()) * t_answer[si],
+                         strong_user_weight)):
+                    if y_q is None:
+                        continue
+                    p_q = (c_q + (1.0 - c_q - lam_q) * torch.sigmoid(
+                        (a_q * (th_q - b_q)).clamp(-35, 35))).clamp(EPS, 1 - EPS)
+                    loss = loss + w_q * (len(tfeat) / n) * (
+                        torch.nn.functional.binary_cross_entropy(p_q, y_q))
             m.train(True)
             opt.zero_grad(); loss.backward(); opt.step()
 
@@ -1236,6 +1238,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         "random_user_weight": float(random_user_weight),
         "strong_user_weight": float(strong_user_weight),
         "theta_strong": float(m.theta_strong),
+        "theta_random": float(m.theta_random),
         "lr_schedule": str(lr_schedule),
         "lr_warmup_epochs": int(lr_warmup_epochs),
         "ortho_axes": float(ortho_axes),
