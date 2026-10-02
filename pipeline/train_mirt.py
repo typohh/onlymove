@@ -190,14 +190,19 @@ SHALLOW_W = 0.3
 # sits well under BATCH, and moving it trades one number against the other in
 # the obvious direction: more samples, steadier barrier gradient, slower epoch.
 SHALLOW_SAMPLES = 20000
-# FLOOR_BARRIER_W (off at 0; needs the second slope): a floor at chance leaves
-# the second slope no height, and no position is so blank that a player who
-# cannot read it is picking among ALL legal moves. With the barrier on the floor
-# is placed ABOVE chance by construction, and priced directly against chance:
-# -log(1 - chance / floor). Chance is its own scale, so the price is steep within
-# a few multiples of it and fades above, leaving a high floor alone — the top is
-# bounded by the cap, not by this. It reads the same corpus sample the slope
-# barrier does.
+# FLOOR_BARRIER_W (off at 0; needs the second slope): the floor divides a
+# problem's range between its two slopes, and at either end one of them has no
+# height left. At chance it is the second slope — and no position is so blank
+# that a player who cannot read it is picking among ALL legal moves. At the top
+# it is the main one, whose rating and slope then describe nothing. With the
+# barrier on the floor is placed between chance and the ceiling by construction
+# and priced against the two FIXED ends, chance and 1:
+#   -log(1 - chance / floor) - log(1 - floor)
+# The bottom term has chance as its own scale, so it is steep within a few
+# multiples of it and fades above. Neither term reads the lapse, so the lapse is
+# not pushed around by where the floors want to be; the ceiling bounds the floor
+# only because the curve must stay a probability. It reads the same corpus
+# sample the slope barrier does.
 FLOOR_BARRIER_W = 0.0
 # ONE SCHEDULE, and the loop is uniform because of it. Holding the per-user axis
 # positions at zero for an opening span is the obvious companion to teaching —
@@ -533,7 +538,7 @@ class JointMIRT(nn.Module):
         lam = self.lapse()
         cap = 1.0 - 2.0 * lam
         if self.floor_between:
-            c = chance + torch.relu(cap - chance) * torch.sigmoid(o[:, 2])
+            c = chance + torch.relu(1.0 - lam - chance) * torch.sigmoid(o[:, 2])
         else:
             c = cap * torch.sigmoid(o[:, 2])
         if self.rating_min and self.idiocy_form == "sigmoid":
@@ -1167,10 +1172,11 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
             loss = loss + shallow_w * short
             if floor_barrier_w > 0:
                 ch_b = t_chance[si]
-                c_b = ch_b + torch.relu(1.0 - 2.0 * m.lapse() - ch_b) \
+                c_b = ch_b + torch.relu(1.0 - m.lapse() - ch_b) \
                     * torch.sigmoid(o_floor)
-                loss = loss - floor_barrier_w * torch.log(
-                    (1.0 - ch_b / c_b).clamp(min=EPS)).mean()
+                loss = loss - floor_barrier_w * (
+                    torch.log((1.0 - ch_b / c_b).clamp(min=EPS))
+                    + torch.log((1.0 - c_b).clamp(min=EPS))).mean()
             m.train(True)
             opt.zero_grad(); loss.backward()
             opt.step()
