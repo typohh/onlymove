@@ -290,6 +290,11 @@ IDIOCY = True
 #                  chance at the idiocy rating, reaches the problem's floor. The
 #                  main slope does not enter, so the two slopes cannot stand in
 #                  for each other.
+#   "sigmoid"      the same one global steepness, but the second slope is a
+#                  sigmoid in PROBABILITY from chance up to the floor, centred
+#                  on the idiocy rating: it approaches both levels and reaches
+#                  neither, as the main slope does, so there is no corner to
+#                  round and no meeting point to define.
 IDIOCY_FORM = "floor_onset"
 # RATING_MIN (own_slope only): no problem is rated below where the second slope
 # meets its floor. Under that point the curve is the second slope's, the same
@@ -359,7 +364,7 @@ class JointMIRT(nn.Module):
                  idiocy_form=IDIOCY_FORM, rating_min=RATING_MIN):
         super().__init__()
         self.idiocy = bool(idiocy)
-        if idiocy_form not in ("floor_onset", "own_slope"):
+        if idiocy_form not in ("floor_onset", "own_slope", "sigmoid"):
             raise ValueError(f"unknown idiocy_form {idiocy_form!r}")
         self.idiocy_form = idiocy_form
         if rating_min and not (idiocy and idiocy_form == "own_slope"):
@@ -432,6 +437,10 @@ class JointMIRT(nn.Module):
         at the idiocy rating."""
         if not self.idiocy:
             return c
+        if self.idiocy_form == "sigmoid":
+            return chance + torch.relu(c - chance) * torch.sigmoid(
+                nn.functional.softplus(self.idiocy_slope_raw)
+                * (th - self.idiocy_rating))
         lc = torch.logit(c.clamp(EPS, 1 - EPS))
         fall = torch.relu(lc - torch.logit(chance.clamp(EPS, 1 - EPS)))
         if self.idiocy_form == "own_slope":
@@ -1385,7 +1394,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         "idiocy_rating": float(m.idiocy_rating) if idiocy else None,
         "idiocy_form": idiocy_form if idiocy else None,
         "idiocy_slope": (float(nn.functional.softplus(m.idiocy_slope_raw))
-                         if idiocy and idiocy_form == "own_slope" else None),
+                         if idiocy and idiocy_form != "floor_onset" else None),
         "lr_schedule": str(lr_schedule),
         "lr_warmup_epochs": int(lr_warmup_epochs),
         "ortho_axes": float(ortho_axes),
