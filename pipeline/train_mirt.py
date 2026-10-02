@@ -263,9 +263,10 @@ MIN_BOTH_OUTCOMES = 1
 #   above the ceiling cannot be met by any ability.
 # A WEIGHT is the share of the user's rows drawn into each epoch, afresh each
 # time: 1 is the user as stated, less is the same user having answered that
-# fraction of the corpus. Neither carries a rank or reaches anything outside
-# the fit: they are left out of user_theta.csv and of every row the fit is
-# scored on.
+# fraction of the corpus. Neither carries a rank or is part of any row the fit
+# is scored on. Their fitted abilities are written to user_theta.csv under the
+# profiles `synthetic:random` and `synthetic:strong` with n_attempts 0 — no real
+# user id has that form, and a reader summing attempts is not moved by them.
 RANDOM_USER_WEIGHT = 0.0
 STRONG_USER_WEIGHT = 0.0
 STOP_ROW_FRAC = 0.0              # the shipped fit trains on every row: the budget
@@ -1157,8 +1158,11 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
                             **spread_rows)
 
     natt = pd.Series(user_idx).value_counts()
-    pd.DataFrame({"profile": list(users.categories), "theta": theta,
-                  "n_attempts": [int(natt.get(i, 0)) for i in range(n_users)]}
+    pd.DataFrame({"profile": list(users.categories)
+                  + [f"synthetic:{k}" for k in theta_synthetic],
+                  "theta": list(theta) + list(theta_synthetic.values()),
+                  "n_attempts": [int(natt.get(i, 0)) for i in range(n_users)]
+                  + [0] * len(theta_synthetic)}
                  ).to_csv(os.path.join(out_dir, "user_theta.csv"), index=False)
     with open(os.path.join(out_dir, "rating_constants.json"), "w") as f:
         json.dump({"fat_finger_rate": round(lam, 4), "slope_scale": 1.0,
