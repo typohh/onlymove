@@ -98,7 +98,7 @@ What `own_full_s0` does, which looks healthy:
 
 What is questionable: 5,674 problems are rated below the idiocy rating. They are the high-floor, shallow-slope problems (median floor 0.55, slope 0.86), and include all 146 floors above 0.8.
 
-**Soft corners.** The ramp's two corners are rounded (softplus, `IDIOCY_SHARPNESS = 10`) so a player below the idiocy rating still passes gradient to it. The matching idea for the lapse side (a very small slope instead of a plateau) was discussed and not built.
+**Soft corners.** The ramp's two corners are rounded (softplus, `IDIOCY_SHARPNESS = 10`) so a player below the idiocy rating still passes gradient to it. The lapse side needed nothing: the main curve is a sigmoid that approaches `1 − lapse` without reaching it, so it has no plateau or corner and already passes a smooth, fading gradient. A constant small slope on either side was considered and not built — it never stops pushing, so abilities at the extremes drift for as long as training runs, and it needs a slope constant.
 
 ## 16–17. Fixing the ratings below the idiocy rating
 
