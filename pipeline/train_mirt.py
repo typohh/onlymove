@@ -284,6 +284,12 @@ RATING_MIN = False
 # own and still pulls on the idiocy rating. The bend's width is the second
 # slope's own scale, one over its steepness, so it brings no constant.
 ABILITY_MIN = False
+# How far a sigmoid "reaches" either side of its centre, in units of one over
+# its steepness: where the tangent at the centre meets the two levels. This is
+# geometry, not a tuned value. In the sigmoid form RATING_MIN keeps the main
+# slope's lower reach above the second slope's upper reach, and ABILITY_MIN
+# keeps abilities above the second slope's lower reach.
+SIGMOID_REACH = 2.0
 IDIOCY_SLOPE_INIT = 1.0
 IDIOCY_INIT = -10.0
 IDIOCY_SHARPNESS = 10.0          # the ramp's corners round over 1/this of its length
@@ -350,8 +356,8 @@ class JointMIRT(nn.Module):
         if idiocy_form not in ("own_slope", "sigmoid"):
             raise ValueError(f"unknown idiocy_form {idiocy_form!r}")
         self.idiocy_form = idiocy_form
-        if rating_min and not (idiocy and idiocy_form == "own_slope"):
-            raise ValueError("rating_min needs the own_slope second slope")
+        if rating_min and not idiocy:
+            raise ValueError("rating_min needs the second slope")
         self.rating_min = bool(rating_min)
         if ability_min and not idiocy:
             raise ValueError("ability_min needs the second slope")
@@ -421,9 +427,12 @@ class JointMIRT(nn.Module):
         th = (self.theta.weight if uid is None else self.theta(uid)).squeeze(-1)
         if self.ability_min:
             steep = nn.functional.softplus(self.idiocy_slope_raw)
-            th = (self.idiocy_rating
-                  + nn.functional.softplus(steep * (th - self.idiocy_rating))
-                  / steep)
+            # The second slope's bottom: the idiocy rating itself on the line,
+            # the sigmoid's lower reach when it is centred there.
+            lo = self.idiocy_rating
+            if self.idiocy_form == "sigmoid":
+                lo = lo - SIGMOID_REACH / steep
+            th = lo + nn.functional.softplus(steep * (th - lo)) / steep
         return th
 
     def low(self, c, th, chance):
@@ -506,7 +515,15 @@ class JointMIRT(nn.Module):
         lam = self.lapse()
         cap = 1.0 - 2.0 * lam
         c = cap * torch.sigmoid(o[:, 2])
-        if self.rating_min:
+        if self.rating_min and self.idiocy_form == "sigmoid":
+            # The two slopes do not overlap: the main slope's lower reach stays
+            # above the second slope's upper reach. Approached, not cut, on the
+            # main slope's own scale.
+            lo = (self.idiocy_rating + SIGMOID_REACH
+                  / nn.functional.softplus(self.idiocy_slope_raw)
+                  + SIGMOID_REACH / a)
+            b = lo + nn.functional.softplus(a * (b - lo)) / a
+        elif self.rating_min:
             # The rating is b + kappa(c)/a; hold it at or above the onset.
             lc = torch.logit(c.clamp(EPS, 1 - EPS))
             fall = torch.relu(lc - torch.logit(chance.clamp(EPS, 1 - EPS)))
