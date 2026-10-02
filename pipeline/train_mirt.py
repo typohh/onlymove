@@ -722,6 +722,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         v_ridge_ladder=1.0,
         k_axes=K_AXES, dropout=DROPOUT, input_dropout=INPUT_DROPOUT,
         idiocy=IDIOCY, idiocy_form=IDIOCY_FORM,
+        idiocy_init=IDIOCY_INIT, idiocy_free_epoch=IDIOCY_FREE_EPOCH,
         weight_decay=0.0, weight_decay_fields=None,
         out_dir=OUT_DIR, axes_dir=AXES_DIR):
     """The shipped fit, callable. Every keyword defaults to the production
@@ -870,6 +871,8 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
     m = JointMIRT(fdim, n_users + len(synthetic), input_dim, seed, k_axes,
                   dropout=dropout, input_dropout=input_dropout,
                   idiocy=idiocy, idiocy_form=idiocy_form).to(device)
+    with torch.no_grad():
+        m.idiocy_rating.fill_(float(idiocy_init))
     # Adam with no decay is what ships; the decay knob exists so 1.5's claim
     # that a norm penalty does not substitute for dropout can be re-measured,
     # and at 0 this is the same optimizer it always was.
@@ -1112,7 +1115,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
             loss = loss + shallow_w * short
             m.train(True)
             opt.zero_grad(); loss.backward()
-            if ep < IDIOCY_FREE_EPOCH:           # held: the optimizer skips them
+            if ep < idiocy_free_epoch:           # held: the optimizer skips them
                 m.idiocy_rating.grad = None
                 m.idiocy_slope_raw.grad = None
             opt.step()
