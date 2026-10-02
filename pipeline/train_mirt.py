@@ -824,7 +824,13 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         lr_epochs += scale
         m.train(True)
         perm = tr[torch.randperm(n, device=device)]
-        for i in range(0, n, batch):
+        # THE REMAINDER IS DROPPED, after the shuffle, so every step is a full
+        # batch and a different handful of rows sits out each epoch. The gauges
+        # and several penalties are this batch's own statistics and every step
+        # is taken at full size, so a stub of a few thousand rows is one noisy
+        # full-weight step per epoch — and how small the stub is depends on
+        # nothing but the row count modulo the batch size.
+        for i in range(0, (n // batch) * batch or n, batch):
             bi = perm[i:i + batch]
             pred, gh, rsf = m(tu[bi], tfeat[tp[bi]])
             pred = pred.clamp(EPS, 1 - EPS)
