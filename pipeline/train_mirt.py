@@ -173,7 +173,7 @@ ORTHO_RATING = 0.5               # keeps each TAIL off rating, slope and floor
 # rating is b + kappa(c)/a, so a slope collapsing toward its floor sends it to
 # infinity. Without this, slopes fall to a 0.94 median and ratings blow out to a
 # range of [-225, +146] — a 22 mnat loss. There is no floor barrier: the floor is
-# bounded structurally by cap = (1 - 2*lambda).
+# bounded structurally by cap = min(FLOOR_CAP, 1 - 2*lambda).
 SHALLOW_TAU = 0.1
 SHALLOW_W = 0.3
 # The barrier reads the CORPUS rather than the batch, and has to: a problem
@@ -274,6 +274,13 @@ MIN_BOTH_OUTCOMES = 1
 # hands the floor no gradient. Nothing published reads the idiocy rating: the
 # rating, slope and floor are the 4PL's.
 IDIOCY = True
+# THE FLOOR IS CAPPED AT A HALF. With the second slope the fit has two ways to
+# draw one descent — a low floor under a steep main slope, or a high floor
+# whose second slope does the falling — and the likelihood does not choose
+# between them. Uncapped it takes the second, raises most floors past the
+# 80%-clear point and leaves the published rating without a meaning. The cap
+# keeps the main slope the larger part of every curve.
+FLOOR_CAP = 0.5
 IDIOCY_INIT = -6.0               # where the second slope starts out ending
 IDIOCY_SHARPNESS = 10.0          # the ramp's corners round over 1/this of its length
 
@@ -470,7 +477,7 @@ class JointMIRT(nn.Module):
         b = (b - mu) / sd
         a = nn.functional.softplus(o[:, 1]).clamp(min=SLOPE_FLOOR)
         lam = self.lapse()
-        cap = 1.0 - 2.0 * lam
+        cap = torch.clamp(1.0 - 2.0 * lam, max=FLOOR_CAP)
         c = cap * torch.sigmoid(o[:, 2])
         g = self.g_lin(h)
         # Kept for `detached_loadings`: the same representation and, below, the
@@ -979,7 +986,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
             # penalty carry no such conflict.
             #
             # Each column is centred and normalised, so the term is a sum of
-            # squared cosines: floor lives on (0, 1-2*lambda) and rating on its own
+            # squared cosines: floor lives on (0, FLOOR_CAP) and rating on its own
             # scale, and an unnormalised penalty would be dominated by whichever
             # happens to be widest. The targets are DETACHED, so this can only
             # push the axes off the rating side and never degrade the rating to
