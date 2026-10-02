@@ -279,7 +279,10 @@ IDIOCY_FORM = "own_slope"
 RATING_MIN = False
 # ABILITY_MIN: no player is placed below the idiocy rating. Under it the second
 # slope has nothing further to say, so a player parked there is out of the
-# model's sight; held at it, they pull on the idiocy rating instead.
+# model's sight. Abilities APPROACH the idiocy rating from above and never
+# reach it — a bend, not a cut, so a player near it keeps a gradient of their
+# own and still pulls on the idiocy rating. The bend's width is the second
+# slope's own scale, one over its steepness, so it brings no constant.
 ABILITY_MIN = False
 IDIOCY_SLOPE_INIT = 1.0
 IDIOCY_INIT = -10.0
@@ -417,7 +420,10 @@ class JointMIRT(nn.Module):
         """Abilities as the curve reads them (every user's when `uid` is None)."""
         th = (self.theta.weight if uid is None else self.theta(uid)).squeeze(-1)
         if self.ability_min:
-            th = torch.maximum(th, self.idiocy_rating)
+            steep = nn.functional.softplus(self.idiocy_slope_raw)
+            th = (self.idiocy_rating
+                  + nn.functional.softplus(steep * (th - self.idiocy_rating))
+                  / steep)
         return th
 
     def low(self, c, th, chance):
