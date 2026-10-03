@@ -897,9 +897,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
     # last epoch's weights but an average along the run. "swa" is the uniform
     # mean of the end-of-epoch weights from avg_start_frac of the budget on;
     # "ema" is an exponential moving average of them at ema_decay per epoch.
-    # Every float tensor of the state is averaged, buffers included, and the
-    # difficulty gauge is re-measured for the averaged weights at the end,
-    # since its EMA belongs to weights that never existed together.
+    # Every float tensor of the state is averaged, buffers included.
     if weight_avg not in (None, "swa", "ema"):
         raise ValueError(f"unknown weight_avg {weight_avg!r}")
     avg_state, avg_n = None, 0
@@ -1166,16 +1164,11 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
                           "stop_bce": bce_st, "stop_bce_avg": bce_avg})
 
     if avg_state is not None:
-        # Ship the averaged weights, with the difficulty gauge re-measured over
-        # the training rows for exactly those weights.
+        # Ship the averaged weights. The gauge buffers are averaged with them
+        # and kept: they are training-mode statistics, and re-measuring them in
+        # eval mode would rescale the difficulty under abilities and slopes
+        # fitted against the training-mode scale.
         m.load_state_dict(avg_state)
-        m.train(False)
-        with torch.no_grad():
-            rows = tp[tr]
-            braw = torch.cat([m.head(m.trunk(tfeat[rows[i:i + 65536]]))[:, 0]
-                              for i in range(0, len(rows), 65536)])
-            m.b_mu.copy_(braw.mean())
-            m.b_sd.copy_(braw.std() + EPS)
         print(f"  shipped the {weight_avg} average of the weights", flush=True)
 
     # WHAT THE AXES ADD, on the held-aside rows, measured before the gauge is
