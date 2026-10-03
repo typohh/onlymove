@@ -957,6 +957,10 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
                     Muon(mats, lr=muon_lr, weight_decay=muon_wd))
     elif optimizer == "adam":
         opt = torch.optim.Adam(groups)
+    elif optimizer == "adamw":
+        # Decoupled decay: each step shrinks the weights by lr * decay directly,
+        # instead of adding decay * weight to a gradient Adam then rescales.
+        opt = torch.optim.AdamW(groups)
     else:
         raise ValueError(f"unknown optimizer {optimizer!r}")
     o_tau = float(np.log(np.expm1(shallow_tau)))
