@@ -172,3 +172,44 @@ Readings:
 - **`ho_two_sig`'s 0.4866 is not evidence for the conditions.** It is the plain model in a different solution (floors split between near-zero and high, lapse 0.043). At seed 1 the same form is 3 millinats worse than the plain model, so the sign does not repeat.
 - **The chance-and-1 barrier is 9 millinats worse on held-out rows** and compresses floors to 0.08–0.22: the `−log(1 − floor)` term has no scale of its own and pulls every floor down.
 - Seeds hold aside different rows, so held-out levels compare only within a seed.
+
+## Addendum (2026-10-03): the second slope removed; hunting the floor–slope instability
+
+**Decision (user, after the floor analysis): the second slope (idiocy) is removed.** Attempts that sit on the floor are 0.1–0.2% of the log, and among them neither absolute ability nor ability relative to the problem predicts success (logistic coefficients −0.007 ± 0.016 and −0.005 ± 0.018 per rating unit in `baseline_all_rows`; the weakest fifth of floor-row users still succeeds 25% against a 2% chance level). However the data are served, there is nothing for a second slope to be fitted from. The idiocy code, ability/rating minimums and floor barrier are deleted from the trainer.
+
+**Standing criteria (user):** cross-seed stability of the fitted shape (slope × difficulty spread, floor distribution, lapse, parameter agreement between seeds) outranks a few millinats of held-out loss. Tuned constants may probe an interaction but are not acceptable as the fix, because the data will shift (few users above 4d today).
+
+**All fits below:** full rate, cosine, 7,000 epochs, 3% of rows held aside; a seed fixes the held-out rows, so held-out losses compare only within a seed. "Plain" = shipped settings; its seven seeds score 0.4926, 0.4882, 0.4983, 0.4935, 0.4884, 0.4846, 0.4950.
+
+### The core finding: a floor–slope trade-off the data cannot see
+
+- Rank agreement between seeds (plain, 5 seeds): ratings 0.97, slopes 0.69, floors 0.42 (one pair −0.09). Attempts per problem barely help (floors 0.36 at 0 attempts, 0.52 at 5–19).
+- Not a data-volume problem: grouping problems into classes on their own activation inputs, even classes of ~11,000 problems move their average floor by ~0.40 (logit) between seeds, against a 0.15–0.20 spread between classes. The overall floor level moves too: median floor 0.21 / 0.26 / 0.24 / 0.14 / 0.31 across seeds 0–4.
+- Predictions on the actual attempts agree well across seeds (logit correlation 0.90, median difference 2.4 points) although parameters do not: the disagreement lies in directions the served data cannot see.
+- Weight decay on the network moves the instability instead of removing it: floors agree better, slopes worse (0.0001: floors 0.82, slopes 0.38; 0.0003: floors 0.71, slopes 0.40; plain: 0.53 / 0.71).
+- Candidate mechanism (user): in `P = c + (1 − c − λ)·σ(a(θ − b))` the midpoint steepness is `(1 − c − λ)·a/4`, so floor and slope can stand in for each other. Under test as `slope_height`.
+
+### Experiments and verdicts
+
+| Experiment | Switch | Result | Verdict |
+|---|---|---|---|
+| Asymmetric main slope (σ(z)^p, one global p) | `link_power` | paired held-out +3.8 / +0.3 / −3.2; p fitted 1.45 / 1.39 / 1.04 | no effect |
+| Straight ramp with rounded bevels | `link="ramp_soft"` | +9.6 / −2.7 / +0.7; 12–58% of floors near chance | rejected |
+| Hockey stick (hard ramp) | `link="ramp_hard"` | −0.9 / −8.1 / +0.4; 16–29% of floors near chance | rejected (floors implausible, gain not established) |
+| Lapse held at 0.02 / 0.04 / 0.06 | `lapse_fixed` | 0.04: −4.7 / −8.3 / −3.4 (p ≈ 0.06), but 2 of 3 seeds collapse into split floors and slope × spread 0.60 | probe only: the free lapse settles below the best-predicting value |
+| Robust (IQR) difficulty gauge | `gauge="iqr"` | 5 seeds: held-out −1.4 mean (spread 3.0); seed 4 a different solution (median floor 0.52) | not a stabilizer |
+| Empirical-Bayes floor prior (fitted mean and spread) | `floor_prior` | fitted spread collapses to ~5e-5: one floor for all problems (0.45–0.50); held-out +2.6 mean; lapse steady 0.023–0.039 | rejected (self-defeating), but shows one global floor costs only ~2.6 mnat |
+| Floor in the slope's units | `floor_rel` | +2.8; 40% of floors near chance | rejected |
+| Network weight decay 0.0001 / 0.0003 / 0.001 (with dropout) | `weight_decay` | moves instability floor → slope; 0.0003+ flattens floors to a constant | probe: confirms the trade-off |
+| Snapshot average, cosine / constant rate | `weight_avg="swa"` | averaged held-out worse than live; floors agree 0.35 | rejected |
+| Exponential average, cosine / constant rate | `weight_avg="ema"` | under cosine identical to final weights; constant rate: floors agree 0.28 | rejected |
+| No dropout, weight decay 0.0001 / 0.001 | `dropout=0` | memorizes: train 0.26–0.28, held-out 0.68–0.77 | far too weak; stronger sweep running |
+
+A bug was found and fixed along the way: re-measuring the difficulty gauge in eval mode after weight averaging rescaled difficulty under abilities and slopes fitted against the training-mode scale; the averaged buffers are now kept.
+
+### Running / queued
+
+- `slope_height` (floor-independent midpoint steepness), seeds 0–2 — the most promising structural candidate.
+- No dropout with weight decay 0.01 / 0.03 / 0.1 / 0.3.
+- Muon on the trunk matrices (`optimizer="muon"`), seeds 0–1.
+- Dropout 0.4 / 0.5 and a doubled batch, seeds 0–2.
