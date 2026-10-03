@@ -291,6 +291,61 @@ LABELS = os.path.join(AXES_DIR, "labels.json")
 RAMP_SHARPNESS = 10.0
 
 
+def _orthogonalize(g, steps=5):
+    """Newton-Schulz iteration towards the orthogonal factor of `g` (the
+    quintic of the Muon optimizer): every singular value pushed near one."""
+    a, b, c = 3.4445, -4.7750, 2.0315
+    x = g / (g.norm() + 1e-7)
+    tall = x.shape[0] > x.shape[1]
+    if tall:
+        x = x.T
+    for _ in range(steps):
+        xx = x @ x.T
+        x = a * x + (b * xx + c * xx @ xx) @ x
+    return x.T if tall else x
+
+
+class Muon(torch.optim.Optimizer):
+    """EXPERIMENT: momentum whose update is orthogonalized per weight matrix,
+    for the trunk's matrices only; everything else stays on Adam."""
+
+    def __init__(self, params, lr=0.02, momentum=0.95, weight_decay=0.0):
+        super().__init__(params, dict(lr=lr, momentum=momentum,
+                                      weight_decay=weight_decay))
+
+    @torch.no_grad()
+    def step(self):
+        for grp in self.param_groups:
+            for p in grp["params"]:
+                if p.grad is None:
+                    continue
+                st = self.state[p]
+                buf = st.setdefault("buf", torch.zeros_like(p))
+                buf.mul_(grp["momentum"]).add_(p.grad)
+                upd = _orthogonalize(p.grad + grp["momentum"] * buf)
+                scale = max(1.0, p.shape[0] / p.shape[1]) ** 0.5
+                if grp["weight_decay"]:
+                    p.mul_(1.0 - grp["lr"] * grp["weight_decay"])
+                p.add_(upd, alpha=-grp["lr"] * scale)
+
+
+class _Both:
+    """Two optimizers stepped as one, their groups listed together so the
+    learning-rate schedule reaches all of them."""
+
+    def __init__(self, *opts):
+        self.opts = opts
+        self.param_groups = [g for o in opts for g in o.param_groups]
+
+    def zero_grad(self):
+        for o in self.opts:
+            o.zero_grad()
+
+    def step(self):
+        for o in self.opts:
+            o.step()
+
+
 class JointMIRT(nn.Module):
     """Compensatory M4PL with per-problem parameters from a shared trunk.
 
@@ -697,6 +752,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         k_axes=K_AXES, dropout=DROPOUT, input_dropout=INPUT_DROPOUT,
         link_power=False, link="sigmoid", lapse_fixed=None, gauge="sd",
         floor_prior=False, floor_rel=False, weight_avg=None,
+        optimizer="adam", muon_lr=0.02, muon_wd=0.0,
         avg_start_frac=0.5,
         ema_decay=0.99,
         weight_decay=0.0, weight_decay_fields=None,
@@ -860,7 +916,17 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
     groups[0]["weight_decay"] = weight_decay
     groups[1]["weight_decay"] = (weight_decay if weight_decay_fields is None
                                  else weight_decay_fields)
-    opt = torch.optim.Adam(groups)
+    if optimizer == "muon":
+        mats = [prm for n, prm in m.trunk.named_parameters() if prm.ndim == 2]
+        ids = {id(q) for q in mats}
+        for grp in groups:
+            grp["params"] = [q for q in grp["params"] if id(q) not in ids]
+        opt = _Both(torch.optim.Adam(groups),
+                    Muon(mats, lr=muon_lr, weight_decay=muon_wd))
+    elif optimizer == "adam":
+        opt = torch.optim.Adam(groups)
+    else:
+        raise ValueError(f"unknown optimizer {optimizer!r}")
     o_tau = float(np.log(np.expm1(shallow_tau)))
     # THE COSINE DECAY SHIPS; `constant` is the comparison arm and leaves every
     # step at the base rate. A constant rate keeps taking full-size steps long
