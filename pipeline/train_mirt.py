@@ -357,7 +357,8 @@ class JointMIRT(nn.Module):
     def __init__(self, fdim, n_users, input_dim, seed, k_axes=K_AXES,
                  dropout=DROPOUT, input_dropout=INPUT_DROPOUT, link_power=False,
                  link="sigmoid", lapse_fixed=None, gauge="sd",
-                 floor_prior=False, floor_rel=False):
+                 floor_prior=False, floor_rel=False,
+                 slope_height=False):
         super().__init__()
         self.k_axes = int(k_axes)
         # The two dropout sites are separate parameters because they suppress
@@ -394,6 +395,15 @@ class JointMIRT(nn.Module):
         # logit(floor / cap) = slope * output. A floor can then not move
         # without saying how it relates to the slope beside it.
         self.floor_rel = bool(floor_rel)
+        # EXPERIMENT (off as shipped): the slope output read as the curve's
+        # steepness IN PROBABILITY at its midpoint. The 4PL's midpoint
+        # derivative is (1 - floor - lapse) * slope / 4, so a raised floor
+        # flattens the curve even with the slope untouched, and the two can
+        # stand in for each other. Dividing the logistic slope by the height
+        # (1 - floor - lapse) makes the midpoint derivative output / 4 whatever
+        # the floor. The published triple is still an ordinary 4PL: the slope
+        # written is the logistic one.
+        self.slope_height = bool(slope_height)
         # EXPERIMENT (off as shipped): an EMPIRICAL-BAYES prior on the floor's
         # raw output, normal with a FITTED mean and spread. A floor only the
         # weakest players' attempts can inform is otherwise set by wherever the
@@ -523,6 +533,8 @@ class JointMIRT(nn.Module):
         lam = self.lapse()
         cap = 1.0 - 2.0 * lam
         c = cap * torch.sigmoid(a * o[:, 2] if self.floor_rel else o[:, 2])
+        if self.slope_height:
+            a = a / (1.0 - c - lam)
         g = self.g_lin(h)
         # Kept for `detached_loadings`: the same representation and, below, the
         # same divisor this batch's loadings use, so a detached readout is the
@@ -752,7 +764,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         k_axes=K_AXES, dropout=DROPOUT, input_dropout=INPUT_DROPOUT,
         link_power=False, link="sigmoid", lapse_fixed=None, gauge="sd",
         floor_prior=False, floor_rel=False, weight_avg=None,
-        optimizer="adam", muon_lr=0.02, muon_wd=0.0,
+        optimizer="adam", muon_lr=0.02, muon_wd=0.0, slope_height=False,
         avg_start_frac=0.5,
         ema_decay=0.99,
         weight_decay=0.0, weight_decay_fields=None,
@@ -901,7 +913,8 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
                   dropout=dropout, input_dropout=input_dropout,
                   link_power=link_power, link=link,
                   lapse_fixed=lapse_fixed, gauge=gauge,
-                  floor_prior=floor_prior, floor_rel=floor_rel).to(device)
+                  floor_prior=floor_prior, floor_rel=floor_rel,
+                  slope_height=slope_height).to(device)
     prior_ratio = len(keys) / len(df)
     # Adam with no decay is what ships; the decay knob exists so 1.5's claim
     # that a norm penalty does not substitute for dropout can be re-measured,
