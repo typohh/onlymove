@@ -690,7 +690,8 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         v_ridge_ladder=1.0,
         k_axes=K_AXES, dropout=DROPOUT, input_dropout=INPUT_DROPOUT,
         link_power=False, link="sigmoid", lapse_fixed=None, gauge="sd",
-        floor_prior=False,
+        floor_prior=False, weight_avg=None, avg_start_frac=0.5,
+        ema_decay=0.99,
         weight_decay=0.0, weight_decay_fields=None,
         out_dir=OUT_DIR, axes_dir=AXES_DIR):
     """The shipped fit, callable. Every keyword defaults to the production
@@ -885,6 +886,23 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
     if lr_warmup_epochs < 0:
         raise ValueError(f"lr_warmup_epochs must be >= 0, got {lr_warmup_epochs}")
     lr_epochs = 0.0
+    # EXPERIMENT (None as shipped): WEIGHT AVERAGING, so what ships is not the
+    # last epoch's weights but an average along the run. "swa" is the uniform
+    # mean of the end-of-epoch weights from avg_start_frac of the budget on;
+    # "ema" is an exponential moving average of them at ema_decay per epoch.
+    # Every float tensor of the state is averaged, buffers included, and the
+    # difficulty gauge is re-measured for the averaged weights at the end,
+    # since its EMA belongs to weights that never existed together.
+    if weight_avg not in (None, "swa", "ema"):
+        raise ValueError(f"unknown weight_avg {weight_avg!r}")
+    avg_state, avg_n = None, 0
+    avg_from = int(avg_start_frac * epochs)
+
+    def _swap_in(state):
+        live = {k: v.detach().clone() for k, v in m.state_dict().items()}
+        m.load_state_dict(state)
+        return live
+
     for ep in range(epochs):
         if lr_schedule == "cosine":
             # Standard cosine from the base rate to zero over the whole budget,
@@ -1094,6 +1112,29 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
             opt.zero_grad(); loss.backward()
             opt.step()
 
+        if weight_avg is not None:
+            with torch.no_grad():
+                cur = m.state_dict()
+                if weight_avg == "ema":
+                    if avg_state is None:
+                        avg_state = {k: v.detach().clone()
+                                     for k, v in cur.items()}
+                    else:
+                        for k, v in cur.items():
+                            if v.is_floating_point():
+                                avg_state[k].mul_(ema_decay).add_(
+                                    v.detach(), alpha=1.0 - ema_decay)
+                elif ep >= avg_from:
+                    avg_n += 1
+                    if avg_state is None:
+                        avg_state = {k: v.detach().clone()
+                                     for k, v in cur.items()}
+                    else:
+                        for k, v in cur.items():
+                            if v.is_floating_point():
+                                avg_state[k].add_(
+                                    (v.detach() - avg_state[k]) / avg_n)
+
         if (ep + 1) % check_every == 0:
             m.train(False)
             with torch.no_grad():
@@ -1103,10 +1144,32 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
                     pr[tr], ty[tr]))
                 bce_st = float(torch.nn.functional.binary_cross_entropy(
                     pr[i_stop], ty[i_stop])) if has_stop else None
+                bce_avg = None
+                if avg_state is not None and has_stop:
+                    live = _swap_in(avg_state)
+                    pa, _, _ = m(tu[i_stop], tfeat[tp[i_stop]])
+                    bce_avg = float(torch.nn.functional.binary_cross_entropy(
+                        pa.clamp(EPS, 1 - EPS), ty[i_stop]))
+                    m.load_state_dict(live)
             print(f"  epoch {ep + 1:4d}/{epochs}  train {bce_tr:.4f}"
-                  + (f"  stop {bce_st:.4f}" if has_stop else ""), flush=True)
+                  + (f"  stop {bce_st:.4f}" if has_stop else "")
+                  + (f"  stop(avg) {bce_avg:.4f}" if bce_avg is not None
+                     else ""), flush=True)
             trace.append({"epoch": ep + 1, "train_bce": bce_tr,
-                          "stop_bce": bce_st})
+                          "stop_bce": bce_st, "stop_bce_avg": bce_avg})
+
+    if avg_state is not None:
+        # Ship the averaged weights, with the difficulty gauge re-measured over
+        # the training rows for exactly those weights.
+        m.load_state_dict(avg_state)
+        m.train(False)
+        with torch.no_grad():
+            rows = tp[tr]
+            braw = torch.cat([m.head(m.trunk(tfeat[rows[i:i + 65536]]))[:, 0]
+                              for i in range(0, len(rows), 65536)])
+            m.b_mu.copy_(braw.mean())
+            m.b_sd.copy_(braw.std() + EPS)
+        print(f"  shipped the {weight_avg} average of the weights", flush=True)
 
     # WHAT THE AXES ADD, on the held-aside rows, measured before the gauge is
     # pinned so both halves come from the state the last trace entry describes.
