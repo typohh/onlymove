@@ -433,8 +433,12 @@ class JointMIRT(nn.Module):
         # where the main slope is larger train the slope and difficulty.
         # "max_ramp" is the same with the hard ramp as the main slope: the
         # hockey stick with the floor and the slope fully separated.
+        # "clamp" / "clamp_ramp" extend the same to the lapse: the main slope
+        # runs from 0 to 1 and the curve is clamped between the floor and the
+        # ceiling, P = min(1 - lapse, max(floor, main)), so attempts on the
+        # slope train neither level and its midpoint steepness is slope / 4.
         if link not in ("sigmoid", "ramp_soft", "ramp_hard", "max_floor",
-                        "max_ramp"):
+                        "max_ramp", "clamp", "clamp_ramp"):
             raise ValueError(f"unknown link {link!r}")
         self.link = link
         if self.link_power:
@@ -594,11 +598,14 @@ class JointMIRT(nn.Module):
         # the rating's units.
         q = ((CALIBRATION_P - c) / (1.0 - c - lam)).clamp(EPS, 1.0 - EPS)
         r = b + torch.log(q / (1.0 - q)) / a.clamp(min=1e-6)
-        if self.link in ("max_floor", "max_ramp"):
-            main = (torch.sigmoid(z) if self.link == "max_floor"
+        if self.link in ("max_floor", "max_ramp", "clamp", "clamp_ramp"):
+            main = (torch.sigmoid(z) if self.link in ("max_floor", "clamp")
                     else (0.5 + z / 4.0).clamp(0.0, 1.0))
-            return (torch.maximum(c, (1.0 - lam) * main), g,
-                    torch.stack([r, a, c], dim=1).detach())
+            if self.link.startswith("max"):
+                p = torch.maximum(c, (1.0 - lam) * main)
+            else:
+                p = torch.minimum(torch.maximum(c, main), 1.0 - lam)
+            return (p, g, torch.stack([r, a, c], dim=1).detach())
         if self.link == "sigmoid":
             sz = torch.sigmoid(z)
         else:
