@@ -358,7 +358,7 @@ class JointMIRT(nn.Module):
                  dropout=DROPOUT, input_dropout=INPUT_DROPOUT, link_power=False,
                  link="sigmoid", lapse_fixed=None, gauge="sd",
                  floor_prior=False, floor_rel=False,
-                 slope_height=False):
+                 slope_height=False, floor_mode="trunk"):
         super().__init__()
         self.k_axes = int(k_axes)
         # The two dropout sites are separate parameters because they suppress
@@ -404,6 +404,19 @@ class JointMIRT(nn.Module):
         # the floor. The published triple is still an ordinary 4PL: the slope
         # written is the logistic one.
         self.slope_height = bool(slope_height)
+        # EXPERIMENT ("trunk" as shipped): where the floor comes from. "global"
+        # is one fitted floor for every problem; "bot" is a linear map from the
+        # bot win-rate columns and the board flag alone (everything past the
+        # activations), so the floor cannot draw on the activation trunk.
+        if floor_mode not in ("trunk", "global", "bot"):
+            raise ValueError(f"unknown floor_mode {floor_mode!r}")
+        self.floor_mode = floor_mode
+        if floor_mode == "global":
+            self.floor_global = nn.Parameter(torch.zeros(()))
+        elif floor_mode == "bot":
+            self.floor_lin = nn.Linear(int(fdim) - PCA_DIM, 1)
+            nn.init.zeros_(self.floor_lin.weight)
+            nn.init.zeros_(self.floor_lin.bias)
         # EXPERIMENT (off as shipped): an EMPIRICAL-BAYES prior on the floor's
         # raw output, normal with a FITTED mean and spread. A floor only the
         # weakest players' attempts can inform is otherwise set by wherever the
@@ -543,7 +556,12 @@ class JointMIRT(nn.Module):
         a = nn.functional.softplus(o[:, 1]).clamp(min=SLOPE_FLOOR)
         lam = self.lapse()
         cap = 1.0 - 2.0 * lam
-        c = cap * torch.sigmoid(a * o[:, 2] if self.floor_rel else o[:, 2])
+        if self.floor_mode == "global":
+            c = cap * torch.sigmoid(self.floor_global).expand_as(b)
+        elif self.floor_mode == "bot":
+            c = cap * torch.sigmoid(self.floor_lin(feat[:, PCA_DIM:])[:, 0])
+        else:
+            c = cap * torch.sigmoid(a * o[:, 2] if self.floor_rel else o[:, 2])
         if self.slope_height:
             a = a / (1.0 - c - lam)
         g = self.g_lin(h)
@@ -784,6 +802,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         link_power=False, link="sigmoid", lapse_fixed=None, gauge="sd",
         floor_prior=False, floor_rel=False, weight_avg=None,
         optimizer="adam", muon_lr=0.02, muon_wd=0.0, slope_height=False,
+        floor_mode="trunk",
         avg_start_frac=0.5,
         ema_decay=0.99,
         weight_decay=0.0, weight_decay_fields=None,
@@ -933,7 +952,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
                   link_power=link_power, link=link,
                   lapse_fixed=lapse_fixed, gauge=gauge,
                   floor_prior=floor_prior, floor_rel=floor_rel,
-                  slope_height=slope_height).to(device)
+                  slope_height=slope_height, floor_mode=floor_mode).to(device)
     prior_ratio = len(keys) / len(df)
     # Adam with no decay is what ships; the decay knob exists so 1.5's claim
     # that a norm penalty does not substitute for dropout can be re-measured,
