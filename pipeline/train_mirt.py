@@ -427,7 +427,14 @@ class JointMIRT(nn.Module):
         # centre, a straight line in probability: "ramp_hard" clamps it at both
         # levels, so the levels are truly flat and pass no gradient; "ramp_soft"
         # rounds the two corners over a tenth of the ramp.
-        if link not in ("sigmoid", "ramp_soft", "ramp_hard"):
+        # "max_floor": the main slope runs from 0 to the ceiling and the floor
+        # is a level the curve cannot fall below, P = max(floor, main). Only
+        # attempts where the floor is the larger term train it, and only those
+        # where the main slope is larger train the slope and difficulty.
+        # "max_ramp" is the same with the hard ramp as the main slope: the
+        # hockey stick with the floor and the slope fully separated.
+        if link not in ("sigmoid", "ramp_soft", "ramp_hard", "max_floor",
+                        "max_ramp"):
             raise ValueError(f"unknown link {link!r}")
         self.link = link
         if self.link_power:
@@ -587,6 +594,11 @@ class JointMIRT(nn.Module):
         # the rating's units.
         q = ((CALIBRATION_P - c) / (1.0 - c - lam)).clamp(EPS, 1.0 - EPS)
         r = b + torch.log(q / (1.0 - q)) / a.clamp(min=1e-6)
+        if self.link in ("max_floor", "max_ramp"):
+            main = (torch.sigmoid(z) if self.link == "max_floor"
+                    else (0.5 + z / 4.0).clamp(0.0, 1.0))
+            return (torch.maximum(c, (1.0 - lam) * main), g,
+                    torch.stack([r, a, c], dim=1).detach())
         if self.link == "sigmoid":
             sz = torch.sigmoid(z)
         else:
