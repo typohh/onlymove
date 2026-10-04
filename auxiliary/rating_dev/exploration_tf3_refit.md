@@ -253,3 +253,10 @@ Better on all five, mean −2.1 millinats. Agreement between seeds: floors 0.996
 - Muon at step 0.002 and 0.005 (judged on convergence speed and final held-out loss, per the user's expectation).
 - Slope from a linear map too (`slope_mode` = `bot` / `linear`), 3 seeds each.
 - Bot-floor seeds 5–6.
+
+### Update (2026-10-04, later)
+
+- **Slope from a linear map**, 3 seeds on the bot-floor baseline: `slope_mode="linear"` held-out −1.8 / −0.8 / +0.5, slopes agree 0.997, slope × spread 1.27–1.42, lapse 0.009–0.019; `slope_mode="bot"` +0.4 / +0.6 / +4.3, slopes agree 1.000, lapse 0.004–0.006. Both raise near-chance floors to 28k–34k and squeeze the difficulty IQR (0.51–0.67 against 1.06–1.26). Promising on stability; blocked by the near-chance floors. Seeds 3–6 of the linear slope queued, plus floor and slope both linear over every input.
+- **Bot-floor seeds 5–6** against plain: +3.7 and −3.1. Over seven seeds the held-out gain is −1.4 mean (spread 2.6), not significant; the case for the bot floor rests on stability (floors 0.996), not loss.
+- **Muon**, step 0.002 / 0.005, 7,000 epochs: ahead early (−4.4 at epoch 1,000), then overfits past ~3,000 and ends +4.3 / +4.0. At a 3,000-epoch budget, Muon against Adam: +1.4 / −0.6 (no difference). Both 3,000-epoch fits are within ~1–2 millinats of the 7,000-epoch Adam fit, so a shorter budget may be nearly free — worth a proper budget panel later. Muon itself: no gain here.
+- **Candidate-count floor bound**: SGF first-move variations enumerate nearly every legal move (median 63 against 63 legal cells), so one over their count is no useful lower bound for the floor.
