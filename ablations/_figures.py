@@ -154,6 +154,13 @@ def panel_regime(records, ramp_may_vary=False, mutual_may_vary=False):
     require(mutual_may_vary or len(mutual) == 1,
             f"the panel's arms ran mutual-orthogonality terms of {sorted(mutual)} "
             f"(weight, detached) — the panel straddles a baseline change")
+    # THE FLOOR'S SOURCE IS PART OF THE REGIME. A record that predates the
+    # knob drew its floor from the trunk's head, which is what the default
+    # reads.
+    floors = {str(r["metrics"].get("floor_mode", "trunk")) for r in records.values()}
+    require(len(floors) == 1,
+            f"the panel's arms drew their floors from {sorted(floors)} — the "
+            f"panel straddles a baseline change")
     return budgets.pop(), schedules.pop()
 
 

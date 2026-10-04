@@ -289,6 +289,14 @@ LABELS = os.path.join(AXES_DIR, "labels.json")
 
 
 RAMP_SHARPNESS = 10.0
+# THE FLOOR IS A LINEAR MAP OF THE BOT WIN-RATE COLUMNS AND THE BOARD FLAG, not
+# a row of the trunk's head. Floor and slope can stand in for each other across
+# most of the curve, so a floor free to draw on the whole trunk lands in a
+# different place every seed while the predictions barely move; a linear map of
+# a few dozen columns has no room to drift, and the floors it gives reproduce
+# across seeds. "trunk" (the head's own row) and "global" (one floor for all)
+# remain for comparison.
+FLOOR_MODE = "bot"
 
 
 def _orthogonalize(g, steps=5):
@@ -358,7 +366,7 @@ class JointMIRT(nn.Module):
                  dropout=DROPOUT, input_dropout=INPUT_DROPOUT, link_power=False,
                  link="sigmoid", lapse_fixed=None, gauge="sd",
                  floor_prior=False, floor_rel=False,
-                 slope_height=False, floor_mode="trunk"):
+                 slope_height=False, floor_mode=FLOOR_MODE):
         super().__init__()
         self.k_axes = int(k_axes)
         # The two dropout sites are separate parameters because they suppress
@@ -807,7 +815,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         link_power=False, link="sigmoid", lapse_fixed=None, gauge="sd",
         floor_prior=False, floor_rel=False, weight_avg=None,
         optimizer="adam", muon_lr=0.02, muon_wd=0.0, slope_height=False,
-        floor_mode="trunk",
+        floor_mode=FLOOR_MODE,
         avg_start_frac=0.5,
         ema_decay=0.99,
         weight_decay=0.0, weight_decay_fields=None,
@@ -1483,6 +1491,9 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
     # map this projection does not fold into a matrix (see write_mirt_per_cell).
     torch.save({"trunk": m.trunk.state_dict(), "head": m.head.state_dict(),
                 "g_lin": m.g_lin.state_dict(),
+                "floor_mode": floor_mode,
+                "floor_lin": (m.floor_lin.state_dict()
+                              if hasattr(m, "floor_lin") else None),
                 "b_mu": m.b_mu, "b_sd": m.b_sd,
                 "g_rms": m.g_rms.cpu()},
                os.path.join(out_dir, "mirt_model.pt"))
@@ -1524,6 +1535,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         "theta_synthetic": theta_synthetic,
         "lr_schedule": str(lr_schedule),
         "lr_warmup_epochs": int(lr_warmup_epochs),
+        "floor_mode": str(floor_mode),
         "ortho_axes": float(ortho_axes),
         "teach_detach": bool(teach_detach),
         "ortho_detach": bool(ortho_detach),

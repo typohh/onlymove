@@ -119,6 +119,7 @@ def snapshot_pins(cfg=None):
         # value.
         "epochs": int(cfg.get("epochs", train_mirt.EPOCHS)),
         "lr_schedule": str(cfg.get("lr_schedule", train_mirt.LR_SCHEDULE)),
+        "floor_mode": str(cfg.get("floor_mode", train_mirt.FLOOR_MODE)),
         "torch": torch.__version__,
         "gpu": (torch.cuda.get_device_name(0)
                 if torch.cuda.is_available() else "cpu"),

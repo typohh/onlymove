@@ -93,7 +93,7 @@ Local testing must go through `npm run dev`: the Worker runs `/report` and the S
 
 `P = c_p + (1 − c_p − λ)·σ( a_p·(θ_u − b_p) + Σ_k g_k(x_p)·v_u[k] )`
 
-**ONE TRUNK feeds every head, axes included** — a `Linear`'s output rows are independent, so this is exactly a shared head emitting `(b, a, c, g_1..g_K)`. The axis path is COUPLED, so the trunk learns what the AXES need and not only what the rating needs; detaching measures the same but is feature reuse rather than a joint fit.
+**ONE TRUNK feeds difficulty, slope and the axes** — a `Linear`'s output rows are independent, so this is exactly a shared head emitting `(b, a, g_1..g_K)`. The axis path is COUPLED, so the trunk learns what the AXES need and not only what the rating needs; detaching measures the same but is feature reuse rather than a joint fit. **The floor is NOT a trunk output: it is a linear map of the bot win-rate columns and the board flag (`FLOOR_MODE`).** Floor and slope can stand in for each other, so a floor free to read the whole trunk lands somewhere different every seed while predictions barely move; the linear floor reproduces across seeds. Don't move it back onto the trunk to "let it learn more" — that is the unstable arrangement. Evidence: `auxiliary/rating_dev/exploration_tf3_refit.md`.
 
 Method: `methodology.md` §1.5–§1.14. Evidence for every constant, ablation and sweep: `mirt_benchmark.md`. Six things bind from outside those:
 
