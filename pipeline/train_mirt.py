@@ -367,7 +367,7 @@ class JointMIRT(nn.Module):
                  link="sigmoid", lapse_fixed=None, gauge="sd",
                  floor_prior=False, floor_rel=False,
                  slope_height=False, floor_mode=FLOOR_MODE,
-                 slope_mode="trunk"):
+                 slope_mode="trunk", floor_cols=None):
         super().__init__()
         self.k_axes = int(k_axes)
         # The two dropout sites are separate parameters because they suppress
@@ -419,7 +419,11 @@ class JointMIRT(nn.Module):
         # activations), so the floor cannot draw on the activation trunk.
         # "linear" is a linear map from every input column, activations
         # included: low capacity like "bot", without restricting what it reads.
-        if floor_mode not in ("trunk", "global", "bot", "linear"):
+        # "weak_human" reads only the human-imitation bot at KYU strengths
+        # (`floor_cols`, indices into the columns past the activations): the
+        # floor as a calibration of how often a weak human-like player finds
+        # the answer.
+        if floor_mode not in ("trunk", "global", "bot", "linear", "weak_human"):
             raise ValueError(f"unknown floor_mode {floor_mode!r}")
         self.floor_mode = floor_mode
         # EXPERIMENT ("trunk" as shipped): where the slope comes from, as with
@@ -434,6 +438,10 @@ class JointMIRT(nn.Module):
             nn.init.zeros_(self.slope_lin.weight)
         if floor_mode == "global":
             self.floor_global = nn.Parameter(torch.zeros(()))
+        elif floor_mode == "weak_human":
+            self.register_buffer("floor_cols", torch.as_tensor(
+                list(floor_cols), dtype=torch.long))
+            self.floor_lin = nn.Linear(len(floor_cols), 1)
         elif floor_mode in ("bot", "linear"):
             self.floor_lin = nn.Linear(
                 int(fdim) - (PCA_DIM if floor_mode == "bot" else 0), 1)
@@ -592,6 +600,9 @@ class JointMIRT(nn.Module):
             c = cap * torch.sigmoid(self.floor_global).expand_as(b)
         elif self.floor_mode == "bot":
             c = cap * torch.sigmoid(self.floor_lin(feat[:, PCA_DIM:])[:, 0])
+        elif self.floor_mode == "weak_human":
+            c = cap * torch.sigmoid(self.floor_lin(
+                feat[:, PCA_DIM:][:, self.floor_cols])[:, 0])
         elif self.floor_mode == "linear":
             c = cap * torch.sigmoid(self.floor_lin(self._drop(feat))[:, 0])
         else:
@@ -981,13 +992,25 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
           f"directions, taught at a constant weight of {teach_weight}",
           flush=True)
 
+    floor_cols = None
+    if floor_mode == "weak_human":
+        import re
+        from utils.rating.features import bot_winrate_column_names
+        names = bot_winrate_column_names(SIZES)
+        if len(names) + 1 != fdim - PCA_DIM:
+            raise ValueError(f"{len(names)} bot files against "
+                             f"{fdim - PCA_DIM - 1} bot columns")
+        floor_cols = [i for i, n in enumerate(names)
+                      if re.search(r"humanv0_\d+k(_t[0-9.]+)?\.txt$", n)]
+        print(f"  floor reads {len(floor_cols)} weak human-bot columns",
+              flush=True)
     m = JointMIRT(fdim, n_users + len(synthetic), input_dim, seed, k_axes,
                   dropout=dropout, input_dropout=input_dropout,
                   link_power=link_power, link=link,
                   lapse_fixed=lapse_fixed, gauge=gauge,
                   floor_prior=floor_prior, floor_rel=floor_rel,
                   slope_height=slope_height, floor_mode=floor_mode,
-                  slope_mode=slope_mode).to(device)
+                  slope_mode=slope_mode, floor_cols=floor_cols).to(device)
     prior_ratio = len(keys) / len(df)
     # Adam with no decay is what ships; the decay knob exists so 1.5's claim
     # that a norm penalty does not substitute for dropout can be re-measured,

@@ -1123,6 +1123,18 @@ def _keep_bot_file(name, temperatures):
     return m.group(1) in keep["human" if "humanv0" in name else "network"]
 
 
+def bot_winrate_column_names(sizes, temperatures="all"):
+    """The bot files behind load_joint_bot_winrate's columns, in its order,
+    before its zero-variance drop (a caller relying on the names checks the
+    width matches)."""
+    import glob
+    filesets = [{os.path.basename(f) for f in glob.glob(
+        os.path.join(PROJECT_ROOT, "attempts", str(size), "*.txt"))}
+        for size in sizes]
+    return sorted(f for f in set.intersection(*filesets)
+                  if _keep_bot_file(f, temperatures))
+
+
 def load_joint_bot_winrate(sizes, tids_by_size, clip=1e-4, temperatures="all"):
     """Bot winrate in a shared column layout across boards (the bots are the same;
     a bot's logit pass-rate means the same thing on either board). Common file set =
