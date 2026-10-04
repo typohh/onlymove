@@ -500,8 +500,15 @@ class JointMIRT(nn.Module):
         # runs from 0 to 1 and the curve is clamped between the floor and the
         # ceiling, P = min(1 - lapse, max(floor, main)), so attempts on the
         # slope train neither level and its midpoint steepness is slope / 4.
+        # "odds_clamp" is the clamp made smooth in ODDS: the floor's odds and
+        # the main slope's odds ADD (a soft maximum, logit P ~ max(logit floor,
+        # z)), and the lapse's odds add to the failure odds (a soft minimum
+        # against the ceiling). Each level takes the gradient in proportion to
+        # its share of the odds, so near the slope's middle the floor and lapse
+        # get almost none, and nothing sets the width but the logit scale the
+        # sigmoid already has.
         if link not in ("sigmoid", "ramp_soft", "ramp_hard", "max_floor",
-                        "max_ramp", "clamp", "clamp_ramp"):
+                        "max_ramp", "clamp", "clamp_ramp", "odds_clamp"):
             raise ValueError(f"unknown link {link!r}")
         self.link = link
         if self.link_power:
@@ -688,6 +695,12 @@ class JointMIRT(nn.Module):
         # the rating's units.
         q = ((CALIBRATION_P - c) / (1.0 - c - lam)).clamp(EPS, 1.0 - EPS)
         r = b + torch.log(q / (1.0 - q)) / a.clamp(min=1e-6)
+        if self.link == "odds_clamp":
+            lc = torch.log(c.clamp(EPS, 1 - EPS)) - torch.log1p(-c.clamp(EPS, 1 - EPS))
+            ll = torch.log(lam) - torch.log1p(-lam)
+            low = torch.logaddexp(lc, z)                 # log odds, floor + slope
+            lp = -torch.logaddexp(-low, ll)              # log odds after the lapse
+            return (torch.sigmoid(lp), g, torch.stack([r, a, c], dim=1).detach())
         if self.link in ("max_floor", "max_ramp", "clamp", "clamp_ramp"):
             main = (torch.sigmoid(z) if self.link in ("max_floor", "clamp")
                     else (0.5 + z / 4.0).clamp(0.0, 1.0))
