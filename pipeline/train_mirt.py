@@ -367,7 +367,8 @@ class JointMIRT(nn.Module):
                  link="sigmoid", lapse_fixed=None, gauge="sd",
                  floor_prior=False, floor_rel=False,
                  slope_height=False, floor_mode=FLOOR_MODE,
-                 slope_mode="trunk", floor_cols=None):
+                 slope_mode="trunk", floor_cols=None,
+                 hidden=None):
         super().__init__()
         self.k_axes = int(k_axes)
         # The two dropout sites are separate parameters because they suppress
@@ -380,7 +381,11 @@ class JointMIRT(nn.Module):
         # theta before the trunk so the RNG draw order is fixed. nn.Embedding
         # initializes to N(0, 1) itself, so there is nothing to re-draw.
         self.theta = nn.Embedding(n_users, 1)
-        self.trunk, d = build_trunk(fdim, dropout=dropout)
+        # EXPERIMENT (None = the shipped DIFF_HIDDEN): the trunk's hidden
+        # widths; () makes every head a linear map of the inputs.
+        self.trunk, d = (build_trunk(fdim, dropout=dropout) if hidden is None
+                         else build_trunk(fdim, dropout=dropout,
+                                          hidden=tuple(hidden)))
         self.head = nn.Linear(d, 3)                     # difficulty, slope, floor
         # The axis map, on the TRUNK's representation. Same linear map, different
         # input: it adds no capacity (fewer parameters than reading the 212
@@ -847,7 +852,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         link_power=False, link="sigmoid", lapse_fixed=None, gauge="sd",
         floor_prior=False, floor_rel=False, weight_avg=None,
         optimizer="adam", muon_lr=0.02, muon_wd=0.0, slope_height=False,
-        floor_mode=FLOOR_MODE, slope_mode="trunk",
+        floor_mode=FLOOR_MODE, slope_mode="trunk", hidden=None,
         avg_start_frac=0.5,
         ema_decay=0.99,
         weight_decay=0.0, weight_decay_fields=None,
@@ -1010,7 +1015,8 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
                   lapse_fixed=lapse_fixed, gauge=gauge,
                   floor_prior=floor_prior, floor_rel=floor_rel,
                   slope_height=slope_height, floor_mode=floor_mode,
-                  slope_mode=slope_mode, floor_cols=floor_cols).to(device)
+                  slope_mode=slope_mode, floor_cols=floor_cols,
+                  hidden=hidden).to(device)
     prior_ratio = len(keys) / len(df)
     # Adam with no decay is what ships; the decay knob exists so 1.5's claim
     # that a norm penalty does not substitute for dropout can be re-measured,
