@@ -274,3 +274,14 @@ Better on all five, mean −2.1 millinats. Agreement between seeds: floors 0.996
 **Baseline note (user):** the adopted floor is the LINEAR map over every input (`FLOOR_MODE = "linear"`), not the bot-only one; comparisons from here are against the linear-floor fits (`ho_flin_*`: 0.4913 / 0.4803 / 0.4963 at seeds 0–2).
 
 - **Floor with its own nonlinear trunk** (`floor_mode="own_trunk"`), 3 seeds: memorizes (training 0.400 against held-out 0.49–0.51); held-out +6.4 / +11.4 / +9.3 against the linear floor; floors swing high (median 0.61–0.64, 18–20% above 0.8, 7% near chance); seeds 0–1 agree on floors 0.85 but on ratings only 0.88. Separating the floor's parameters is not enough — its capacity is the problem. Rejected.
+- **Hockey sticks with the linear floor**, seeds 0–1 (paired against the linear floor):
+
+  | | Clamped ramp (`clamp_ramp`) | Floor-bound ramp (`max_ramp`) | Linear floor, sigmoid |
+  |---|---|---|---|
+  | Held-out difference | +7.2 / +5.3 | +4.7 / +8.6 | — |
+  | Floor / slope / rating agreement (seeds 0–1) | 0.98 / 0.92 / 0.98 | 0.93 / 0.94 / 0.97 | 0.99 / 0.76 / 0.97 |
+  | Lapse | 0.014 / 0.017 | 0.012 / 0.010 | 0.007 / 0.037 |
+  | Floors near chance | 1.2k / 2.5k | 0.7k / 1.4k | 10.0k / 10.1k |
+  | Floors above 0.8 | 3.1k / 3.7k | 3.4k / 3.3k | 3.9k / 3.0k |
+
+  With the linear floor the hockey sticks are consistent: slopes agree far better than with the sigmoid (0.92–0.94 against 0.76), the lapse is steady, and near-chance floors fall by 4–13×. The cost is 5–9 millinats of held-out loss. Consistent, so seed 2 of both is queued.
