@@ -289,14 +289,14 @@ LABELS = os.path.join(AXES_DIR, "labels.json")
 
 
 RAMP_SHARPNESS = 10.0
-# THE FLOOR IS A LINEAR MAP OF THE BOT WIN-RATE COLUMNS AND THE BOARD FLAG, not
-# a row of the trunk's head. Floor and slope can stand in for each other across
-# most of the curve, so a floor free to draw on the whole trunk lands in a
-# different place every seed while the predictions barely move; a linear map of
-# a few dozen columns has no room to drift, and the floors it gives reproduce
-# across seeds. "trunk" (the head's own row) and "global" (one floor for all)
-# remain for comparison.
-FLOOR_MODE = "bot"
+# THE FLOOR IS A LINEAR MAP OF THE INPUTS, not a row of the trunk's head: the
+# same columns everything else reads, without passing through the shared
+# trunk. Floor and slope can stand in for each other across most of the curve,
+# so a floor free to draw on the trunk lands in a different place every seed
+# while the predictions barely move; a linear map has no room to drift, and the
+# floors it gives reproduce across seeds. "trunk" (the head's own row), "bot"
+# (the bot columns only) and the other sources remain for comparison.
+FLOOR_MODE = "linear"
 
 
 def _orthogonalize(g, steps=5):
