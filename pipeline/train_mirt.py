@@ -428,7 +428,10 @@ class JointMIRT(nn.Module):
         # (`floor_cols`, indices into the columns past the activations): the
         # floor as a calibration of how often a weak human-like player finds
         # the answer.
-        if floor_mode not in ("trunk", "global", "bot", "linear", "weak_human"):
+        # "own_trunk" gives the floor a trunk of its own, the same shape as the
+        # shared one but sharing no weights with difficulty, slope or axes.
+        if floor_mode not in ("trunk", "global", "bot", "linear", "weak_human",
+                              "own_trunk"):
             raise ValueError(f"unknown floor_mode {floor_mode!r}")
         self.floor_mode = floor_mode
         # EXPERIMENT ("global" as shipped): "linear" gives every problem its own
@@ -452,6 +455,9 @@ class JointMIRT(nn.Module):
             nn.init.zeros_(self.slope_lin.weight)
         if floor_mode == "global":
             self.floor_global = nn.Parameter(torch.zeros(()))
+        elif floor_mode == "own_trunk":
+            self.floor_trunk, d_f = build_trunk(fdim, dropout=dropout)
+            self.floor_out = nn.Linear(d_f, 1)
         elif floor_mode == "weak_human":
             self.register_buffer("floor_cols", torch.as_tensor(
                 list(floor_cols), dtype=torch.long))
@@ -618,6 +624,9 @@ class JointMIRT(nn.Module):
             c = cap * torch.sigmoid(self.floor_global).expand_as(b)
         elif self.floor_mode == "bot":
             c = cap * torch.sigmoid(self.floor_lin(feat[:, PCA_DIM:])[:, 0])
+        elif self.floor_mode == "own_trunk":
+            c = cap * torch.sigmoid(
+                self.floor_out(self.floor_trunk(self._drop(feat)))[:, 0])
         elif self.floor_mode == "weak_human":
             c = cap * torch.sigmoid(self.floor_lin(
                 feat[:, PCA_DIM:][:, self.floor_cols])[:, 0])
