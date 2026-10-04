@@ -213,3 +213,43 @@ A bug was found and fixed along the way: re-measuring the difficulty gauge in ev
 - No dropout with weight decay 0.01 / 0.03 / 0.1 / 0.3.
 - Muon on the trunk matrices (`optimizer="muon"`), seeds 0–1.
 - Dropout 0.4 / 0.5 and a doubled batch, seeds 0–2.
+
+## Addendum (2026-10-04): the floor moves off the trunk — adopted
+
+**Adopted (user): the floor is a linear map of the bot win-rate columns and the board flag** (`FLOOR_MODE = "bot"`), no longer a row of the trunk's head. The floor's source is now part of the ablation regime (`panel_regime`), and old records read as `"trunk"`.
+
+Five paired seeds against the plain fit (trunk floor):
+
+| Seed | Plain held-out | Bot-floor held-out | Difference |
+|---|---|---|---|
+| 0 | 0.4926 | 0.4918 | −0.8 |
+| 1 | 0.4882 | 0.4837 | −4.5 |
+| 2 | 0.4983 | 0.4956 | −2.7 |
+| 3 | 0.4935 | 0.4921 | −1.4 |
+| 4 | 0.4884 | 0.4871 | −1.3 |
+
+Better on all five, mean −2.1 millinats. Agreement between seeds: floors 0.996 (plain 0.53), slopes 0.82 (plain 0.71), ratings 0.97 (unchanged). Lapse 0.004–0.026. High floors (above 0.6 in every seed: 11,526 problems) include the one-obvious-move positions the user judged legitimate (`3a3434b2`, `04aba1a0`).
+
+**Known fault, open:** 5–10% of floors sit within 0.05 of chance, reproducibly (12,068 in all three of the first seeds; their attempted ones are solved 70.9% of the time). Some are positions the user judged should not be near chance (`0f58c3a7`, `107189c5`).
+
+### Other results in this round
+
+| Experiment | Result | Verdict |
+|---|---|---|
+| Floor-independent midpoint slope (`slope_height`) | held-out +9.8 / −5.3 / +7.3; floors collapse to chance (70k–112k); floor agreement −0.19 | rejected |
+| Floor as a lower bound, sigmoid (`link="max_floor"`), 3 seeds | held-out +11.7 / +3.6 / +6.6; floors tidy (no extremes) but agreement 0.46; lapse → 0 | rejected |
+| Curve clamped between floor and ceiling, sigmoid (`link="clamp"`), 3 seeds | +11.0 / −2.8 / +7.5; floor agreement 0.49; lapse → 0 | rejected |
+| Bound / clamp with the hard ramp, seed 0 | −2.0 / +4.8; collapsed solution (lapse at cap, difficulties squeezed) | rejected |
+| One global floor (`floor_mode="global"`) | +7.7 / +1.6 / +8.4 | rejected: per-problem floors carry real value |
+| Floor linear over every input (`floor_mode="linear"`), 3 seeds | −1.4 / −8.0 / −2.0 vs plain; floors agree 0.993 but run higher (median 0.41–0.49, 2,200–3,900 above 0.8); slopes agree 0.76 | comparable to the bot floor; the bot floor kept (simpler, slopes steadier) |
+| No dropout, coupled weight decay 0.01 / 0.03 | unstable mid-run; held-out 0.534 / 0.528; floors constant | rejected |
+| No dropout, decoupled weight decay (AdamW) 0.1 / 1 | 0.1 memorizes (held-out 0.741); 1 breaks down mid-run (0.645) | rejected: dropout stays |
+| Dropout 0.5 (trunk floor), 3 seeds | collapsed solutions on all three (slope × spread 0.11–0.66) | rejected |
+| Doubled batch (trunk floor), 3 seeds | +7.1 / −0.7 / +7.6; floor agreement 0.43, slopes 0.54 | rejected |
+| Muon on the trunk, step 0.02, 2 seeds | training stalls by epoch 1,000–2,000 (train 0.508); outputs constant | step size far too large; 0.002 / 0.005 queued |
+
+### Queued under the new baseline
+
+- Muon at step 0.002 and 0.005 (judged on convergence speed and final held-out loss, per the user's expectation).
+- Slope from a linear map too (`slope_mode` = `bot` / `linear`), 3 seeds each.
+- Bot-floor seeds 5–6.
