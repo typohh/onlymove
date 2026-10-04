@@ -408,13 +408,16 @@ class JointMIRT(nn.Module):
         # is one fitted floor for every problem; "bot" is a linear map from the
         # bot win-rate columns and the board flag alone (everything past the
         # activations), so the floor cannot draw on the activation trunk.
-        if floor_mode not in ("trunk", "global", "bot"):
+        # "linear" is a linear map from every input column, activations
+        # included: low capacity like "bot", without restricting what it reads.
+        if floor_mode not in ("trunk", "global", "bot", "linear"):
             raise ValueError(f"unknown floor_mode {floor_mode!r}")
         self.floor_mode = floor_mode
         if floor_mode == "global":
             self.floor_global = nn.Parameter(torch.zeros(()))
-        elif floor_mode == "bot":
-            self.floor_lin = nn.Linear(int(fdim) - PCA_DIM, 1)
+        elif floor_mode in ("bot", "linear"):
+            self.floor_lin = nn.Linear(
+                int(fdim) - (PCA_DIM if floor_mode == "bot" else 0), 1)
             nn.init.zeros_(self.floor_lin.weight)
             nn.init.zeros_(self.floor_lin.bias)
         # EXPERIMENT (off as shipped): an EMPIRICAL-BAYES prior on the floor's
@@ -560,6 +563,8 @@ class JointMIRT(nn.Module):
             c = cap * torch.sigmoid(self.floor_global).expand_as(b)
         elif self.floor_mode == "bot":
             c = cap * torch.sigmoid(self.floor_lin(feat[:, PCA_DIM:])[:, 0])
+        elif self.floor_mode == "linear":
+            c = cap * torch.sigmoid(self.floor_lin(self._drop(feat))[:, 0])
         else:
             c = cap * torch.sigmoid(a * o[:, 2] if self.floor_rel else o[:, 2])
         if self.slope_height:
