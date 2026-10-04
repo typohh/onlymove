@@ -368,7 +368,7 @@ class JointMIRT(nn.Module):
                  floor_prior=False, floor_rel=False,
                  slope_height=False, floor_mode=FLOOR_MODE,
                  slope_mode="trunk", floor_cols=None,
-                 hidden=None):
+                 hidden=None, lapse_mode="global"):
         super().__init__()
         self.k_axes = int(k_axes)
         # The two dropout sites are separate parameters because they suppress
@@ -431,6 +431,15 @@ class JointMIRT(nn.Module):
         if floor_mode not in ("trunk", "global", "bot", "linear", "weak_human"):
             raise ValueError(f"unknown floor_mode {floor_mode!r}")
         self.floor_mode = floor_mode
+        # EXPERIMENT ("global" as shipped): "linear" gives every problem its own
+        # lapse, a linear map of every input column under the same cap.
+        if lapse_mode not in ("global", "linear"):
+            raise ValueError(f"unknown lapse_mode {lapse_mode!r}")
+        self.lapse_mode = lapse_mode
+        if lapse_mode == "linear":
+            self.lapse_lin = nn.Linear(int(fdim), 1)
+            nn.init.zeros_(self.lapse_lin.weight)
+            nn.init.constant_(self.lapse_lin.bias, float(np.log(li / (1.0 - li))))
         # EXPERIMENT ("trunk" as shipped): where the slope comes from, as with
         # the floor — "bot" a linear map of the bot columns and board flag,
         # "linear" a linear map of every input column.
@@ -599,7 +608,11 @@ class JointMIRT(nn.Module):
         else:
             so = o[:, 1]
         a = nn.functional.softplus(so).clamp(min=SLOPE_FLOOR)
-        lam = self.lapse()
+        if self.lapse_mode == "linear":
+            lam = LAPSE_CAP * torch.sigmoid(self.lapse_lin(self._drop(feat))[:, 0])
+        else:
+            lam = self.lapse()
+        self._last_lam = lam
         cap = 1.0 - 2.0 * lam
         if self.floor_mode == "global":
             c = cap * torch.sigmoid(self.floor_global).expand_as(b)
@@ -652,7 +665,7 @@ class JointMIRT(nn.Module):
     def forward(self, uid, feat):
         b, a, c, g = self.problem_params(feat)
         th = self.theta(uid).squeeze(-1)
-        lam = self.lapse()
+        lam = self._last_lam
         z = (a * (th - b) + (g * self.user_axis(uid)).sum(-1)).clamp(-35, 35)
         # The SHIPPED per-problem triple, returned DETACHED for the rating-
         # orthogonality penalty: rating, slope, floor — exactly what packaging
@@ -853,6 +866,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         floor_prior=False, floor_rel=False, weight_avg=None,
         optimizer="adam", muon_lr=0.02, muon_wd=0.0, slope_height=False,
         floor_mode=FLOOR_MODE, slope_mode="trunk", hidden=None,
+        lapse_mode="global",
         avg_start_frac=0.5,
         ema_decay=0.99,
         weight_decay=0.0, weight_decay_fields=None,
@@ -1016,7 +1030,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
                   floor_prior=floor_prior, floor_rel=floor_rel,
                   slope_height=slope_height, floor_mode=floor_mode,
                   slope_mode=slope_mode, floor_cols=floor_cols,
-                  hidden=hidden).to(device)
+                  hidden=hidden, lapse_mode=lapse_mode).to(device)
     prior_ratio = len(keys) / len(df)
     # Adam with no decay is what ships; the decay knob exists so 1.5's claim
     # that a norm penalty does not substitute for dropout can be re-measured,
