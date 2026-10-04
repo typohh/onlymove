@@ -366,7 +366,8 @@ class JointMIRT(nn.Module):
                  dropout=DROPOUT, input_dropout=INPUT_DROPOUT, link_power=False,
                  link="sigmoid", lapse_fixed=None, gauge="sd",
                  floor_prior=False, floor_rel=False,
-                 slope_height=False, floor_mode=FLOOR_MODE):
+                 slope_height=False, floor_mode=FLOOR_MODE,
+                 slope_mode="trunk"):
         super().__init__()
         self.k_axes = int(k_axes)
         # The two dropout sites are separate parameters because they suppress
@@ -421,6 +422,16 @@ class JointMIRT(nn.Module):
         if floor_mode not in ("trunk", "global", "bot", "linear"):
             raise ValueError(f"unknown floor_mode {floor_mode!r}")
         self.floor_mode = floor_mode
+        # EXPERIMENT ("trunk" as shipped): where the slope comes from, as with
+        # the floor — "bot" a linear map of the bot columns and board flag,
+        # "linear" a linear map of every input column.
+        if slope_mode not in ("trunk", "bot", "linear"):
+            raise ValueError(f"unknown slope_mode {slope_mode!r}")
+        self.slope_mode = slope_mode
+        if slope_mode != "trunk":
+            self.slope_lin = nn.Linear(
+                int(fdim) - (PCA_DIM if slope_mode == "bot" else 0), 1)
+            nn.init.zeros_(self.slope_lin.weight)
         if floor_mode == "global":
             self.floor_global = nn.Parameter(torch.zeros(()))
         elif floor_mode in ("bot", "linear"):
@@ -536,6 +547,10 @@ class JointMIRT(nn.Module):
     def slope_logit(self, feat):
         """Pre-softplus slope output — the space the barrier acts in, where the
         penalty falls away properly for healthy slopes."""
+        if self.slope_mode == "bot":
+            return self.slope_lin(feat[:, PCA_DIM:])[:, 0]
+        if self.slope_mode == "linear":
+            return self.slope_lin(feat)[:, 0]
         return self.head(self.trunk(feat))[:, 1]
 
     def problem_params(self, feat, pin_gauge=False):
@@ -564,7 +579,13 @@ class JointMIRT(nn.Module):
         else:
             mu, sd = self.b_mu, self.b_sd
         b = (b - mu) / sd
-        a = nn.functional.softplus(o[:, 1]).clamp(min=SLOPE_FLOOR)
+        if self.slope_mode == "bot":
+            so = self.slope_lin(feat[:, PCA_DIM:])[:, 0]
+        elif self.slope_mode == "linear":
+            so = self.slope_lin(self._drop(feat))[:, 0]
+        else:
+            so = o[:, 1]
+        a = nn.functional.softplus(so).clamp(min=SLOPE_FLOOR)
         lam = self.lapse()
         cap = 1.0 - 2.0 * lam
         if self.floor_mode == "global":
@@ -815,7 +836,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         link_power=False, link="sigmoid", lapse_fixed=None, gauge="sd",
         floor_prior=False, floor_rel=False, weight_avg=None,
         optimizer="adam", muon_lr=0.02, muon_wd=0.0, slope_height=False,
-        floor_mode=FLOOR_MODE,
+        floor_mode=FLOOR_MODE, slope_mode="trunk",
         avg_start_frac=0.5,
         ema_decay=0.99,
         weight_decay=0.0, weight_decay_fields=None,
@@ -965,7 +986,8 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
                   link_power=link_power, link=link,
                   lapse_fixed=lapse_fixed, gauge=gauge,
                   floor_prior=floor_prior, floor_rel=floor_rel,
-                  slope_height=slope_height, floor_mode=floor_mode).to(device)
+                  slope_height=slope_height, floor_mode=floor_mode,
+                  slope_mode=slope_mode).to(device)
     prior_ratio = len(keys) / len(df)
     # Adam with no decay is what ships; the decay knob exists so 1.5's claim
     # that a norm penalty does not substitute for dropout can be re-measured,
