@@ -805,9 +805,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     logStartupVersions();
 
     updateBoardSize();
-    // Using CSS vi units for responsive sizing, but still need to update the WGo
-    // board on resize.
-    window.addEventListener('resize', () => updateBoardSize());
+    // The WGo canvas takes its pixel size from #board-container, so it follows
+    // the CONTAINER, not the window. The container is sized by viewport tokens
+    // that include env(safe-area-inset-*), and an inset change fires no window
+    // 'resize' — a window listener leaves the canvas at whatever size the
+    // container had at init until something (a rotation) does fire one.
+    new ResizeObserver(() => updateBoardSize())
+        .observe(document.getElementById('board-container'));
 
     // Static UI wiring (persistent elements, registered once).
     initCornerMark();

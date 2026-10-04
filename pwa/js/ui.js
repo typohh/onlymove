@@ -622,10 +622,21 @@ export function updateBoardSize() {
     const boardElement = document.getElementById('board-container');
     const computedStyle = window.getComputedStyle(boardElement);
     const boardSize = parseInt(computedStyle.width);
+    // Recorded in CSS pixels on the board itself: WGo's own width/height are
+    // device pixels, and a freshly built board has none recorded, so it is
+    // always sized once.
+    const applied = state.board._appliedCssSize;
+    if (applied === boardSize) return;
+    if (applied !== undefined) {
+        // For the on-device debug viewer: a resize with the window dimensions
+        // unchanged is one only the container saw.
+        console.log(`Board resize ${applied} -> ${boardSize} (window ${window.innerWidth}x${window.innerHeight})`);
+    }
 
     // Update WGo board dimensions
     state.board.setWidth(boardSize);
     state.board.setHeight(boardSize);
+    state.board._appliedCssSize = boardSize;
 }
 
 // The small label above the header slot, naming what the slot shows: the
