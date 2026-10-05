@@ -445,11 +445,14 @@ class JointMIRT(nn.Module):
             nn.init.constant_(self.lapse_lin.bias, float(np.log(li / (1.0 - li))))
         # EXPERIMENT ("trunk" as shipped): where the slope comes from, as with
         # the floor — "bot" a linear map of the bot columns and board flag,
-        # "linear" a linear map of every input column.
-        if slope_mode not in ("trunk", "bot", "linear"):
+        # "linear" a linear map of every input column, "global" one slope
+        # shared by every problem.
+        if slope_mode not in ("trunk", "bot", "linear", "global"):
             raise ValueError(f"unknown slope_mode {slope_mode!r}")
         self.slope_mode = slope_mode
-        if slope_mode != "trunk":
+        if slope_mode == "global":
+            self.slope_global = nn.Parameter(torch.zeros(()))
+        elif slope_mode != "trunk":
             self.slope_lin = nn.Linear(
                 int(fdim) - (PCA_DIM if slope_mode == "bot" else 0), 1)
             nn.init.zeros_(self.slope_lin.weight)
@@ -602,6 +605,8 @@ class JointMIRT(nn.Module):
             return self.slope_lin(feat[:, PCA_DIM:])[:, 0]
         if self.slope_mode == "linear":
             return self.slope_lin(feat)[:, 0]
+        if self.slope_mode == "global":
+            return self.slope_global.expand(feat.shape[0])
         return self.head(self.trunk(feat))[:, 1]
 
     def _blend_floor(self, cap, raw):
@@ -639,6 +644,8 @@ class JointMIRT(nn.Module):
             so = self.slope_lin(feat[:, PCA_DIM:])[:, 0]
         elif self.slope_mode == "linear":
             so = self.slope_lin(self._drop(feat))[:, 0]
+        elif self.slope_mode == "global":
+            so = self.slope_global.expand_as(b)
         else:
             so = o[:, 1]
         if self.blend_frac:
