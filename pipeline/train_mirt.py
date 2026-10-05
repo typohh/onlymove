@@ -1206,18 +1206,19 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
             loss = torch.nn.functional.binary_cross_entropy(
                 pred, yb, reduction="none").sum() / len(bi)
             if theta_moments:
-                # EXPERIMENT: hold the users' abilities to the same gauge the
-                # difficulty is held to — mean 0, sd 1 — by a squared penalty
-                # on the population's moments. Nothing else prices an ability's
-                # distance from everyone, so a user can otherwise be parked
-                # arbitrarily far below every problem and explained by the
-                # floors; under this a far outlier inflates the spread
-                # quadratically and is held near the edge, where the fit can
-                # still pull it back. (A learned per-user spread was tried
-                # first and collapses every ability to one value.)
+                # EXPERIMENT: a squared penalty pulling the abilities' mean and
+                # spread toward zero, which the likelihood resists — no target
+                # spread is asserted. Nothing else prices an ability's distance
+                # from everyone, so a user can otherwise be parked arbitrarily
+                # far below every problem and explained by the floors; under
+                # this a far outlier inflates the spread quadratically and is
+                # held near the edge, where the fit can still pull it back.
+                # mean^2 + var is the population's second moment, i.e. a ridge
+                # of the same weight on every user. (A learned per-user spread
+                # was tried first and collapses every ability to one value.)
                 th_all = m.theta.weight[:n_users, 0]
                 loss = loss + theta_moments * (th_all.mean() ** 2
-                                               + (th_all.std() - 1.0) ** 2)
+                                               + th_all.var(unbiased=False))
             # SHRINK WHAT THE LIKELIHOOD READS. user_axis, not the raw
             # parameter: the two differ by the population mean, which is a
             # direction no prediction depends on, so a ridge on raw v spends
