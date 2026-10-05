@@ -973,6 +973,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         pca_dim=PCA_DIM, blocks=PRODUCTION_BLOCKS, act_source="store",
         stop_unit="row",
         split_seed=None, pca_seed=None, init_seed=None, stream_seed=None,
+        snapshot_epochs=None,
         lr_schedule=LR_SCHEDULE,
         lr_warmup_epochs=0, ortho_axes=ORTHO_AXES,
         teach_detach=False, ortho_detach=False,
@@ -1251,6 +1252,20 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
     for ep in range(epochs):
         if blend_frac:
             m.blend_w.fill_(min(1.0, ep / max(blend_frac * epochs, 1.0)))
+        if snapshot_epochs and ep in snapshot_epochs:
+            # Diagnostic: the per-problem triple at this epoch, read at eval
+            # (the gauges' EMAs, nothing ticked), for following when two
+            # replicates' floors and slopes part ways.
+            m.train(False)
+            with torch.no_grad():
+                sb, sa, sc, _ = m.problem_params(tfeat)
+                sl = float(m._last_lam.mean()) if torch.is_tensor(m._last_lam) else float(m._last_lam)
+            m.train(True)
+            os.makedirs(out_dir, exist_ok=True)
+            np.savez(os.path.join(out_dir, f"snap_{ep}.npz"),
+                     b=sb.cpu().numpy(), a=sa.cpu().numpy(),
+                     c=sc.cpu().numpy(), lam=sl,
+                     theta=m.theta.weight.detach().cpu().numpy().ravel())
         if stage_frac and ep == int(stage_frac * epochs):
             m.start_stage2()
             print(f"  stage 2 from epoch {ep}: global floor "
