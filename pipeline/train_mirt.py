@@ -941,7 +941,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         ortho_axes_detach=ORTHO_AXES_DETACH,
         v_ridge_ladder=1.0,
         k_axes=K_AXES, dropout=DROPOUT, input_dropout=INPUT_DROPOUT,
-        link_power=False, link="sigmoid", odds_sharpness=1.0, blend_frac=None, theta_moments=None, rating_anchor=None, curve_param="ab", lapse_fixed=None, gauge="sd",
+        link_power=False, link="sigmoid", odds_sharpness=1.0, blend_frac=None, theta_moments=None, rating_anchor=None, anchor_skip=30, curve_param="ab", lapse_fixed=None, gauge="sd",
         floor_prior=False, floor_rel=False, weight_avg=None,
         optimizer="adam", muon_lr=0.02, muon_wd=0.0, slope_height=False,
         floor_mode=FLOOR_MODE, slope_mode="trunk", hidden=None,
@@ -1035,6 +1035,11 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         tp_all.append(every)
         ty_all.append(torch.tensor(target, dtype=torch.float32, device=device))
     tu_all, tp_all, ty_all = (torch.cat(t) for t in (tu_all, tp_all, ty_all))
+    # Each real row's place in its user's history (0 = first attempt), for the
+    # rating anchor; synthetic rows get 0 and are excluded there anyway.
+    seq = df.groupby("user_id")["created_at"].rank(method="first").to_numpy() - 1
+    t_seq = torch.zeros(len(tu_all), device=device)
+    t_seq[:len(df)] = torch.tensor(seq, dtype=torch.float32, device=device)
 
     # A measurement for comparison arms, never a criterion: every row spent here
     # is a row the model does not learn from, so the shipped fit spends none.
@@ -1247,10 +1252,15 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
                 # attempts exactly as the likelihood does; a parked user, far
                 # from every problem they played, pays quadratically. Rows
                 # whose problem has no 80% point inside the curve are left out, and
-                # so are the synthetic users, who belong far from the problems.
+                # so are the synthetic users, who belong far from the problems,
+                # and each user's first `anchor_skip` attempts: before serving
+                # has found a user's level, what they are served says little
+                # about where they are (clearance settles near 0.78 from about
+                # the 30th first-time attempt on).
                 r_row, c_row = rsf[:, 0], rsf[:, 2]
                 q_row = (CALIBRATION_P - c_row) / (1.0 - c_row - m._last_lam)
-                ok = (q_row > 0.01) & (q_row < 0.99) & (tu_all[bi] < n_users)
+                ok = ((q_row > 0.01) & (q_row < 0.99) & (tu_all[bi] < n_users)
+                      & (t_seq[bi] >= anchor_skip))
                 th_row = m.theta(tu_all[bi]).squeeze(-1)
                 loss = loss + rating_anchor * (
                     (th_row - r_row) ** 2 * ok).sum() / len(bi)
