@@ -972,7 +972,8 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         teach_weight=TEACH_WEIGHT, stop_row_frac=STOP_ROW_FRAC,
         pca_dim=PCA_DIM, blocks=PRODUCTION_BLOCKS, act_source="store",
         stop_unit="row",
-        split_seed=None, pca_seed=None, lr_schedule=LR_SCHEDULE,
+        split_seed=None, pca_seed=None, init_seed=None, stream_seed=None,
+        lr_schedule=LR_SCHEDULE,
         lr_warmup_epochs=0, ortho_axes=ORTHO_AXES,
         teach_detach=False, ortho_detach=False,
         ortho_axes_detach=ORTHO_AXES_DETACH,
@@ -1154,7 +1155,8 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
                       if re.search(r"humanv0_\d+k(_t[0-9.]+)?\.txt$", n)]
         print(f"  floor reads {len(floor_cols)} weak human-bot columns",
               flush=True)
-    m = JointMIRT(fdim, n_users + len(synthetic), input_dim, seed, k_axes,
+    m = JointMIRT(fdim, n_users + len(synthetic), input_dim,
+                  seed if init_seed is None else init_seed, k_axes,
                   dropout=dropout, input_dropout=input_dropout,
                   link_power=link_power, link=link, odds_sharpness=odds_sharpness,
                   blend_frac=blend_frac, stage_frac=stage_frac,
@@ -1164,6 +1166,12 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
                   slope_height=slope_height, floor_mode=floor_mode,
                   slope_mode=slope_mode, floor_cols=floor_cols,
                   hidden=hidden, lapse_mode=lapse_mode).to(device)
+    # The training stream — minibatch order and dropout masks — runs on the
+    # global RNG the model's initialisation left behind, so by default it is a
+    # function of the init seed. `stream_seed` re-seeds it after construction,
+    # separating the two for the replicate study.
+    if stream_seed is not None:
+        torch.manual_seed(stream_seed)
     prior_ratio = len(keys) / len(df)
     # Adam with no decay is what ships; the decay knob exists so 1.5's claim
     # that a norm penalty does not substitute for dropout can be re-measured,
@@ -1786,6 +1794,8 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         "lr_integral_epochs": round(lr_epochs, 3),
         "split_seed": int(seed if split_seed is None else split_seed),
         "pca_seed": int(seed if pca_seed is None else pca_seed),
+        "init_seed": int(seed if init_seed is None else init_seed),
+        "stream_seed": None if stream_seed is None else int(stream_seed),
         "stop_bce_no_axes": bce_stop_no_axes,
         "slope_scale_sweep": slope_sweep,
         "slope_pct": {str(p): float(np.percentile(a_np, p))
