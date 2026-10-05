@@ -365,7 +365,7 @@ class JointMIRT(nn.Module):
 
     def __init__(self, fdim, n_users, input_dim, seed, k_axes=K_AXES,
                  dropout=DROPOUT, input_dropout=INPUT_DROPOUT, link_power=False,
-                 link="sigmoid", odds_sharpness=1.0, blend_frac=None, stage_frac=None, curve_param="ab", lapse_fixed=None, gauge="sd",
+                 link="sigmoid", odds_sharpness=1.0, blend_frac=None, stage_frac=None, head_zero_init=False, curve_param="ab", lapse_fixed=None, gauge="sd",
                  floor_prior=False, floor_rel=False,
                  slope_height=False, floor_mode=FLOOR_MODE,
                  slope_mode="trunk", floor_cols=None,
@@ -388,6 +388,14 @@ class JointMIRT(nn.Module):
                          else build_trunk(fdim, dropout=dropout,
                                           hidden=tuple(hidden)))
         self.head = nn.Linear(d, 3)                     # difficulty, slope, floor
+        if head_zero_init:
+            # EXPERIMENT: the slope and floor rows start at zero, weights and
+            # bias, so every seed starts from the same flat curve shape and the
+            # per-problem values move only where a gradient pushes them. Zeroed
+            # after the default draw, so the RNG stream is unchanged.
+            with torch.no_grad():
+                self.head.weight[1:3].zero_()
+                self.head.bias[1:3].zero_()
         # The axis map, on the TRUNK's representation. Same linear map, different
         # input: it adds no capacity (fewer parameters than reading the 212
         # features) and the axis objective reaches the trunk, so the trunk learns
@@ -980,7 +988,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         ortho_axes_detach=ORTHO_AXES_DETACH,
         v_ridge_ladder=1.0,
         k_axes=K_AXES, dropout=DROPOUT, input_dropout=INPUT_DROPOUT,
-        link_power=False, link="sigmoid", odds_sharpness=1.0, blend_frac=None, stage_frac=None, theta_moments=None, rating_anchor=None, anchor_skip=30, curve_param="ab", lapse_fixed=None, gauge="sd",
+        link_power=False, link="sigmoid", odds_sharpness=1.0, blend_frac=None, stage_frac=None, head_zero_init=False, theta_moments=None, rating_anchor=None, anchor_skip=30, curve_param="ab", lapse_fixed=None, gauge="sd",
         floor_prior=False, floor_rel=False, weight_avg=None,
         optimizer="adam", muon_lr=0.02, muon_wd=0.0, slope_height=False,
         floor_mode=FLOOR_MODE, slope_mode="trunk", hidden=None,
@@ -1161,6 +1169,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
                   dropout=dropout, input_dropout=input_dropout,
                   link_power=link_power, link=link, odds_sharpness=odds_sharpness,
                   blend_frac=blend_frac, stage_frac=stage_frac,
+                  head_zero_init=head_zero_init,
                   curve_param=curve_param,
                   lapse_fixed=lapse_fixed, gauge=gauge,
                   floor_prior=floor_prior, floor_rel=floor_rel,
