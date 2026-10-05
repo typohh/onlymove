@@ -615,8 +615,8 @@ class JointMIRT(nn.Module):
         """Pre-softplus slope output — the space the barrier acts in, where the
         penalty falls away properly for healthy slopes."""
         if self.curve_param == "local":
-            a = self.problem_params(feat)[1]
-            return torch.log(torch.expm1(a.clamp(min=1e-4)))
+            a = self.problem_params(feat)[1].clamp(min=1e-4)
+            return a + torch.log(-torch.expm1(-a))   # inverse softplus, stable
         if self.slope_mode == "bot":
             return self.slope_lin(feat[:, PCA_DIM:])[:, 0]
         if self.slope_mode == "linear":
