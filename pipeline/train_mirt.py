@@ -364,7 +364,7 @@ class JointMIRT(nn.Module):
 
     def __init__(self, fdim, n_users, input_dim, seed, k_axes=K_AXES,
                  dropout=DROPOUT, input_dropout=INPUT_DROPOUT, link_power=False,
-                 link="sigmoid", odds_sharpness=1.0, lapse_fixed=None, gauge="sd",
+                 link="sigmoid", odds_sharpness=1.0, blend_frac=None, lapse_fixed=None, gauge="sd",
                  floor_prior=False, floor_rel=False,
                  slope_height=False, floor_mode=FLOOR_MODE,
                  slope_mode="trunk", floor_cols=None,
@@ -453,6 +453,17 @@ class JointMIRT(nn.Module):
             self.slope_lin = nn.Linear(
                 int(fdim) - (PCA_DIM if slope_mode == "bot" else 0), 1)
             nn.init.zeros_(self.slope_lin.weight)
+        # `blend_frac`: a curriculum from one global floor and slope to the
+        # per-problem ones. Each is used as (1 - w) * global + w * local in its
+        # pre-activation, w rising linearly from 0 to 1 over that fraction of
+        # the epochs, so the fit settles abilities and difficulty under a
+        # shared curve shape before any problem may depart from it. The end
+        # state is the ordinary model; only the path differs.
+        self.blend_frac = blend_frac
+        if blend_frac:
+            self.slope_g = nn.Parameter(torch.zeros(()))
+            self.floor_g = nn.Parameter(torch.zeros(()))
+            self.register_buffer("blend_w", torch.zeros(()))
         if floor_mode == "global":
             self.floor_global = nn.Parameter(torch.zeros(()))
         elif floor_mode == "own_trunk":
@@ -593,6 +604,11 @@ class JointMIRT(nn.Module):
             return self.slope_lin(feat)[:, 0]
         return self.head(self.trunk(feat))[:, 1]
 
+    def _blend_floor(self, cap, raw):
+        if self.blend_frac:
+            raw = (1 - self.blend_w) * self.floor_g + self.blend_w * raw
+        return cap * torch.sigmoid(raw)
+
     def problem_params(self, feat, pin_gauge=False):
         """(difficulty b, discrimination a, floor c, axis loadings g).
 
@@ -625,6 +641,8 @@ class JointMIRT(nn.Module):
             so = self.slope_lin(self._drop(feat))[:, 0]
         else:
             so = o[:, 1]
+        if self.blend_frac:
+            so = (1 - self.blend_w) * self.slope_g + self.blend_w * so
         a = nn.functional.softplus(so).clamp(min=SLOPE_FLOOR)
         if self.lapse_mode == "linear":
             lam = LAPSE_CAP * torch.sigmoid(self.lapse_lin(self._drop(feat))[:, 0])
@@ -643,9 +661,9 @@ class JointMIRT(nn.Module):
             c = cap * torch.sigmoid(self.floor_lin(
                 feat[:, PCA_DIM:][:, self.floor_cols])[:, 0])
         elif self.floor_mode == "linear":
-            c = cap * torch.sigmoid(self.floor_lin(self._drop(feat))[:, 0])
+            c = self._blend_floor(cap, self.floor_lin(self._drop(feat))[:, 0])
         else:
-            c = cap * torch.sigmoid(a * o[:, 2] if self.floor_rel else o[:, 2])
+            c = self._blend_floor(cap, a * o[:, 2] if self.floor_rel else o[:, 2])
         if self.slope_height:
             a = a / (1.0 - c - lam)
         g = self.g_lin(h)
@@ -890,7 +908,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         ortho_axes_detach=ORTHO_AXES_DETACH,
         v_ridge_ladder=1.0,
         k_axes=K_AXES, dropout=DROPOUT, input_dropout=INPUT_DROPOUT,
-        link_power=False, link="sigmoid", odds_sharpness=1.0, lapse_fixed=None, gauge="sd",
+        link_power=False, link="sigmoid", odds_sharpness=1.0, blend_frac=None, lapse_fixed=None, gauge="sd",
         floor_prior=False, floor_rel=False, weight_avg=None,
         optimizer="adam", muon_lr=0.02, muon_wd=0.0, slope_height=False,
         floor_mode=FLOOR_MODE, slope_mode="trunk", hidden=None,
@@ -1064,6 +1082,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
     m = JointMIRT(fdim, n_users + len(synthetic), input_dim, seed, k_axes,
                   dropout=dropout, input_dropout=input_dropout,
                   link_power=link_power, link=link, odds_sharpness=odds_sharpness,
+                  blend_frac=blend_frac,
                   lapse_fixed=lapse_fixed, gauge=gauge,
                   floor_prior=floor_prior, floor_rel=floor_rel,
                   slope_height=slope_height, floor_mode=floor_mode,
@@ -1146,6 +1165,8 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         return live
 
     for ep in range(epochs):
+        if blend_frac:
+            m.blend_w.fill_(min(1.0, ep / max(blend_frac * epochs, 1.0)))
         if lr_schedule == "cosine":
             # Standard cosine from the base rate to zero over the whole budget,
             # applied to BOTH groups so their ratio — the thing 1.8 measures —
@@ -1489,6 +1510,8 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
 
     # --- outputs
     m.train(False)
+    if blend_frac:
+        m.blend_w.fill_(1.0)
     with torch.no_grad():
         # PIN THE AXIS GAUGE TO THE CORPUS before anything is written. Its EMA
         # tracks the attempt stream, which over-weights whatever is popular,
