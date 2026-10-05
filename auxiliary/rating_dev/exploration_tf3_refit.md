@@ -325,4 +325,15 @@ Checked while weighing a proposal to anchor the floor on the worst-gap 0.1% of a
 | Odds clamp + linear slope s0 | 67 | 10,376 | 7,813 |
 | Clamped ramp + linear floor s0 | 0 | 0 | — |
 
-The linear floor reproduces this parking across seeds, so part of its 0.994 floor agreement may be several seeds landing on the same degenerate solution. Candidate route, not separated: a floor that is a linear map of features correlated with difficulty can itself carry a difficulty gradient, so a user can ride the floor, and below the curve the sigmoid passes almost no gradient back to the user's ability. The clamped ramp parks nobody.
+The linear floor reproduces this parking across seeds, so part of its 0.994 floor agreement may be several seeds landing on the same degenerate solution. Candidate route, not separated: a floor that is a linear map of features correlated with difficulty can itself carry a difficulty gradient, so a user can ride the floor, and below the curve the sigmoid passes almost no gradient back to the user's ability. Over more seeds (heavy user's ability; users below −10):
+
+| Fit | Heavy user | Users below −10 |
+|---|---|---|
+| Plain trunk floor s0 / s1 | −0.7 / −0.9 | 37 / 41 |
+| Clamped ramp, trunk floor s0 / s1 | 0.0 / 0.0 | 2 / 1 |
+| Linear slope (sigmoid, linear floor) s0 | −0.8 | 26 |
+| Clamped ramp + linear floor s0 / s1 / s2 | −6.8 / −8.5 / −11.3 | 0 / 6 / 1 |
+| Linear floor s0–s6 | −24 to −36 | 117–158 |
+| Odds clamp + linear slope s0 / s1 / s2 | −25.8 / −24.3 / −4.7 | 67 / 62 / 35 |
+
+So parking goes with the linear floor beside a free (trunk) slope; the clamped ramp shrinks it to that one user at −7 to −11, and the linear slope under the sigmoid removes it. Bot-only slope arms dropped by decision (never to be used). Probe queued: the linear floor with that user excluded (`exclude_users`, `ho_flinx_s0/s1`; not paired, since excluding rows changes the held-out draw).
