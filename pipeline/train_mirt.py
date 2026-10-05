@@ -941,7 +941,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         ortho_axes_detach=ORTHO_AXES_DETACH,
         v_ridge_ladder=1.0,
         k_axes=K_AXES, dropout=DROPOUT, input_dropout=INPUT_DROPOUT,
-        link_power=False, link="sigmoid", odds_sharpness=1.0, blend_frac=None, theta_moments=None, curve_param="ab", lapse_fixed=None, gauge="sd",
+        link_power=False, link="sigmoid", odds_sharpness=1.0, blend_frac=None, theta_moments=None, rating_anchor=None, curve_param="ab", lapse_fixed=None, gauge="sd",
         floor_prior=False, floor_rel=False, weight_avg=None,
         optimizer="adam", muon_lr=0.02, muon_wd=0.0, slope_height=False,
         floor_mode=FLOOR_MODE, slope_mode="trunk", hidden=None,
@@ -1238,6 +1238,22 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
                                  (1.0 - m.lapse().detach()) * yb, yb)
             loss = torch.nn.functional.binary_cross_entropy(
                 pred, yb, reduction="none").sum() / len(bi)
+            if rating_anchor:
+                # EXPERIMENT: each attempt pulls its user's ability toward the
+                # problem's RATING (the 80% point, held fixed here), so a user
+                # is drawn to the average rating of what they were served —
+                # where a user clearing about 80% belongs — whatever the slope
+                # and floor do. Per attempt, so the pull grows with a user's
+                # attempts exactly as the likelihood does; a parked user, far
+                # from every problem they played, pays quadratically. Rows
+                # whose problem has no 80% point inside the curve are left out, and
+                # so are the synthetic users, who belong far from the problems.
+                r_row, c_row = rsf[:, 0], rsf[:, 2]
+                q_row = (CALIBRATION_P - c_row) / (1.0 - c_row - m._last_lam)
+                ok = (q_row > 0.01) & (q_row < 0.99) & (tu_all[bi] < n_users)
+                th_row = m.theta(tu_all[bi]).squeeze(-1)
+                loss = loss + rating_anchor * (
+                    (th_row - r_row) ** 2 * ok).sum() / len(bi)
             if theta_moments:
                 # EXPERIMENT: a squared penalty pulling the abilities' mean and
                 # spread toward zero, which the likelihood resists — no target
