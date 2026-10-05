@@ -337,3 +337,16 @@ The linear floor reproduces this parking across seeds, so part of its 0.994 floo
 | Odds clamp + linear slope s0 / s1 / s2 | −25.8 / −24.3 / −4.7 | 67 / 62 / 35 |
 
 So parking goes with the linear floor beside a free (trunk) slope; the clamped ramp shrinks it to that one user at −7 to −11, and the linear slope under the sigmoid removes it. Bot-only slope arms dropped by decision (never to be used). Probe queued: the linear floor with that user excluded (`exclude_users`, `ho_flinx_s0/s1`; not paired, since excluding rows changes the held-out draw).
+
+## Addendum: held-out rows on problems with no training rows
+
+The row split leaves some held-out rows on problems none of whose rows were trained on (mostly single-attempt problems): 1,419–1,496 of the ~12,100 held-out rows per seed. Reconstructed after the fact (`/tmp/cold.py` on windtunnel: same filters, same `default_rng(seed)` draw; held-out counts match the logs exactly and the all-held-out loss matches within 0.2 millinats, the axis term left out). Those problems are still seen by the synthetic random user, so "cold" means no human rows. Deltas against the linear floor at the same seed, millinats:
+
+| Arm | Cold s0–s4 | Cold mean | Warm s0–s4 | Warm mean |
+|---|---|---|---|---|
+| Plain trunk floor | +1.9 / −1.1 / −1.4 / −4.4 / +1.7 | −0.7 | +1.4 / +9.6 / +2.7 / +2.9 / −1.7 | +3.0 |
+| Linear slope (sigmoid) | +3.0 / +1.6 / −0.7 / +2.7 / +2.2 | +1.8 | −0.4 / +2.7 / −0.1 / +3.7 / −2.0 | +0.8 |
+| Odds clamp + linear slope | −8.2 / −2.6 / +6.2 / −5.7 / +6.1 | −0.8 | −3.6 / −0.6 / −1.7 / −0.4 / −4.1 | −2.1 |
+| Clamped ramp + linear floor (s0–s2) | −2.0 / +3.9 / +8.9 | +3.6 | +8.2 / +5.8 / +5.0 | +6.3 |
+
+About 1,400 rows per seed, so the cold column is noisy (the odds arm swings ±8). No arm separates from the linear floor on cold problems; the linear slope is slightly worse on 4 of 5 seeds. The trunk floor's warm-row cost against the linear floor does not carry over to cold problems.
