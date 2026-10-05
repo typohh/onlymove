@@ -973,7 +973,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         pca_dim=PCA_DIM, blocks=PRODUCTION_BLOCKS, act_source="store",
         stop_unit="row",
         split_seed=None, pca_seed=None, init_seed=None, stream_seed=None,
-        snapshot_epochs=None,
+        snapshot_epochs=None, stop_epoch=None,
         lr_schedule=LR_SCHEDULE,
         lr_warmup_epochs=0, ortho_axes=ORTHO_AXES,
         teach_detach=False, ortho_detach=False,
@@ -1250,6 +1250,10 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         return live
 
     for ep in range(epochs):
+        if stop_epoch is not None and ep >= stop_epoch:
+            # Diagnostic: end the run here with the schedule still that of the
+            # full budget, so the path so far is the full run's path.
+            break
         if blend_frac:
             m.blend_w.fill_(min(1.0, ep / max(blend_frac * epochs, 1.0)))
         if snapshot_epochs and ep in snapshot_epochs:
