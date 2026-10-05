@@ -364,7 +364,7 @@ class JointMIRT(nn.Module):
 
     def __init__(self, fdim, n_users, input_dim, seed, k_axes=K_AXES,
                  dropout=DROPOUT, input_dropout=INPUT_DROPOUT, link_power=False,
-                 link="sigmoid", lapse_fixed=None, gauge="sd",
+                 link="sigmoid", odds_sharpness=1.0, lapse_fixed=None, gauge="sd",
                  floor_prior=False, floor_rel=False,
                  slope_height=False, floor_mode=FLOOR_MODE,
                  slope_mode="trunk", floor_cols=None,
@@ -506,11 +506,16 @@ class JointMIRT(nn.Module):
         # against the ceiling). Each level takes the gradient in proportion to
         # its share of the odds, so near the slope's middle the floor and lapse
         # get almost none, and nothing sets the width but the logit scale the
-        # sigmoid already has.
+        # sigmoid already has. `odds_sharpness` k sharpens both soft extremes
+        # to the k-norm of the odds — log odds = logsumexp(k * terms) / k —
+        # so a level's gradient share at a given log-odds distance d from the
+        # slope is sigmoid(-k d) instead of sigmoid(-d); k = 1 is the plain
+        # odds sum and k -> infinity is the hard clamp in odds.
         if link not in ("sigmoid", "ramp_soft", "ramp_hard", "max_floor",
                         "max_ramp", "clamp", "clamp_ramp", "odds_clamp"):
             raise ValueError(f"unknown link {link!r}")
         self.link = link
+        self.odds_sharpness = float(odds_sharpness)
         if self.link_power:
             self.link_power_raw = nn.Parameter(
                 torch.tensor(float(np.log(np.expm1(1.0)))))
@@ -698,8 +703,9 @@ class JointMIRT(nn.Module):
         if self.link == "odds_clamp":
             lc = torch.log(c.clamp(EPS, 1 - EPS)) - torch.log1p(-c.clamp(EPS, 1 - EPS))
             ll = torch.log(lam) - torch.log1p(-lam)
-            low = torch.logaddexp(lc, z)                 # log odds, floor + slope
-            lp = -torch.logaddexp(-low, ll)              # log odds after the lapse
+            k = self.odds_sharpness
+            low = torch.logaddexp(k * lc, k * z) / k     # log odds, floor + slope
+            lp = -torch.logaddexp(-k * low, k * ll) / k  # log odds after the lapse
             return (torch.sigmoid(lp), g, torch.stack([r, a, c], dim=1).detach())
         if self.link in ("max_floor", "max_ramp", "clamp", "clamp_ramp"):
             main = (torch.sigmoid(z) if self.link in ("max_floor", "clamp")
@@ -884,7 +890,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         ortho_axes_detach=ORTHO_AXES_DETACH,
         v_ridge_ladder=1.0,
         k_axes=K_AXES, dropout=DROPOUT, input_dropout=INPUT_DROPOUT,
-        link_power=False, link="sigmoid", lapse_fixed=None, gauge="sd",
+        link_power=False, link="sigmoid", odds_sharpness=1.0, lapse_fixed=None, gauge="sd",
         floor_prior=False, floor_rel=False, weight_avg=None,
         optimizer="adam", muon_lr=0.02, muon_wd=0.0, slope_height=False,
         floor_mode=FLOOR_MODE, slope_mode="trunk", hidden=None,
@@ -1057,7 +1063,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
               flush=True)
     m = JointMIRT(fdim, n_users + len(synthetic), input_dim, seed, k_axes,
                   dropout=dropout, input_dropout=input_dropout,
-                  link_power=link_power, link=link,
+                  link_power=link_power, link=link, odds_sharpness=odds_sharpness,
                   lapse_fixed=lapse_fixed, gauge=gauge,
                   floor_prior=floor_prior, floor_rel=floor_rel,
                   slope_height=slope_height, floor_mode=floor_mode,
