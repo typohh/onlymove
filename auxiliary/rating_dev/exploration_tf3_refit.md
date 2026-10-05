@@ -389,3 +389,17 @@ By decision, new changes are tested on the trunk model (floor and slope both fro
 - **Two stages, global then per-problem with the mean held** (`ho_stage_s0/s1`, trunk model, sd gauge): 0.4921 / 0.4795, −0.5 / −8.7 against the plain trunk floor. Trunk floors agree 0.94 (plain 0.36), slopes 0.85, ratings 0.965; the mean floor lands at 0.308 / 0.283 (plain trunk seeds range 0.15–0.32). Lapse 0.003 / 0.019. Parking at the baseline's level (4 / 2 users more than 2 rating-IQRs below their served mean; heavy user −0.05 / −0.13). Near-chance floors 13k / 11k. Seeds 2–3 queued.
 - **Local parameterization + moments + interquartile gauge, seed 1**: 0.4778, −10.5 (seed 0 −5.7); floors agree 0.75, slopes 0.72, floors low (median 0.14, 25k near chance). Ended with the interquartile gauge.
 - The two-stage + moments pair launched under the interquartile gauge by a stale queue script; stopped at about 30 / 11 minutes and requeued under the sd gauge.
+- **Parking measured on the outcome scale** (`/tmp/park2.py`): for users with 30+ attempts after their first 30, the mean of the sigmoid part σ(a(θ − b)) over their attempts — how much of their predicted success the curve, rather than the floor, explains. The ability-gap measure fails when the scale collapses (gaps shrink with it), and it hid parking under the moments penalty with the sd gauge.
+
+  | Fit | Users with curve part < 0.1 / < 0.2 | Their attempts | Heavy user's curve part (clears 0.71) |
+  |---|---|---|---|
+  | Baseline s0–s4 | 2–5 / 4–7 | 446–617 | 0.50–0.71 |
+  | Linear floor s0 | 17 / 21 | 9,281 | 0.00 |
+  | Moments, sd gauge s0–s4 | 3–16 / 6–20 | 282–9,940 | 0.25 / 0.13 / 0.41 / 0.23 / 0.08 |
+  | Moments + interquartile s0–s4 | 1 / 2–5 | 73–618 | 0.60–0.65 |
+  | Two stages s0 / s1 | 7 / 6–7 | 561–611 | 0.45 / 0.51 |
+  | Two stages + moments, sd gauge, s0 | 1 / 3 | 106 | 0.31 |
+
+  Under the sd gauge the moments penalty contracts the scale and the floor takes over explaining users: parking is worse than the baseline on four of five seeds. Under the interquartile gauge the same penalty leaves the least parking of any arm. So the gauge is not noise in that combination: it is what keeps the penalty from being satisfied by shrinking the scale.
+- **Moments, sd gauge, seeds 2–4**: 0.4944 / 0.4883 / 0.4837, −3.9 / −5.2 / −4.7. Five seeds mean −6.4 (moments + interquartile −4.3). Five-seed agreement: floors 0.83 (min 0.63), slopes 0.84, ratings 0.954 (with the interquartile gauge 0.88 / 0.93 / 0.974). The collapse itself varies by seed (difficulty IQR 0.31 on seed 2, 0.05–0.09 on the others); near-chance floors 1.2k–61k.
+- **Two stages + moments, sd gauge, seed 0** (`ho_stagetm_s0`): 0.4843, −8.3. Less contraction (difficulty IQR 0.82, ability IQR 0.50), floors median 0.47 with none near chance, lapse 0.000, parking 1 user below 0.1.
