@@ -167,8 +167,7 @@ LR_FIELD = 1e-2
 # anything not listed here is "the net" and gets the slow rate, so a parameter
 # added and forgotten lands on the safe side.
 FIELD_PARAMS = ("theta.weight", "v", "lapse_raw", "link_power_raw",
-                "floor_prior_mu", "floor_prior_logsd",
-                "theta_prior_mu", "theta_prior_logsd")
+                "floor_prior_mu", "floor_prior_logsd")
 V_RIDGE = 0.5                    # not binding: 0.05/0.15/0.5 score alike
 ORTHO_RATING = 0.5               # keeps each TAIL off rating, slope and floor
 # ONE barrier, on the slope, one-sided, acting on the PRE-SOFTPLUS output. The
@@ -365,7 +364,7 @@ class JointMIRT(nn.Module):
 
     def __init__(self, fdim, n_users, input_dim, seed, k_axes=K_AXES,
                  dropout=DROPOUT, input_dropout=INPUT_DROPOUT, link_power=False,
-                 link="sigmoid", odds_sharpness=1.0, blend_frac=None, theta_prior=False, lapse_fixed=None, gauge="sd",
+                 link="sigmoid", odds_sharpness=1.0, blend_frac=None, lapse_fixed=None, gauge="sd",
                  floor_prior=False, floor_rel=False,
                  slope_height=False, floor_mode=FLOOR_MODE,
                  slope_mode="trunk", floor_cols=None,
@@ -382,14 +381,6 @@ class JointMIRT(nn.Module):
         # theta before the trunk so the RNG draw order is fixed. nn.Embedding
         # initializes to N(0, 1) itself, so there is nothing to re-draw.
         self.theta = nn.Embedding(n_users, 1)
-        # EXPERIMENT (off as shipped): a Gaussian prior on ability with its
-        # mean and spread learned, paid once per user. Without it nothing
-        # prices an ability's distance from the population, so a user can be
-        # parked far below every problem and explained by the floors alone.
-        self.theta_prior = bool(theta_prior)
-        if self.theta_prior:
-            self.theta_prior_mu = nn.Parameter(torch.zeros(()))
-            self.theta_prior_logsd = nn.Parameter(torch.zeros(()))
         # EXPERIMENT (None = the shipped DIFF_HIDDEN): the trunk's hidden
         # widths; () makes every head a linear map of the inputs.
         self.trunk, d = (build_trunk(fdim, dropout=dropout) if hidden is None
@@ -917,7 +908,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         ortho_axes_detach=ORTHO_AXES_DETACH,
         v_ridge_ladder=1.0,
         k_axes=K_AXES, dropout=DROPOUT, input_dropout=INPUT_DROPOUT,
-        link_power=False, link="sigmoid", odds_sharpness=1.0, blend_frac=None, theta_prior=False, lapse_fixed=None, gauge="sd",
+        link_power=False, link="sigmoid", odds_sharpness=1.0, blend_frac=None, theta_moments=None, lapse_fixed=None, gauge="sd",
         floor_prior=False, floor_rel=False, weight_avg=None,
         optimizer="adam", muon_lr=0.02, muon_wd=0.0, slope_height=False,
         floor_mode=FLOOR_MODE, slope_mode="trunk", hidden=None,
@@ -1091,7 +1082,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
     m = JointMIRT(fdim, n_users + len(synthetic), input_dim, seed, k_axes,
                   dropout=dropout, input_dropout=input_dropout,
                   link_power=link_power, link=link, odds_sharpness=odds_sharpness,
-                  blend_frac=blend_frac, theta_prior=theta_prior,
+                  blend_frac=blend_frac,
                   lapse_fixed=lapse_fixed, gauge=gauge,
                   floor_prior=floor_prior, floor_rel=floor_rel,
                   slope_height=slope_height, floor_mode=floor_mode,
@@ -1214,12 +1205,19 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
                                  (1.0 - m.lapse().detach()) * yb, yb)
             loss = torch.nn.functional.binary_cross_entropy(
                 pred, yb, reduction="none").sum() / len(bi)
-            if theta_prior:
-                # Once per real user per epoch: the full prior over the epoch's
-                # rows, so the objective is mean row NLL + prior / rows.
-                zt = ((m.theta.weight[:n_users, 0] - m.theta_prior_mu)
-                      * torch.exp(-m.theta_prior_logsd))
-                loss = loss + (0.5 * zt ** 2 + m.theta_prior_logsd).sum() / n
+            if theta_moments:
+                # EXPERIMENT: hold the users' abilities to the same gauge the
+                # difficulty is held to — mean 0, sd 1 — by a squared penalty
+                # on the population's moments. Nothing else prices an ability's
+                # distance from everyone, so a user can otherwise be parked
+                # arbitrarily far below every problem and explained by the
+                # floors; under this a far outlier inflates the spread
+                # quadratically and is held near the edge, where the fit can
+                # still pull it back. (A learned per-user spread was tried
+                # first and collapses every ability to one value.)
+                th_all = m.theta.weight[:n_users, 0]
+                loss = loss + theta_moments * (th_all.mean() ** 2
+                                               + (th_all.std() - 1.0) ** 2)
             # SHRINK WHAT THE LIKELIHOOD READS. user_axis, not the raw
             # parameter: the two differ by the population mean, which is a
             # direction no prediction depends on, so a ridge on raw v spends
