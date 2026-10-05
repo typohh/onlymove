@@ -365,7 +365,7 @@ class JointMIRT(nn.Module):
 
     def __init__(self, fdim, n_users, input_dim, seed, k_axes=K_AXES,
                  dropout=DROPOUT, input_dropout=INPUT_DROPOUT, link_power=False,
-                 link="sigmoid", odds_sharpness=1.0, blend_frac=None, curve_param="ab", lapse_fixed=None, gauge="sd",
+                 link="sigmoid", odds_sharpness=1.0, blend_frac=None, stage_frac=None, curve_param="ab", lapse_fixed=None, gauge="sd",
                  floor_prior=False, floor_rel=False,
                  slope_height=False, floor_mode=FLOOR_MODE,
                  slope_mode="trunk", floor_cols=None,
@@ -480,6 +480,20 @@ class JointMIRT(nn.Module):
             self.slope_g = nn.Parameter(torch.zeros(()))
             self.floor_g = nn.Parameter(torch.zeros(()))
             self.register_buffer("blend_w", torch.zeros(()))
+        # `stage_frac`: two stages. Until that fraction of the epochs one global
+        # floor and one global slope serve every problem; then the globals are
+        # frozen and the per-problem outputs take over, CENTRED the way the
+        # difficulty gauge centres b — each batch's mean pre-activation is
+        # subtracted and the frozen global added back (an EMA of the mean at
+        # eval) — so the per-problem floors and slopes may spread but their
+        # mean stays where stage one put it.
+        self.stage_frac = stage_frac
+        if stage_frac:
+            self.slope_g = nn.Parameter(torch.zeros(()))
+            self.floor_g = nn.Parameter(torch.zeros(()))
+            for nm in ("stage2", "slope_g_frozen", "floor_g_frozen",
+                       "slope_mu", "floor_mu"):
+                self.register_buffer(nm, torch.zeros(()))
         if floor_mode == "global":
             self.floor_global = nn.Parameter(torch.zeros(()))
         elif floor_mode == "own_trunk":
@@ -625,9 +639,30 @@ class JointMIRT(nn.Module):
             return self.slope_global.expand(feat.shape[0])
         return self.head(self.trunk(feat))[:, 1]
 
+    def _staged(self, raw, g, frozen, mu_buf):
+        if not bool(self.stage2):
+            return g.expand_as(raw)
+        if self.training:
+            mu = raw.mean()
+            with torch.no_grad():
+                mu_buf.mul_(1 - GAUGE_MOM).add_(GAUGE_MOM * mu)
+        else:
+            mu = mu_buf
+        return frozen + raw - mu
+
+    def start_stage2(self):
+        with torch.no_grad():
+            self.slope_g_frozen.copy_(self.slope_g)
+            self.floor_g_frozen.copy_(self.floor_g)
+            self.stage2.fill_(1.0)
+        self.slope_g.requires_grad_(False)
+        self.floor_g.requires_grad_(False)
+
     def _blend_floor(self, cap, raw):
         if self.blend_frac:
             raw = (1 - self.blend_w) * self.floor_g + self.blend_w * raw
+        if self.stage_frac:
+            raw = self._staged(raw, self.floor_g, self.floor_g_frozen, self.floor_mu)
         return cap * torch.sigmoid(raw)
 
     def problem_params(self, feat, pin_gauge=False):
@@ -666,6 +701,8 @@ class JointMIRT(nn.Module):
             so = o[:, 1]
         if self.blend_frac:
             so = (1 - self.blend_w) * self.slope_g + self.blend_w * so
+        if self.stage_frac:
+            so = self._staged(so, self.slope_g, self.slope_g_frozen, self.slope_mu)
         a = nn.functional.softplus(so).clamp(min=SLOPE_FLOOR)
         if self.lapse_mode == "linear":
             lam = LAPSE_CAP * torch.sigmoid(self.lapse_lin(self._drop(feat))[:, 0])
@@ -941,7 +978,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         ortho_axes_detach=ORTHO_AXES_DETACH,
         v_ridge_ladder=1.0,
         k_axes=K_AXES, dropout=DROPOUT, input_dropout=INPUT_DROPOUT,
-        link_power=False, link="sigmoid", odds_sharpness=1.0, blend_frac=None, theta_moments=None, rating_anchor=None, anchor_skip=30, curve_param="ab", lapse_fixed=None, gauge="sd",
+        link_power=False, link="sigmoid", odds_sharpness=1.0, blend_frac=None, stage_frac=None, theta_moments=None, rating_anchor=None, anchor_skip=30, curve_param="ab", lapse_fixed=None, gauge="sd",
         floor_prior=False, floor_rel=False, weight_avg=None,
         optimizer="adam", muon_lr=0.02, muon_wd=0.0, slope_height=False,
         floor_mode=FLOOR_MODE, slope_mode="trunk", hidden=None,
@@ -1120,7 +1157,8 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
     m = JointMIRT(fdim, n_users + len(synthetic), input_dim, seed, k_axes,
                   dropout=dropout, input_dropout=input_dropout,
                   link_power=link_power, link=link, odds_sharpness=odds_sharpness,
-                  blend_frac=blend_frac, curve_param=curve_param,
+                  blend_frac=blend_frac, stage_frac=stage_frac,
+                  curve_param=curve_param,
                   lapse_fixed=lapse_fixed, gauge=gauge,
                   floor_prior=floor_prior, floor_rel=floor_rel,
                   slope_height=slope_height, floor_mode=floor_mode,
@@ -1205,6 +1243,11 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
     for ep in range(epochs):
         if blend_frac:
             m.blend_w.fill_(min(1.0, ep / max(blend_frac * epochs, 1.0)))
+        if stage_frac and ep == int(stage_frac * epochs):
+            m.start_stage2()
+            print(f"  stage 2 from epoch {ep}: global floor "
+                  f"{float(torch.sigmoid(m.floor_g)):.3f} (pre-cap), slope "
+                  f"{float(nn.functional.softplus(m.slope_g)):.3f}", flush=True)
         if lr_schedule == "cosine":
             # Standard cosine from the base rate to zero over the whole budget,
             # applied to BOTH groups so their ratio — the thing 1.8 measures —
