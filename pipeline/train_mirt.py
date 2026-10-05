@@ -168,6 +168,7 @@ LR_FIELD = 1e-2
 # added and forgotten lands on the safe side.
 FIELD_PARAMS = ("theta.weight", "v", "lapse_raw", "link_power_raw",
                 "floor_prior_mu", "floor_prior_logsd")
+LOCAL_STEEP_SCALE = 0.25         # curve_param="local" only: initial steepness scale
 V_RIDGE = 0.5                    # not binding: 0.05/0.15/0.5 score alike
 ORTHO_RATING = 0.5               # keeps each TAIL off rating, slope and floor
 # ONE barrier, on the slope, one-sided, acting on the PRE-SOFTPLUS output. The
@@ -364,7 +365,7 @@ class JointMIRT(nn.Module):
 
     def __init__(self, fdim, n_users, input_dim, seed, k_axes=K_AXES,
                  dropout=DROPOUT, input_dropout=INPUT_DROPOUT, link_power=False,
-                 link="sigmoid", odds_sharpness=1.0, blend_frac=None, lapse_fixed=None, gauge="sd",
+                 link="sigmoid", odds_sharpness=1.0, blend_frac=None, curve_param="ab", lapse_fixed=None, gauge="sd",
                  floor_prior=False, floor_rel=False,
                  slope_height=False, floor_mode=FLOOR_MODE,
                  slope_mode="trunk", floor_cols=None,
@@ -463,6 +464,18 @@ class JointMIRT(nn.Module):
         # shared curve shape before any problem may depart from it. The end
         # state is the ordinary model; only the path differs.
         self.blend_frac = blend_frac
+        # EXPERIMENT ("ab" as shipped): how the trunk's difficulty and slope
+        # outputs define the curve. "local" makes them the rating itself (the
+        # 80% point) and the curve's steepness AT that point, and derives the
+        # sigmoid's midpoint and slope from those and the floor. Served
+        # attempts sit near the 80% point, so the data there measures exactly
+        # these two; the floor then moves only the curve's tail and cannot
+        # stand in for the slope, because changing it leaves the curve's level
+        # and steepness at the 80% point where they were. Floors are held below
+        # 0.8, where an 80% point exists.
+        if curve_param not in ("ab", "local"):
+            raise ValueError(f"unknown curve_param {curve_param!r}")
+        self.curve_param = curve_param
         if blend_frac:
             self.slope_g = nn.Parameter(torch.zeros(()))
             self.floor_g = nn.Parameter(torch.zeros(()))
@@ -601,6 +614,9 @@ class JointMIRT(nn.Module):
     def slope_logit(self, feat):
         """Pre-softplus slope output — the space the barrier acts in, where the
         penalty falls away properly for healthy slopes."""
+        if self.curve_param == "local":
+            a = self.problem_params(feat)[1]
+            return torch.log(torch.expm1(a.clamp(min=1e-4)))
         if self.slope_mode == "bot":
             return self.slope_lin(feat[:, PCA_DIM:])[:, 0]
         if self.slope_mode == "linear":
@@ -657,6 +673,8 @@ class JointMIRT(nn.Module):
             lam = self.lapse()
         self._last_lam = lam
         cap = 1.0 - 2.0 * lam
+        if self.curve_param == "local":
+            cap = cap.clamp(max=CALIBRATION_P) * (1.0 - 1e-3)
         if self.floor_mode == "global":
             c = cap * torch.sigmoid(self.floor_global).expand_as(b)
         elif self.floor_mode == "bot":
@@ -673,6 +691,14 @@ class JointMIRT(nn.Module):
             c = self._blend_floor(cap, a * o[:, 2] if self.floor_rel else o[:, 2])
         if self.slope_height:
             a = a / (1.0 - c - lam)
+        if self.curve_param == "local":
+            # b holds the rating r and a the steepness dP/dtheta at r (scaled
+            # so the initial output sits near the fitted range); solve for the
+            # sigmoid's slope and midpoint.
+            r_loc, steep = b, LOCAL_STEEP_SCALE * a
+            q = ((CALIBRATION_P - c) / (1.0 - c - lam)).clamp(EPS, 1.0 - EPS)
+            a = (steep / ((1.0 - c - lam) * q * (1.0 - q))).clamp(min=SLOPE_FLOOR)
+            b = r_loc - torch.log(q / (1.0 - q)) / a
         g = self.g_lin(h)
         # Kept for `detached_loadings`: the same representation and, below, the
         # same divisor this batch's loadings use, so a detached readout is the
@@ -915,7 +941,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         ortho_axes_detach=ORTHO_AXES_DETACH,
         v_ridge_ladder=1.0,
         k_axes=K_AXES, dropout=DROPOUT, input_dropout=INPUT_DROPOUT,
-        link_power=False, link="sigmoid", odds_sharpness=1.0, blend_frac=None, theta_moments=None, lapse_fixed=None, gauge="sd",
+        link_power=False, link="sigmoid", odds_sharpness=1.0, blend_frac=None, theta_moments=None, curve_param="ab", lapse_fixed=None, gauge="sd",
         floor_prior=False, floor_rel=False, weight_avg=None,
         optimizer="adam", muon_lr=0.02, muon_wd=0.0, slope_height=False,
         floor_mode=FLOOR_MODE, slope_mode="trunk", hidden=None,
@@ -1089,7 +1115,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
     m = JointMIRT(fdim, n_users + len(synthetic), input_dim, seed, k_axes,
                   dropout=dropout, input_dropout=input_dropout,
                   link_power=link_power, link=link, odds_sharpness=odds_sharpness,
-                  blend_frac=blend_frac,
+                  blend_frac=blend_frac, curve_param=curve_param,
                   lapse_fixed=lapse_fixed, gauge=gauge,
                   floor_prior=floor_prior, floor_rel=floor_rel,
                   slope_height=slope_height, floor_mode=floor_mode,
