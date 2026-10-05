@@ -891,7 +891,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         lapse_mode="global",
         avg_start_frac=0.5,
         ema_decay=0.99,
-        weight_decay=0.0, weight_decay_fields=None,
+        weight_decay=0.0, weight_decay_fields=None, exclude_users=None,
         out_dir=OUT_DIR, axes_dir=AXES_DIR):
     """The shipped fit, callable. Every keyword defaults to the production
     constant above, so `run()` IS the production run — `main()` passes nothing,
@@ -924,6 +924,16 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
     # two-stage design has to answer rather than answering it.
     df = load_first_time_attempts()
     df = df[df["size"].isin(SIZES)].copy()
+    if exclude_users:
+        # Diagnostic only: drop named users (id prefixes) to see how much of a
+        # fit's shape they carry. Changes the held-out draw, so an arm run with
+        # it is not paired with one run without.
+        uid = df["user_id"].astype(str)
+        drop = np.zeros(len(df), dtype=bool)
+        for pre in exclude_users:
+            drop |= uid.str.startswith(pre).to_numpy()
+        print(f"  exclude_users: dropping {int(drop.sum())} rows", flush=True)
+        df = df[~drop].copy()
     g = df.groupby("user_id")["success"].agg(c="sum", n="count")
     g["w"] = g["n"] - g["c"]
     keep = set(g.index[(g["c"] >= MIN_BOTH_OUTCOMES)
