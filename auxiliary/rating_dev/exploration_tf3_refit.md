@@ -311,3 +311,18 @@ Better on all five, mean −2.1 millinats. Agreement between seeds: floors 0.996
 - **Linear slope under the sigmoid, seeds 3–4**: 0.4949 / 0.4882, +3.5 / −1.4. Five seeds against the linear floor: 0.0 / +2.5 / −0.1 / +3.5 / −1.4 (mean +0.9). At matched seeds 0–4 the odds link beats the sigmoid under the linear slope on every seed: −4.1 / −3.4 / −0.6 / −4.5 / −1.4 (mean −2.8).
 - **Correction to the rating-spread readings above.** The written rating is the sigmoid's 80% point under every link, and a problem whose floor is above 0.8 has no 80% point, so its rating comes out of a clamp far below everyone (1st percentile among them −6 to −21). Those problems inflated the rating sd, and the odds arms have 16–17k of them. Excluding floors above 0.78 (seed 0): rating sd 1.23 linear floor, 0.92 linear slope, 1.30 odds clamp, 1.46 odds + linear slope; so the linear slope narrows the spread by about a quarter, not half. The slope–rating correlation on the same subset is −0.21 linear floor, −0.75 under either linear-slope arm, −0.49 odds clamp. An odds-link candidate needs its own 80% point written (closed form in the link's comment) and a decision on what a problem with no 80% point ships.
 - Queued: odds clamp + bot-only slope (`ho_oddsbot2_s0/s1`).
+
+## Addendum: the linear floor parks users below the scale
+
+Checked while weighing a proposal to anchor the floor on the worst-gap 0.1% of attempts. Under the linear floor that tail is not "weak users on hard problems": it is 1–7 users at ability −31 to −36 (median user +0.4), and it is dominated by ONE user with 7,813 attempts (≈2% of all rows), 13×13 only, 71% success. That user's success has an ordinary difficulty gradient (0.95 on the easiest eighth of their problems down to 0.40 on the hardest), and the plain trunk floor and the sigmoid linear slope both place them near −0.7. The linear-floor fits put them at −33 / −36 / (seed 2 likewise), the odds clamp at −26, and explain every one of their answers through the floor: floors average 0.64 on their 4,000 problems, against 0.41–0.43 corpus-wide.
+
+| Fit | Users below −10 | Their attempts | Largest |
+|---|---|---|---|
+| Plain trunk floor s0 / s1 | 37 / 41 | 250 / 704 | 46 / 359 |
+| Linear floor s0 / s1 / s2 | 132 / 129 / 117 | ~10,100 each | 7,813 |
+| Linear slope (sigmoid) s0 | 26 | 415 | 53 |
+| Odds clamp s0 | 78 | 10,267 | 7,813 |
+| Odds clamp + linear slope s0 | 67 | 10,376 | 7,813 |
+| Clamped ramp + linear floor s0 | 0 | 0 | — |
+
+The linear floor reproduces this parking across seeds, so part of its 0.994 floor agreement may be several seeds landing on the same degenerate solution. Candidate route, not separated: a floor that is a linear map of features correlated with difficulty can itself carry a difficulty gradient, so a user can ride the floor, and below the curve the sigmoid passes almost no gradient back to the user's ability. The clamped ramp parks nobody.
