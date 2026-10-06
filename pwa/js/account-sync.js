@@ -663,12 +663,25 @@ async function probeFrontier(userId) {
 }
 
 // Cheap existence probe before adopting an account code: an account "exists"
-// iff it has at least one report (reports are the only server-side state an
-// account is rebuilt from, so a code with none is indistinguishable from a
-// typo). Returns true/false, or null when the check itself failed.
+// iff it has at least one report, or — only when it has none — a leaderboard
+// identity of its own (a chosen alias or a linked EGD/AGA binding), since an
+// account can hold an identity before its first attempt. A code with neither is
+// indistinguishable from a typo. The identity read is a second request made
+// only for the no-reports case. Returns true/false, or null when a check itself
+// failed.
 export async function accountExists(userId) {
     const probe = await probeFrontier(userId);
-    return probe === null ? null : probe.hasReports;
+    if (probe === null) return null;
+    if (probe.hasReports) return true;
+    try {
+        const res = await fetch(`/profile?userId=${encodeURIComponent(userId)}`);
+        if (!res.ok) return null;
+        const body = await res.json().catch(() => null);
+        if (!body || typeof body !== 'object') return null;
+        return !!(body.alias || body.linked);
+    } catch {
+        return null;
+    }
 }
 
 export function hasPendingAccountSwitch() {
