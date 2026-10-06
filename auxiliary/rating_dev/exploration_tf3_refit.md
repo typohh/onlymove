@@ -507,3 +507,15 @@ Held-out loss is nearly blind to the floor: the held-out rows mirror training, s
 
 Laplace + init is best or tied-best in every cell; the low-floor arms are worse on the one-IQR band; the plain trunk is worst or near it. Standard error ~0.02 per row on the one-IQR band, ~0.05 on the two-IQR band, so pool seeds before leaning on a single cell. Users far below a problem still clear it 43–54% of the time. This measure is to be reported for every floor-related arm alongside held-out loss. Queued: Laplace + init with the sharpened odds clamp (k = 4, `ho_lapk4_s0/s1`), which leaves the floor's gradient to exactly these rows.
 - **Chance floor, seed 0** (`ho_flch_s0`, untrained floor = one over legal moves, new defaults): held-out 0.4870, −0.9 against Laplace + init with a trained floor — overall loss cannot tell them apart, as predicted. Lapse 0.000, no parking (heavy user 0.74). On the floor-region rows (rows re-chosen for this arm set; seed 0) it is worse than the trained floor: gap < −1 0.702 against 0.681, gap < −2 0.660 against 0.605 (plain trunk 0.729 / 0.768). The trained floor earns something there that the overall score does not show.
+- **Fixed floors, both seeds** (`ho_flch_s1`, `ho_fl0_s0/s1`). Held-out against Laplace + init with a trained floor: chance −0.9 / +1.3, zero −0.2 / +2.3 — parity overall. No parking anywhere (heavy user 0.74), lapse 0.000. Chance floor is consistent: difficulty IQR 1.30 / 1.33, slope × IQR 1.99 / 2.00, slopes agree 0.86 (trained floor 0.81), ratings 0.974 (0.972). **Zero floor is not**: seed 1's scale collapses (difficulty IQR 0.75 against 1.30, ability IQR 0.59 against 0.84, slope × IQR 1.59 against 1.93), so ratings agree 0.972 by rank but the across-seed sd per problem is 0.25 (chance 0.07) and slope sd 0.49 (chance 0.10). Floor-region rows (re-chosen over five arms; seeds 0 / 1, loss per row):
+
+| Arm | gap < −1 (251 / 285 rows) | gap < −2 (40 / 50 rows) |
+|---|---|---|
+| observed success | 0.474 / 0.540 | 0.425 / 0.440 |
+| plain trunk | 0.731 / 0.697 | 0.720 / 0.661 |
+| Laplace + init | 0.677 / 0.667 | 0.599 / 0.635 |
+| slow 0.1× | 0.688 / 0.667 | 0.651 / 0.641 |
+| chance floor | 0.699 / 0.676 | 0.665 / 0.690 |
+| zero floor | 0.709 / 0.686 | 0.661 / 0.730 |
+
+The trained floor (Laplace + init) is best in all four cells; chance is ~0.01–0.06 worse, zero worse again. A floor of some kind keeps the scale anchored (zero floor lost it on one seed); the chance floor holds it but under-predicts the far-below rows, which clear at 43–54%.
