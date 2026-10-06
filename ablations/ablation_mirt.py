@@ -120,6 +120,8 @@ def snapshot_pins(cfg=None):
         "epochs": int(cfg.get("epochs", train_mirt.EPOCHS)),
         "lr_schedule": str(cfg.get("lr_schedule", train_mirt.LR_SCHEDULE)),
         "floor_mode": str(cfg.get("floor_mode", train_mirt.FLOOR_MODE)),
+        "theta_laplace": bool(cfg.get("theta_laplace", train_mirt.THETA_LAPLACE)),
+        "init_base_rate": bool(cfg.get("init_base_rate", train_mirt.INIT_BASE_RATE)),
         "torch": torch.__version__,
         "gpu": (torch.cuda.get_device_name(0)
                 if torch.cuda.is_available() else "cpu"),

@@ -298,6 +298,16 @@ RAMP_SHARPNESS = 10.0
 # floors it gives reproduce across seeds. "trunk" (the head's own row), "bot"
 # (the bot columns only) and the other sources remain for comparison.
 FLOOR_MODE = "linear"
+# ABILITY HAS A POPULATION PRIOR WHOSE VARIANCE IS THE DATA'S OWN (Laplace-EM:
+# each epoch sigma^2 = mean over users of (theta - mean)^2 + 1/I_u), and the fit
+# STARTS AT THE POPULATION'S CLEARANCE (one ability shift at initialisation,
+# so the floor is not the cheapest early intercept). Without the prior nothing
+# prices a user's distance from everyone and a user can be explained by floors;
+# without the initialisation the floor overshoots early and settles wherever
+# its weak gradient leaves it. Together they make the curve's global shape
+# reproduce across seeds. Evidence: auxiliary/rating_dev/exploration_tf3_refit.md.
+THETA_LAPLACE = True
+INIT_BASE_RATE = True
 
 
 def _orthogonalize(g, steps=5):
@@ -1011,7 +1021,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         ortho_axes_detach=ORTHO_AXES_DETACH,
         v_ridge_ladder=1.0,
         k_axes=K_AXES, dropout=DROPOUT, input_dropout=INPUT_DROPOUT,
-        link_power=False, link="sigmoid", odds_sharpness=1.0, blend_frac=None, stage_frac=None, stage_lapse=False, head_zero_init=False, curve_lr_mult=None, theta_laplace=False, init_base_rate=False, slope_pin=None, slope_pin_w=0.01, theta_moments=None, rating_anchor=None, anchor_skip=30, curve_param="ab", lapse_fixed=None, gauge="sd",
+        link_power=False, link="sigmoid", odds_sharpness=1.0, blend_frac=None, stage_frac=None, stage_lapse=False, head_zero_init=False, curve_lr_mult=None, theta_laplace=THETA_LAPLACE, init_base_rate=INIT_BASE_RATE, slope_pin=None, slope_pin_w=0.01, theta_moments=None, rating_anchor=None, anchor_skip=30, curve_param="ab", lapse_fixed=None, gauge="sd",
         floor_prior=False, floor_rel=False, weight_avg=None,
         optimizer="adam", muon_lr=0.02, muon_wd=0.0, slope_height=False,
         floor_mode=FLOOR_MODE, slope_mode="trunk", hidden=None,
@@ -1918,6 +1928,8 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         "lr_schedule": str(lr_schedule),
         "lr_warmup_epochs": int(lr_warmup_epochs),
         "floor_mode": str(floor_mode),
+        "theta_laplace": bool(theta_laplace),
+        "init_base_rate": bool(init_base_rate),
         "ortho_axes": float(ortho_axes),
         "teach_detach": bool(teach_detach),
         "ortho_detach": bool(ortho_detach),

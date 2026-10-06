@@ -161,6 +161,13 @@ def panel_regime(records, ramp_may_vary=False, mutual_may_vary=False):
     require(len(floors) == 1,
             f"the panel's arms drew their floors from {sorted(floors)} — the "
             f"panel straddles a baseline change")
+    # SO ARE THE ABILITY PRIOR AND THE BASE-RATE START. A record that predates
+    # either knob ran without it.
+    for knob in ("theta_laplace", "init_base_rate"):
+        vals = {bool(r["metrics"].get(knob, False)) for r in records.values()}
+        require(len(vals) == 1,
+                f"the panel's arms ran {knob} = {sorted(vals)} — the panel "
+                f"straddles a baseline change")
     return budgets.pop(), schedules.pop()
 
 
