@@ -449,8 +449,11 @@ class JointMIRT(nn.Module):
         # the answer.
         # "own_trunk" gives the floor a trunk of its own, the same shape as the
         # shared one but sharing no weights with difficulty, slope or axes.
+        # "chance" fixes every floor at the problem's random-guess rate (one
+        # over its legal moves, carried as an extra last feature column the
+        # trunk never reads) and "zero" fixes it at 0; neither is trained.
         if floor_mode not in ("trunk", "global", "bot", "linear", "weak_human",
-                              "own_trunk"):
+                              "own_trunk", "chance", "zero"):
             raise ValueError(f"unknown floor_mode {floor_mode!r}")
         self.floor_mode = floor_mode
         # EXPERIMENT ("global" as shipped): "linear" gives every problem its own
@@ -675,6 +678,8 @@ class JointMIRT(nn.Module):
     def slope_logit(self, feat):
         """Pre-softplus slope output — the space the barrier acts in, where the
         penalty falls away properly for healthy slopes."""
+        if self.floor_mode == "chance":
+            feat = feat[:, :-1]
         if self.curve_param == "local":
             a = self.problem_params(feat)[1].clamp(min=1e-4)
             return a + torch.log(-torch.expm1(-a))   # inverse softplus, stable
@@ -726,6 +731,8 @@ class JointMIRT(nn.Module):
         objects, while difficulty is MULTIPLIED by the slope and must rescale
         with it. The shipped rating is an ability, so under the unblocked
         rescaling every rating scales and the whole axis floats."""
+        if self.floor_mode == "chance":
+            c_chance, feat = feat[:, -1], feat[:, :-1]
         h = self.trunk(self._drop(feat))
         o = self.head(h)
         b = o[:, 0]
@@ -763,7 +770,11 @@ class JointMIRT(nn.Module):
         cap = 1.0 - 2.0 * lam
         if self.curve_param == "local":
             cap = cap.clamp(max=CALIBRATION_P) * (1.0 - 1e-3)
-        if self.floor_mode == "global":
+        if self.floor_mode == "chance":
+            c = c_chance
+        elif self.floor_mode == "zero":
+            c = torch.zeros_like(b)
+        elif self.floor_mode == "global":
             c = cap * torch.sigmoid(self.floor_global).expand_as(b)
         elif self.floor_mode == "bot":
             c = cap * torch.sigmoid(self.floor_lin(feat[:, PCA_DIM:])[:, 0])
@@ -1109,6 +1120,12 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
     synthetic = []
     tids_by_size = {s: [t for sz, t in keys if sz == s] for s in SIZES}
     cells = load_legal_cell_counts(SIZES, tids_by_size)
+    if floor_mode == "chance":
+        # The chance floor rides as an extra last column, stripped off by the
+        # model before anything reads the features (see JointMIRT).
+        chance = torch.tensor([1.0 / cells[k] for k in keys],
+                              dtype=tfeat.dtype, device=device)[:, None]
+        tfeat = torch.cat([tfeat, chance], dim=1)
     every = torch.arange(len(keys), device=device)
     tu_all, tp_all, ty_all = [tu], [tp], [ty]
     strong_from = None
