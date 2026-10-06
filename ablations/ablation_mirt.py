@@ -19,8 +19,9 @@ orthogonality penalty and the taught pull (§1.5, §1.14), and the feature layou
 held-aside fraction is drawn over rows or over whole problems, or is the
 per-problem spread holdout of §1.5), the axis count
 (§1.14), the two dropout sites with the weight decay §1.5 rejects as their
-substitute, and the schedule (§1.8: the decay against the constant rate, and
-the opening ramp the axis-space panel measures).
+substitute, the schedule (§1.8: the decay against the constant rate, and
+the opening ramp the axis-space panel measures), and the ability prior and
+the base-rate start (§1.5, §1.8).
 
 An arm writes:
 
@@ -232,6 +233,19 @@ def main(argv=None):
     ap.add_argument("--teach-weight", type=float, default=None,
                     help="the pull toward the taught rule columns (production "
                          f"{train_mirt.TEACH_WEIGHT}); 0 frees the basis")
+    # --- the ability prior and the starting point (methodology §1.5, §1.8) ---
+    ap.add_argument("--theta-laplace", type=int, default=None,
+                    help="1 = ability carries the population prior whose "
+                         "variance is re-estimated each epoch from the "
+                         "abilities and their Fisher information (production "
+                         f"{int(train_mirt.THETA_LAPLACE)}); 0 leaves ability "
+                         "free. Part of the regime")
+    ap.add_argument("--init-base-rate", type=int, default=None,
+                    help="1 = every ability is shifted by one amount before "
+                         "training so the initial mean prediction equals the "
+                         "observed clearance (production "
+                         f"{int(train_mirt.INIT_BASE_RATE)}); 0 starts from the "
+                         "network's initial output. Part of the regime")
     # --- the feature cluster (methodology §1.3) ---
     ap.add_argument("--pca-dim", type=int, default=None,
                     help="joint-PCA activation width (production "
@@ -319,7 +333,8 @@ def main(argv=None):
                  "pca_dim", "blocks", "act_source", "stop_unit", "k_axes",
                  "dropout", "input_dropout", "weight_decay",
                  "weight_decay_fields",
-                 "lr_schedule", "lr_warmup_epochs", "split_seed", "pca_seed"):
+                 "lr_schedule", "lr_warmup_epochs", "split_seed", "pca_seed",
+                 "theta_laplace", "init_base_rate"):
         v = getattr(args, flag)
         if v is not None:
             cfg[flag] = v

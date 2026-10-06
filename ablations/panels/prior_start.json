@@ -1,0 +1,118 @@
+{
+  "panel": "prior_start",
+  "description": "methodology 1.5 / 1.8 \u2014 what the ability prior and the base-rate start each buy. The served attempts sit near each problem's 80% point, so the curve below it is barely informed: without a population prior on ability a user can be explained by floors (parked far below every problem), and without a start at the observed clearance the floor is the cheapest early intercept and lands wherever its weak gradient leaves it. EVERY ARM IS THE SHIPPED FIT with one or both switched off: no_prior drops the ability prior, no_start starts from the network's initial output, neither drops both. FOUR SEEDS per configuration paired against the shipped arm at the same seed, at one pinned draw of held-out problems (split_seed 0). The claim is about consistency first, so each configuration is read for cross-seed agreement of the per-problem floors and slopes, the spread of the floor's centre and of the lapse across seeds, and the number of users explained mostly by floors, beside its paired held-out level.",
+  "arms": {
+    "shipped_s0": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 0
+    },
+    "no_prior_s0": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 0,
+      "theta_laplace": 0
+    },
+    "no_start_s0": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 0,
+      "init_base_rate": 0
+    },
+    "neither_s0": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 0,
+      "theta_laplace": 0,
+      "init_base_rate": 0
+    },
+    "shipped_s1": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 1
+    },
+    "no_prior_s1": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 1,
+      "theta_laplace": 0
+    },
+    "no_start_s1": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 1,
+      "init_base_rate": 0
+    },
+    "neither_s1": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 1,
+      "theta_laplace": 0,
+      "init_base_rate": 0
+    },
+    "shipped_s2": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 2
+    },
+    "no_prior_s2": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 2,
+      "theta_laplace": 0
+    },
+    "no_start_s2": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 2,
+      "init_base_rate": 0
+    },
+    "neither_s2": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 2,
+      "theta_laplace": 0,
+      "init_base_rate": 0
+    },
+    "shipped_s3": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 3
+    },
+    "no_prior_s3": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 3,
+      "theta_laplace": 0
+    },
+    "no_start_s3": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 3,
+      "init_base_rate": 0
+    },
+    "neither_s3": {
+      "stop_unit": "problem",
+      "split_seed": 0,
+      "pca_seed": 0,
+      "seed": 3,
+      "theta_laplace": 0,
+      "init_base_rate": 0
+    }
+  }
+}
