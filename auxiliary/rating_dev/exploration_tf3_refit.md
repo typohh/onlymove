@@ -491,3 +491,18 @@ Adopted from it (by decision; the external-signal floor was declined): **a Lapla
 - **Fixed, untrained floors** (`floor_mode="chance"`: each problem's random-guess rate, one over its legal moves, median 0.016, range 0.006–0.25; `floor_mode="zero"`), new defaults, normal rate, two seeds each (`ho_flch_s0/s1`, `ho_fl0_s0/s1`). If the floor level is unidentified, these should fit about as well as a trained floor while being consistent by construction.
 - **Slow rate from a low start, seed 1** (`ho_lapclrfl_s1`): median floor 0.032 against 0.318 from the usual start, held-out 0.4778 against 0.4784 — anchoring confirmed on both seeds.
 - **Full rate from a low start** (`ho_lapfl_s0/s1`): 0.4892 / 0.4811, +1.3 / +2.9 against the usual start. At the full rate the floor does not stay low: median 0.161 / 0.334 (from ~0.05). Seed 1 degenerates — the scale collapses (difficulty IQR 0.07, slope × IQR 0.36), lapse 0.037, 11 users mostly floor-explained (heavy user 0.33). Slopes agree 0.05 across the pair, floors 0.74. A low start is not a fix at the full rate.
+
+## Addendum: scoring where the floor acts
+
+Held-out loss is nearly blind to the floor: the held-out rows mirror training, so only ~2.4% sit more than one rating-IQR below the problem and ~0.4% more than two, and a 0.05-nat difference on them moves the overall score by ~1 millinat, under the seed noise. Scored on those rows alone (`/tmp/floorrows2.py` on windtunnel; rows chosen per seed by the average gap across the arms compared, so no arm picks its own rows), at seeds 0 / 1, loss per row:
+
+| Arm | gap < −1 (266 / 322 rows) | gap < −2 (42 / 60 rows) |
+|---|---|---|
+| observed success | 0.500 / 0.540 | 0.429 / 0.433 |
+| plain trunk | 0.716 / 0.693 | 0.764 / 0.674 |
+| Laplace + init | 0.653 / 0.673 | 0.540 / 0.653 |
+| slow 0.1× | 0.667 / 0.672 | 0.588 / 0.672 |
+| slow, low floor start | 0.672 / 0.694 | 0.605 / 0.704 |
+| full rate, low floor start | 0.690 / 0.721 | 0.601 / 0.877 |
+
+Laplace + init is best or tied-best in every cell; the low-floor arms are worse on the one-IQR band; the plain trunk is worst or near it. Standard error ~0.02 per row on the one-IQR band, ~0.05 on the two-IQR band, so pool seeds before leaning on a single cell. Users far below a problem still clear it 43–54% of the time. This measure is to be reported for every floor-related arm alongside held-out loss. Queued: Laplace + init with the sharpened odds clamp (k = 4, `ho_lapk4_s0/s1`), which leaves the floor's gradient to exactly these rows.
