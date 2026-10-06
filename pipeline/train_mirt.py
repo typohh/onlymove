@@ -365,7 +365,7 @@ class JointMIRT(nn.Module):
 
     def __init__(self, fdim, n_users, input_dim, seed, k_axes=K_AXES,
                  dropout=DROPOUT, input_dropout=INPUT_DROPOUT, link_power=False,
-                 link="sigmoid", odds_sharpness=1.0, blend_frac=None, stage_frac=None, stage_lapse=False, head_zero_init=False, curve_param="ab", lapse_fixed=None, gauge="sd",
+                 link="sigmoid", odds_sharpness=1.0, blend_frac=None, stage_frac=None, stage_lapse=False, head_zero_init=False, curve_lr_mult=None, curve_param="ab", lapse_fixed=None, gauge="sd",
                  floor_prior=False, floor_rel=False,
                  slope_height=False, floor_mode=FLOOR_MODE,
                  slope_mode="trunk", floor_cols=None,
@@ -581,6 +581,14 @@ class JointMIRT(nn.Module):
         self.register_buffer("b_mu", torch.zeros(()))
         self.register_buffer("b_sd", torch.ones(()))
         self.register_buffer("g_rms", torch.ones(1, self.k_axes))
+        # EXPERIMENT (None as shipped): slope and floor read from their own
+        # head on the trunk's representation, trained at `curve_lr_mult` times
+        # the network rate, so ability and difficulty settle first and the
+        # curve shape follows — the two-stage ordering without a switch.
+        # Built last so every other module draws the same initial weights.
+        self.curve_lr_mult = curve_lr_mult
+        if curve_lr_mult:
+            self.head_cs = nn.Linear(d, 2)
 
     def param_groups(self, lr_net=LR_NET, lr_field=LR_FIELD):
         """SPLIT RATES: the network trains an order of magnitude slower than the
@@ -596,8 +604,14 @@ class JointMIRT(nn.Module):
         net, field = [], []
         for name, prm in self.named_parameters():
             (field if name in FIELD_PARAMS else net).append(prm)
-        return [{"params": net, "lr": lr_net},
-                {"params": field, "lr": lr_field}]
+        groups = [{"params": net, "lr": lr_net},
+                  {"params": field, "lr": lr_field}]
+        if self.curve_lr_mult:
+            cs = {id(q) for q in self.head_cs.parameters()}
+            groups[0]["params"] = [q for q in net if id(q) not in cs]
+            groups.append({"params": list(self.head_cs.parameters()),
+                           "lr": lr_net * self.curve_lr_mult})
+        return groups
 
     def lapse(self):
         if self.lapse_fixed is not None:
@@ -648,6 +662,8 @@ class JointMIRT(nn.Module):
             return self.slope_lin(feat)[:, 0]
         if self.slope_mode == "global":
             return self.slope_global.expand(feat.shape[0])
+        if self.curve_lr_mult:
+            return self.head_cs(self.trunk(feat))[:, 0]
         return self.head(self.trunk(feat))[:, 1]
 
     def _staged(self, raw, g, frozen, mu_buf):
@@ -711,7 +727,7 @@ class JointMIRT(nn.Module):
         elif self.slope_mode == "global":
             so = self.slope_global.expand_as(b)
         else:
-            so = o[:, 1]
+            so = self.head_cs(h)[:, 0] if self.curve_lr_mult else o[:, 1]
         if self.blend_frac:
             so = (1 - self.blend_w) * self.slope_g + self.blend_w * so
         if self.stage_frac:
@@ -738,7 +754,8 @@ class JointMIRT(nn.Module):
         elif self.floor_mode == "linear":
             c = self._blend_floor(cap, self.floor_lin(self._drop(feat))[:, 0])
         else:
-            c = self._blend_floor(cap, a * o[:, 2] if self.floor_rel else o[:, 2])
+            fr = self.head_cs(h)[:, 1] if self.curve_lr_mult else o[:, 2]
+            c = self._blend_floor(cap, a * fr if self.floor_rel else fr)
         if self.slope_height:
             a = a / (1.0 - c - lam)
         if self.curve_param == "local":
@@ -994,7 +1011,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         ortho_axes_detach=ORTHO_AXES_DETACH,
         v_ridge_ladder=1.0,
         k_axes=K_AXES, dropout=DROPOUT, input_dropout=INPUT_DROPOUT,
-        link_power=False, link="sigmoid", odds_sharpness=1.0, blend_frac=None, stage_frac=None, stage_lapse=False, head_zero_init=False, slope_pin=None, slope_pin_w=0.01, theta_moments=None, rating_anchor=None, anchor_skip=30, curve_param="ab", lapse_fixed=None, gauge="sd",
+        link_power=False, link="sigmoid", odds_sharpness=1.0, blend_frac=None, stage_frac=None, stage_lapse=False, head_zero_init=False, curve_lr_mult=None, slope_pin=None, slope_pin_w=0.01, theta_moments=None, rating_anchor=None, anchor_skip=30, curve_param="ab", lapse_fixed=None, gauge="sd",
         floor_prior=False, floor_rel=False, weight_avg=None,
         optimizer="adam", muon_lr=0.02, muon_wd=0.0, slope_height=False,
         floor_mode=FLOOR_MODE, slope_mode="trunk", hidden=None,
@@ -1175,6 +1192,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
                   dropout=dropout, input_dropout=input_dropout,
                   link_power=link_power, link=link, odds_sharpness=odds_sharpness,
                   blend_frac=blend_frac, stage_frac=stage_frac, stage_lapse=stage_lapse,
+                  curve_lr_mult=curve_lr_mult,
                   head_zero_init=head_zero_init,
                   curve_param=curve_param,
                   lapse_fixed=lapse_fixed, gauge=gauge,
@@ -1200,6 +1218,8 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
     # which is what Adam's own argument would have done.
     groups = m.param_groups(lr_net, lr_field)
     groups[0]["weight_decay"] = weight_decay
+    for extra in groups[2:]:
+        extra["weight_decay"] = weight_decay
     groups[1]["weight_decay"] = (weight_decay if weight_decay_fields is None
                                  else weight_decay_fields)
     if optimizer == "muon":
