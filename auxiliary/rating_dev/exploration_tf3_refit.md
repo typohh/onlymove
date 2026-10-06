@@ -419,3 +419,17 @@ Toward fixing it at the source rather than stacking remedies. A "seed" so far ch
 ## Addendum: weight decay, tested properly
 
 The earlier no-dropout sweep was not a fair test. Decoupled decay (AdamW) shrinks the weights by rate × decay per step, and this fit takes few, small network steps (rate 3e-4, ~7 steps per epoch at batch 65,536, ~50k steps with the cosine averaging half rate), so the whole run's shrinkage is about exp(−7.5 × decay): 0.1 is weak (≈0.47×, it memorized), 1 is crushing (≈0.0006×, it broke), and the window between was never tried. The coupled runs used Adam's L2, which Adam rescales per parameter, so its strength barely tracks the setting. Plumbing checked: the network group takes the decay, the per-user fields are exempt. A structural caveat stands: the dropout that matters is the input column dropout against activation-fingerprint memorization, a lookup that does not need large weights, so weight decay may not replace it. Queued on the trunk model: AdamW 0.03 / 0.1 / 0.3 WITH dropout, two seeds each — the question there is whether decay narrows the floor–slope valley — and AdamW 0.2 / 0.3 / 0.5 without dropout, one seed each, for the replacement question.
+- **Replicate study, complete.** Feature basis only (`ho_rep_pca`): identical to the reference (every agreement 1.000) — the activations are read unrotated, so `pca_seed` changes nothing. Training stream only (`ho_rep_stream`): floors 0.21, slopes 0.62, ratings 0.973; lapse 0.025 → 0.0003; held-out 0.4901 → 0.4989 on the same rows. With an exact repeat at 1.000 and the initial weights alone at 0.34 / 0.69, the two sources are the initial weights and the training stream, each enough by itself.
+- **Trajectories, plain trunk model, initial weights only** (`ho_traj_a/b`, first half of the full schedule):
+
+  | Epoch | Floors | Slopes | Ratings | Mean floor a / b | Lapse a / b |
+  |---|---|---|---|---|---|
+  | 500 | −0.30 | −0.14 | 0.953 | 0.479 / 0.472 | 0.006 / 0.047 |
+  | 1000 | 0.21 | −0.01 | 0.978 | 0.393 / 0.375 | 0.002 / 0.021 |
+  | 1500 | 0.22 | 0.28 | 0.974 | 0.344 / 0.356 | 0.001 / 0.005 |
+  | 2000 | −0.12 | 0.39 | 0.974 | 0.302 / 0.354 | 0.000 / 0.002 |
+  | 2500 | 0.02 | 0.54 | 0.972 | 0.270 / 0.339 | 0.009 / 0.002 |
+  | 3000 | 0.09 | 0.66 | 0.971 | 0.258 / 0.327 | 0.010 / 0.001 |
+  | 3499 | 0.37 | 0.70 | 0.970 | 0.253 / 0.312 | 0.013 / 0.002 |
+
+  The floors never converge and then part: they disagree from the start (−0.30 at epoch 500) and wander near zero agreement for the whole first half, while the ratings agree from the start and the slopes converge steadily. The data pins the rating, constrains the slope slowly, and leaves the per-problem floor ordering essentially undetermined; the mean floor is still drifting down at the halfway point and the lapse moves against it. Candidate reading: per-problem floor variation is not something this data supports, which points at a global floor (queued) rather than at another way of holding a per-problem one.
