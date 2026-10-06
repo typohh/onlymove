@@ -1011,7 +1011,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         ortho_axes_detach=ORTHO_AXES_DETACH,
         v_ridge_ladder=1.0,
         k_axes=K_AXES, dropout=DROPOUT, input_dropout=INPUT_DROPOUT,
-        link_power=False, link="sigmoid", odds_sharpness=1.0, blend_frac=None, stage_frac=None, stage_lapse=False, head_zero_init=False, curve_lr_mult=None, slope_pin=None, slope_pin_w=0.01, theta_moments=None, rating_anchor=None, anchor_skip=30, curve_param="ab", lapse_fixed=None, gauge="sd",
+        link_power=False, link="sigmoid", odds_sharpness=1.0, blend_frac=None, stage_frac=None, stage_lapse=False, head_zero_init=False, curve_lr_mult=None, theta_laplace=False, init_base_rate=False, slope_pin=None, slope_pin_w=0.01, theta_moments=None, rating_anchor=None, anchor_skip=30, curve_param="ab", lapse_fixed=None, gauge="sd",
         floor_prior=False, floor_rel=False, weight_avg=None,
         optimizer="adam", muon_lr=0.02, muon_wd=0.0, slope_height=False,
         floor_mode=FLOOR_MODE, slope_mode="trunk", hidden=None,
@@ -1206,6 +1206,51 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
     # separating the two for the replicate study.
     if stream_seed is not None:
         torch.manual_seed(stream_seed)
+    if init_base_rate:
+        # EXPERIMENT: start at the population's own clearance. One shift is
+        # added to every real user's ability, found by bisection so that the
+        # mean predicted success over a batch of training rows equals the
+        # observed base rate; otherwise the fit starts near 0.5 against data
+        # near 0.8 and the floor is the cheapest intercept to close the gap.
+        # Run in training mode (the gauge standardises b as in training) with
+        # the RNG state and the gauge buffers restored afterwards, so the
+        # training stream is unchanged.
+        g_init = torch.Generator(device=device).manual_seed(0)
+        rows0 = tr[torch.randperm(len(tr), generator=g_init, device=device)[:batch]]
+        target = float(ty_all[tr].mean())
+        cpu_state = torch.get_rng_state()
+        cuda_state = torch.cuda.get_rng_state() if device.type == "cuda" else None
+        bufs = {k: v.clone() for k, v in m.named_buffers()}
+        th0 = m.theta.weight.data[:n_users].clone()
+        lo, hi = -10.0, 10.0
+        with torch.no_grad():
+            for _ in range(40):
+                mid = 0.5 * (lo + hi)
+                m.theta.weight.data[:n_users] = th0 + mid
+                torch.set_rng_state(cpu_state)
+                if cuda_state is not None:
+                    torch.cuda.set_rng_state(cuda_state)
+                pm = float(m(tu_all[rows0], tfeat[tp_all[rows0]])[0].mean())
+                lo, hi = (mid, hi) if pm < target else (lo, mid)
+            m.theta.weight.data[:n_users] = th0 + 0.5 * (lo + hi)
+            for k, v in m.named_buffers():
+                v.copy_(bufs[k])
+        torch.set_rng_state(cpu_state)
+        if cuda_state is not None:
+            torch.cuda.set_rng_state(cuda_state)
+        print(f"  init_base_rate: ability shift {0.5 * (lo + hi):+.3f} "
+              f"(predicted {pm:.3f}, target {target:.3f})", flush=True)
+    if theta_laplace:
+        # EXPERIMENT: a population prior on ability whose variance is the
+        # data's own, by a Laplace-EM step each epoch: sigma^2 = mean over
+        # users of (theta - mean)^2 + 1 / I_u, with I_u each user's Fisher
+        # information summed over their rows in the previous epoch. A sparse
+        # user's large 1/I keeps sigma^2 from collapsing (the failure of
+        # maximising jointly over abilities and their variance), heavy users
+        # are barely touched, and a user parked far from everyone is priced.
+        # No weight is set; sigma^2 is detached (the M-step).
+        info_acc = torch.zeros(n_users, device=device)
+        sig2 = None
     prior_ratio = len(keys) / len(df)
     # Adam with no decay is what ships; the decay knob exists so 1.5's claim
     # that a norm penalty does not substitute for dropout can be re-measured,
@@ -1285,6 +1330,16 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         return live
 
     for ep in range(epochs):
+        if theta_laplace:
+            if ep > 0:
+                with torch.no_grad():
+                    th = m.theta.weight[:n_users, 0]
+                    sig2 = float(((th - th.mean()) ** 2
+                                  + 1.0 / info_acc.clamp(min=1e-3)).mean())
+                if ep % 1000 == 1:
+                    print(f"  laplace prior: sigma {sig2 ** 0.5:.3f}, ability sd "
+                          f"{float(th.std()):.3f}", flush=True)
+            info_acc.zero_()
         if stop_epoch is not None and ep >= stop_epoch:
             # Diagnostic: end the run here with the schedule still that of the
             # full budget, so the path so far is the full run's path.
@@ -1348,6 +1403,21 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
                                  (1.0 - m.lapse().detach()) * yb, yb)
             loss = torch.nn.functional.binary_cross_entropy(
                 pred, yb, reduction="none").sum() / len(bi)
+            if theta_laplace:
+                with torch.no_grad():
+                    a_r, c_r = rsf[:, 1], rsf[:, 2]
+                    lam_r = m._last_lam
+                    span = (1.0 - c_r - lam_r).clamp(min=1e-6)
+                    sz = ((pred - c_r) / span).clamp(1e-6, 1 - 1e-6)
+                    dp = span * a_r * sz * (1 - sz)
+                    fi = dp ** 2 / (pred * (1 - pred))
+                    uu = tu_all[bi]
+                    real = uu < n_users
+                    info_acc.index_add_(0, uu[real], fi[real])
+                if sig2 is not None:
+                    th = m.theta.weight[:n_users, 0]
+                    loss = loss + (0.5 * (th - th.mean().detach()) ** 2
+                                   ).sum() / sig2 / n
             if rating_anchor:
                 # EXPERIMENT: each attempt pulls its user's ability toward the
                 # problem's RATING (the 80% point, held fixed here), so a user
