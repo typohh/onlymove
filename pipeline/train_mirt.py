@@ -749,6 +749,7 @@ class JointMIRT(nn.Module):
             q = ((CALIBRATION_P - c) / (1.0 - c - lam)).clamp(EPS, 1.0 - EPS)
             a = (steep / ((1.0 - c - lam) * q * (1.0 - q))).clamp(min=SLOPE_FLOOR)
             b = r_loc - torch.log(q / (1.0 - q)) / a
+        self._last_a = a
         g = self.g_lin(h)
         # Kept for `detached_loadings`: the same representation and, below, the
         # same divisor this batch's loadings use, so a detached readout is the
@@ -993,7 +994,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         ortho_axes_detach=ORTHO_AXES_DETACH,
         v_ridge_ladder=1.0,
         k_axes=K_AXES, dropout=DROPOUT, input_dropout=INPUT_DROPOUT,
-        link_power=False, link="sigmoid", odds_sharpness=1.0, blend_frac=None, stage_frac=None, stage_lapse=False, head_zero_init=False, theta_moments=None, rating_anchor=None, anchor_skip=30, curve_param="ab", lapse_fixed=None, gauge="sd",
+        link_power=False, link="sigmoid", odds_sharpness=1.0, blend_frac=None, stage_frac=None, stage_lapse=False, head_zero_init=False, slope_pin=None, slope_pin_w=0.01, theta_moments=None, rating_anchor=None, anchor_skip=30, curve_param="ab", lapse_fixed=None, gauge="sd",
         floor_prior=False, floor_rel=False, weight_avg=None,
         optimizer="adam", muon_lr=0.02, muon_wd=0.0, slope_height=False,
         floor_mode=FLOOR_MODE, slope_mode="trunk", hidden=None,
@@ -1348,6 +1349,14 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
                 th_row = m.theta(tu_all[bi]).squeeze(-1)
                 loss = loss + rating_anchor * (
                     (th_row - r_row) ** 2 * ok).sum() / len(bi)
+            if slope_pin:
+                # EXPERIMENT: a gentle pull of the batch's mean log slope toward
+                # log(slope_pin), so floor and slope cannot trade the slope's
+                # centre away, and an ability penalty cannot be met by shrinking
+                # the ability scale while the slopes grow to compensate.
+                loss = loss + slope_pin_w * (
+                    torch.log(m._last_a.clamp(min=1e-6)).mean()
+                    - float(np.log(slope_pin))) ** 2
             if theta_moments:
                 # EXPERIMENT: a squared penalty pulling the abilities' mean and
                 # spread toward zero, which the likelihood resists — no target
