@@ -21,7 +21,8 @@ K_AXES = 7                       # skill axes fitted alongside the rating; MUST 
                                  # which is the shipping decision K follows
 # THE SHIPPED TRUNK INPUT, stated once: which per-problem blocks the feature trunk
 # sees, named as `blocks` names them in utils.rating.features. Activations + bot
-# winrate here means the joint-PCA activation block, the bot pass-rate block, and
+# winrate here means the standardized activation block (the store's full width,
+# unrotated), the bot pass-rate block, and
 # the board-size flag past the dropout region. The answer-derived blocks — move
 # evals, ownership swing, game phase — stay pipeline artifacts and build the motif
 # rules, but they are NOT trunk inputs: the trunk is fanned out over every legal

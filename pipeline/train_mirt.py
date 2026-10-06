@@ -27,8 +27,8 @@ architecture — lives in `auxiliary.rating_dev.train_joint_mirt`, so a test twe
 cannot reach the shipped fit. The measurement behind every constant here:
 `docs/mirt_benchmark.md`.
 
-THE TRUNK SEES `PRODUCTION_BLOCKS` (utils.rating.model_constants): the joint-PCA
-correct-cell activations, the bot pass-rate block, and the board-size flag past the
+THE TRUNK SEES `PRODUCTION_BLOCKS` (utils.rating.model_constants): the standardized,
+unrotated correct-cell activations, the bot pass-rate block, and the board-size flag past the
 dropout region. The answer-derived blocks — move evals, ownership swing, game phase
 — are not trunk inputs: this same trunk is fanned out over every legal cell by
 `pipeline.write_mirt_per_cell`, where a block describing the problem through its
@@ -1065,8 +1065,9 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     t0 = time.time()
 
-    # THE FEATURE BASIS HAS ITS OWN SEED. The joint PCA is randomized and keyed
-    # on the seed it is given, so one seed re-rolls the basis, the network's
+    # THE FEATURE BASIS HAS ITS OWN SEED. Below the store's width the joint PCA
+    # is randomized and keyed on the seed it is given (at the full width the
+    # block is unrotated and the seed is inert), so one seed re-rolls the basis, the network's
     # initial weights and the minibatch order together. Production runs them all
     # off one seed and is self-consistent; a REPLICATE that varies the seed is
     # varying three things, and separating them is the only way to say which one
