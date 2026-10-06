@@ -290,14 +290,14 @@ LABELS = os.path.join(AXES_DIR, "labels.json")
 
 
 RAMP_SHARPNESS = 10.0
-# THE FLOOR IS A LINEAR MAP OF THE INPUTS, not a row of the trunk's head: the
-# same columns everything else reads, without passing through the shared
-# trunk. Floor and slope can stand in for each other across most of the curve,
-# so a floor free to draw on the trunk lands in a different place every seed
-# while the predictions barely move; a linear map has no room to drift, and the
-# floors it gives reproduce across seeds. "trunk" (the head's own row), "bot"
-# (the bot columns only) and the other sources remain for comparison.
-FLOOR_MODE = "linear"
+# THE FLOOR IS A ROW OF THE TRUNK'S HEAD, like difficulty and slope. On its own
+# that floor lands somewhere different every seed — served attempts sit near
+# each problem's 80% point and say almost nothing about the curve below it —
+# but under the ability prior and the base-rate start below it reproduces. A
+# linear map of the inputs also reproduces, by having no room to drift, but it
+# lets a heavy user be parked far below every problem and explained by floors.
+# "linear", "bot" and the other sources remain for comparison.
+FLOOR_MODE = "trunk"
 # ABILITY HAS A POPULATION PRIOR WHOSE VARIANCE IS THE DATA'S OWN (Laplace-EM:
 # each epoch sigma^2 = mean over users of (theta - mean)^2 + 1/I_u), and the fit
 # STARTS AT THE POPULATION'S CLEARANCE (one ability shift at initialisation,
