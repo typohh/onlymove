@@ -365,7 +365,7 @@ class JointMIRT(nn.Module):
 
     def __init__(self, fdim, n_users, input_dim, seed, k_axes=K_AXES,
                  dropout=DROPOUT, input_dropout=INPUT_DROPOUT, link_power=False,
-                 link="sigmoid", odds_sharpness=1.0, blend_frac=None, stage_frac=None, head_zero_init=False, curve_param="ab", lapse_fixed=None, gauge="sd",
+                 link="sigmoid", odds_sharpness=1.0, blend_frac=None, stage_frac=None, stage_lapse=False, head_zero_init=False, curve_param="ab", lapse_fixed=None, gauge="sd",
                  floor_prior=False, floor_rel=False,
                  slope_height=False, floor_mode=FLOOR_MODE,
                  slope_mode="trunk", floor_cols=None,
@@ -496,6 +496,9 @@ class JointMIRT(nn.Module):
         # eval) — so the per-problem floors and slopes may spread but their
         # mean stays where stage one put it.
         self.stage_frac = stage_frac
+        # `stage_lapse`: freeze the global lapse at the switch too, so stage two
+        # changes only the per-problem departures.
+        self.stage_lapse = bool(stage_lapse)
         if stage_frac:
             self.slope_g = nn.Parameter(torch.zeros(()))
             self.floor_g = nn.Parameter(torch.zeros(()))
@@ -665,6 +668,8 @@ class JointMIRT(nn.Module):
             self.stage2.fill_(1.0)
         self.slope_g.requires_grad_(False)
         self.floor_g.requires_grad_(False)
+        if self.stage_lapse:
+            self.lapse_raw.requires_grad_(False)
 
     def _blend_floor(self, cap, raw):
         if self.blend_frac:
@@ -988,7 +993,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         ortho_axes_detach=ORTHO_AXES_DETACH,
         v_ridge_ladder=1.0,
         k_axes=K_AXES, dropout=DROPOUT, input_dropout=INPUT_DROPOUT,
-        link_power=False, link="sigmoid", odds_sharpness=1.0, blend_frac=None, stage_frac=None, head_zero_init=False, theta_moments=None, rating_anchor=None, anchor_skip=30, curve_param="ab", lapse_fixed=None, gauge="sd",
+        link_power=False, link="sigmoid", odds_sharpness=1.0, blend_frac=None, stage_frac=None, stage_lapse=False, head_zero_init=False, theta_moments=None, rating_anchor=None, anchor_skip=30, curve_param="ab", lapse_fixed=None, gauge="sd",
         floor_prior=False, floor_rel=False, weight_avg=None,
         optimizer="adam", muon_lr=0.02, muon_wd=0.0, slope_height=False,
         floor_mode=FLOOR_MODE, slope_mode="trunk", hidden=None,
@@ -1168,7 +1173,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
                   seed if init_seed is None else init_seed, k_axes,
                   dropout=dropout, input_dropout=input_dropout,
                   link_power=link_power, link=link, odds_sharpness=odds_sharpness,
-                  blend_frac=blend_frac, stage_frac=stage_frac,
+                  blend_frac=blend_frac, stage_frac=stage_frac, stage_lapse=stage_lapse,
                   head_zero_init=head_zero_init,
                   curve_param=curve_param,
                   lapse_fixed=lapse_fixed, gauge=gauge,
