@@ -574,6 +574,11 @@ def main(argv=None):
         if g is None or pd.isna(g):
             continue
         g = float(g)
+        # The mapping screens verified anchors too, keyed as it keys them: on the
+        # system the heartbeat rates and the band of its own value.
+        if verified and (pref, system, rank_band(g)) in excluded:
+            screened += 1
+            continue
         ours = user_internal[pref]              # raw header rank
         ours_adj = user_internal_adj[pref]      # time-adjusted; drives server maps
         declared_internal = declared_to_internal(system, g, server_curves)

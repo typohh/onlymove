@@ -208,6 +208,29 @@ def _honesty(stats):
     }
 
 
+def _carry_verified_exclusions(shipped_dir, scratch_dir):
+    """Append the verified ratings the SHIPPED mapping screened out to the scratch
+    refit's exclusions. A declarations-only refit fits no verified row, so it can
+    screen none; scoring one the shipped screen rejected — a linked account whose
+    rating describes someone else, or nobody yet — against the refit measures that
+    row, not the honesty of self-reports. The screen is the shipped mapping's own
+    decision, applied here exactly as it is applied to declarations."""
+    import csv
+    name = mapping.EXCLUSIONS_CSV
+    with open(os.path.join(shipped_dir, name), newline="") as f:
+        shipped = list(csv.DictReader(f))
+    require(not shipped or "kind" in shipped[0],
+            f"{shipped_dir}/{name} carries no kind column — re-run map_rating_to_rank")
+    verified = [r for r in shipped if r["kind"] == "verified"]
+    path = os.path.join(scratch_dir, name)
+    with open(path, newline="") as f:
+        fields = csv.DictReader(f).fieldnames
+    with open(path, "a", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=fields)
+        for r in verified:
+            w.writerow({k: r[k] for k in fields})
+
+
 def declarations_only_stats():
     """The calibration statistics against a mapping fitted WITHOUT the verified
     ratings. The honesty contrast differences a verified rating's residual against
@@ -220,6 +243,7 @@ def declarations_only_stats():
         scratch = os.path.join(tmp, "ratings")
         shutil.copytree(os.path.join(PROJECT_ROOT, "ratings"), scratch)
         mapping.main(["--dir", scratch, "--no-verified"])
+        _carry_verified_exclusions(os.path.join(PROJECT_ROOT, "ratings"), scratch)
         stats = calibration.main(["--dir", scratch, "--csv", os.path.join(tmp, "d.csv")])
     require(isinstance(stats, dict), "declarations-only calibration returned no statistics")
     return stats

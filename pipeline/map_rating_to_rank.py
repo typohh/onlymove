@@ -855,18 +855,21 @@ def write_exclusions(ratings_dir, dropped, cut, n_declarations):
     same survey — an evaluation keeping rows the fit did not see is measuring a
     different comparison. Written every run, empty header included, so a reader
     never has to branch on the file's absence. The `p_junk` column is the value at
-    the FIRST fit, the one the cut was taken on."""
+    the FIRST fit, the one the cut was taken on; `kind` says whether the row was a
+    declaration or a verified rating, which a declarations-only refit cannot screen
+    itself (ablations.rank_calibration_figures)."""
     path = os.path.join(ratings_dir, EXCLUSIONS_CSV)
     n_cut, threshold, gap = cut
     with open(path, "w", newline="") as f:
         w = csv.writer(f)
         w.writerow(["user_prefix", "server", "declared_band", "declared_rank",
-                    "our_internal", "our_rank", "p_junk"])
+                    "our_internal", "our_rank", "p_junk", "kind"])
         for r in dropped:
             uid, server, g = r["key"]
             w.writerow([uid[:8], server, g, value_to_rank(r["declared_value"]),
                         f"{r['internal']:.4f}", value_to_rank(r["internal"]),
-                        f"{r['p_junk']:.6f}"])
+                        f"{r['p_junk']:.6f}",
+                        "verified" if r["verified"] else "declared"])
     print(f"  wrote {path} ({len(dropped)} of {n_declarations} declarations"
           + (f", lowest excluded {threshold:.3f}; separated head ends "
              f"{gap:.3f} above it)" if dropped else ")"))
