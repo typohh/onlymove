@@ -85,6 +85,14 @@ _shutdown = threading.Event()
 # come back would date the connection a whole idle poll cycle late.
 _link_lock = threading.Lock()
 _link_up = True
+# Set once KataGo is found dead. A worker whose engine has died must STOP rather
+# than keep polling: the server hands a job to any parked poll, so a live poller
+# over a dead engine turns every request it is given into an instant failure for
+# as long as the process lasts — measured, 28 consecutive BrokenPipeError jobs
+# over 18 minutes after the engine was OOM-killed. Exiting hands the work back to
+# the cloud box at once, and systemd (Restart=always) brings a fresh engine up.
+_engine_dead = threading.Event()
+ENGINE_DEAD_EXIT = 3
 
 
 def log(message):
@@ -104,6 +112,23 @@ def note_link(up, detail=""):
     else:
         log(f"Lost the server{detail}; the cloud box is answering requests "
             f"until this reconnects.")
+
+
+def engine_alive(controller):
+    process = controller.process
+    return process is not None and process.poll() is None
+
+
+def note_engine_dead(controller):
+    """Stops the worker, once, because the engine is gone."""
+    if _engine_dead.is_set():
+        return
+    process = controller.process
+    code = process.poll() if process is not None else None
+    log(f"KataGo is no longer running (exit code {code}); stopping so the cloud "
+        f"box answers until systemd restarts this worker.")
+    _engine_dead.set()
+    _shutdown.set()
 
 
 def auth_headers():
@@ -173,6 +198,11 @@ def poll_loop(controller):
     session = requests.Session()
     backoff = 1.0
     while not _shutdown.is_set():
+        # Checked before every poll, so no job is TAKEN for an engine that is
+        # already gone; the poll itself parks for up to POLL_READ_TIMEOUT.
+        if not engine_alive(controller):
+            note_engine_dead(controller)
+            return
         try:
             response = session.post(f"{SERVER_URL}/worker/poll", headers=auth_headers(),
                                     timeout=(CONNECT_TIMEOUT, POLL_READ_TIMEOUT))
@@ -192,6 +222,12 @@ def poll_loop(controller):
             continue
 
         payload, outcome, elapsed_ms = run_job(controller, job)
+        # A failure is either the query's fault (the engine answered with an
+        # error, and is fine) or the engine's (it is gone). Only the second
+        # stops the worker — the result below is still reported, so the server
+        # stops waiting on this job and answers it itself.
+        if outcome != "ok" and not engine_alive(controller):
+            note_engine_dead(controller)
         try:
             reply = session.post(f"{SERVER_URL}/worker/result", json=payload,
                                  headers=auth_headers(), timeout=(CONNECT_TIMEOUT, 30.0))
@@ -239,14 +275,21 @@ def main():
             thread.start()
         log(f"Polling {SERVER_URL} with {POLL_THREADS} threads at {WORKER_VISITS} "
             f"visits. Ctrl-C to hand analysis back to the cloud box.")
-        while any(thread.is_alive() for thread in threads):
+        # The engine is watched here too, so one that dies while every poller
+        # is parked idle is caught before the next job arrives, not by it.
+        while any(thread.is_alive() for thread in threads) and not _shutdown.is_set():
+            if not engine_alive(controller):
+                note_engine_dead(controller)
+                break
             time.sleep(0.5)
     except KeyboardInterrupt:
         log("Stopping.")
     finally:
         _shutdown.set()
         controller.stop_engine()
-    return 0
+    # Non-zero, so the journal records a failure rather than a clean stop; the
+    # parked polls are daemon threads and die with the process.
+    return ENGINE_DEAD_EXIT if _engine_dead.is_set() else 0
 
 
 if __name__ == "__main__":

@@ -35,6 +35,16 @@ TimeoutStopSec=20
 # BEFORE the network is loaded, so a failed attempt never pays for the model.
 Restart=always
 RestartSec=30
+# Make this unit as unattractive to the OOM killer as a USER unit can be. Left
+# unset it runs at oom_score_adj 200, ahead of a build started from a shell (0),
+# so on a memory-pressured box the kernel takes production serving before the
+# job that caused the pressure — measured: it killed this engine twice in 30
+# minutes while rustc builds were the largest processes. An unprivileged unit
+# cannot go below its user manager's value (100 here); a lower request is
+# CLAMPED silently, so 100 is written rather than a number it would not get.
+# Ranking it below a shell's processes needs root (OOMScoreAdjust on
+# user@.service).
+OOMScoreAdjust=100
 
 [Install]
 WantedBy=default.target
