@@ -375,31 +375,39 @@ def rule_sacrifice(own, min_stones=None, net=False):
     return lost - gained >= min_stones
 
 
-def area_counts(d):
-    """Per-problem quantities the territory and influence rules read, vectorized
-    over one board size of the ownership cache (utils.rating.ownership_maps).
+def area_quantities(p_ans, p_pass, stones, answer):
+    """The territory/influence inputs from two ownership maps, over any leading
+    batch shape: (n_territory, n_influence, empty_change, stone_change).
 
-    Returns (n_territory, n_influence, empty_change, stone_change), each (N,):
-    the neutral points the answer turns into territory and into influence, and
-    the summed |answer - pass| ownership change, in fractional points, over the
-    empty non-answer points and over the stones. See the constants block."""
+    `p_ans` and `p_pass` are the probability the SOLVER owns each point after the
+    answer and after a pass, (..., S, S); `stones` marks occupied points and
+    `answer` the answer's own point, both bool in the same frame. The one place
+    the arithmetic lives, so the problem set and any other position source (the
+    self-play contrast) are judged identically. See the constants block."""
+    import numpy as np
+    empty = ~stones & ~answer
+    neutral = empty & (p_pass >= OWN_NEUTRAL[0]) & (p_pass <= OWN_NEUTRAL[1])
+    n_terr = (neutral & (p_ans >= TERRITORY_MIN_P)).sum((-2, -1))
+    n_infl = (neutral & (p_ans >= INFLUENCE_P[0]) & (p_ans <= INFLUENCE_P[1])).sum((-2, -1))
+    change = np.abs(p_ans - p_pass)
+    return (n_terr, n_infl, np.where(empty, change, 0).sum((-2, -1)),
+            np.where(stones, change, 0).sum((-2, -1)))
+
+
+def area_counts(d):
+    """area_quantities over one board size of the ownership cache
+    (utils.rating.ownership_maps), each output (N,)."""
     import numpy as np
     from utils.rating import ownership_maps as OM
     v = OM.solver_frame(d)
     n, size = len(d["tid"]), d["stones"].shape[-1]
-    p_ans, p_pass = v["p_own"][:, OM.SLOT_CORRECT], v["p_own"][:, OM.SLOT_PASS]
-    stones = d["stones"] != OM.EMPTY
-    empty = ~stones
     ans = d["move"][:, OM.SLOT_CORRECT].astype(int)
     if (ans < 0).any():
         raise ValueError("an answer slot holds no board point")
-    empty[np.arange(n), ans // size, ans % size] = False
-    neutral = empty & (p_pass >= OWN_NEUTRAL[0]) & (p_pass <= OWN_NEUTRAL[1])
-    n_terr = (neutral & (p_ans >= TERRITORY_MIN_P)).sum((1, 2))
-    n_infl = (neutral & (p_ans >= INFLUENCE_P[0]) & (p_ans <= INFLUENCE_P[1])).sum((1, 2))
-    change = np.abs(p_ans - p_pass)
-    return (n_terr, n_infl, np.where(empty, change, 0).sum((1, 2)),
-            np.where(stones, change, 0).sum((1, 2)))
+    answer = np.zeros(d["stones"].shape, bool)
+    answer[np.arange(n), ans // size, ans % size] = True
+    return area_quantities(v["p_own"][:, OM.SLOT_CORRECT], v["p_own"][:, OM.SLOT_PASS],
+                           d["stones"] != OM.EMPTY, answer)
 
 
 def rule_area(n_territory, n_influence, empty_change, stone_change):

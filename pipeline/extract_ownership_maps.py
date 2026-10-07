@@ -84,6 +84,14 @@ from utils.rating import ownership_maps as OM  # noqa: E402
 # core at ~75% and the GPU idle, 60 problems/s. So parsing runs in PARSE_WORKERS
 # spawned processes, one chunk ahead of the engine, and every query of a chunk is
 # put in flight at once so KataGo's batches stay full.
+# The shipped read: one visit, every board symmetry averaged. ONE visit is what
+# the map MEANS — the network's own ownership head at the position; a search
+# reports the visit-weighted average over its tree instead, a different quantity.
+# It is stated explicitly because a query that omits it takes analysis.cfg's
+# search budget. A consumer that must judge positions the way the cache does
+# (ablations.selfplay_motif_figures) imports these rather than restating them.
+VISITS = 1
+SYMMETRIES = 8
 ENGINE_THREADS = 128     # KataGo analysis threads = queries evaluated concurrently
 NN_BATCH = 128
 QUERY_THREADS = 128      # in-flight queries from this side
@@ -344,16 +352,14 @@ def run_size(size, visits, symmetries, force, limit):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--sizes", default=",".join(map(str, ALL_BOARD_SIZES)))
-    ap.add_argument("--visits", type=int, default=1,
-                    help="maxVisits per query (default 1, the budget extract_ownership_swing uses)")
-    ap.add_argument("--symmetries", type=int, default=8,
-                    help="board symmetries the root eval averages (default 8, all of D4)")
+    ap.add_argument("--symmetries", type=int, default=SYMMETRIES,
+                    help=f"board symmetries the root eval averages (default {SYMMETRIES}, all of D4)")
     ap.add_argument("--force", action="store_true", help="wipe and rebuild the cache for these sizes")
     ap.add_argument("--limit", type=int, default=0, help="first N problems per size (smoke tests)")
     args = ap.parse_args()
     logging.disable(logging.CRITICAL)
     for size in map(int, args.sizes.split(",")):
-        run_size(size, args.visits, args.symmetries, args.force, args.limit)
+        run_size(size, VISITS, args.symmetries, args.force, args.limit)
 
 
 if __name__ == "__main__":

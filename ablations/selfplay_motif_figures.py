@@ -21,6 +21,12 @@ analogue:
   root variations   {answer, refuted try}: their child searches supply the
                     (winrate, score) pairs yose ranks and the ownership maps
                     life and death / semeai compare
+  pass baseline     the position after the mover passes. Territory and
+                    influence compare the ownership after the played move with
+                    the ownership after that pass, both read the way the problem
+                    set's are (pipeline.extract_ownership_maps: one visit, all
+                    eight symmetries averaged), so the two sides of the contrast
+                    are the same measurement
   prefix            moves played before the position, random opening included
 
 N_GAMES is sized to be barely sufficient: it puts every rule's share inside
@@ -61,6 +67,7 @@ from utils.katago.controller import KatagoController  # noqa: E402
 from utils.katago.coords import gtp_to_sgfmill_point, sgfmill_point_to_sgf  # noqa: E402
 from utils.katago.models import DEFAULT_MODEL, get_model  # noqa: E402
 from utils.katago.problem_finder import RANDOM_MOVE_COUNT, ProblemFinder  # noqa: E402
+from pipeline.extract_ownership_maps import SYMMETRIES, VISITS as MAP_VISITS  # noqa: E402
 from utils.katago.queries import KatagoQueries  # noqa: E402
 from utils.rating import motif_rules as mr  # noqa: E402
 from utils.rating.ratings_io import interp_extrap_vec, load_M, load_size_value_maps  # noqa: E402
@@ -120,12 +127,27 @@ class Engine:
         require("rootInfo" in r and "ownership" in r, f"engine error: {r.get('error', r)}")
         return r
 
+    def ownership_map(self, moves):
+        """The area rules' map after `moves`: one visit, symmetries averaged,
+        BLACK-absolute, [y][x] from the top."""
+        r = self.controller.send_query({
+            "moves": [[colour_at(i), m] for i, m in enumerate(moves)],
+            "initialStones": [], "rules": RULES, "komi": KOMI,
+            "boardXSize": SIZE, "boardYSize": SIZE,
+            "maxVisits": MAP_VISITS, "includeOwnership": True,
+            "overrideSettings": {"rootNumSymmetriesToSample": SYMMETRIES},
+        })
+        require("ownership" in r, f"engine error: {r.get('error', r)}")
+        return np.asarray(r["ownership"], dtype=np.float32).reshape(SIZE, SIZE)
+
 
 def play_game(engine, finder, rng):
-    """(moves, searches, alt): searches[i] is the search of the position before
-    moves[i]; alt[i] is (refuted try, the search after it) per scored position."""
+    """(moves, searches, alt, area): searches[i] is the search of the position
+    before moves[i]; alt[i] is (refuted try, the search after it) per scored
+    position; area[i] is the (after the played move, after a pass) ownership
+    pair the area rules compare."""
     moves = finder.generate_initial_position(rng)
-    searches, alt = {}, {}
+    searches, alt, area = {}, {}, {}
     cap = RANDOM_MOVE_COUNT + 2 * SIZE * SIZE
     while len(moves) < cap:
         r = engine.search(moves)
@@ -144,10 +166,12 @@ def play_game(engine, finder, rng):
                         break
             if b is not None:
                 alt[i] = (b, engine.search(moves + [b]))
+                area[i] = (engine.ownership_map(moves + [a]),
+                           engine.ownership_map(moves + ["pass"]))
         moves.append(a)
         if len(moves) >= 2 and moves[-1] == "pass" and moves[-2] == "pass":
             break
-    return moves, searches, alt
+    return moves, searches, alt, area
 
 
 def mover_eval(search, mover):
@@ -177,7 +201,18 @@ def ownership_parts(board, good, base, mover):
     }
 
 
-def label_game(moves, searches, alt, rules):
+def area_verdict(board, a, own_answer, own_pass, sign):
+    """rule_area on one position: "territory", "influence" or None."""
+    arr = np.array(board)
+    answer = np.zeros((SIZE, SIZE), bool)
+    x, y = mr._xy(to_sgf(a))
+    answer[y, x] = True
+    q = mr.area_quantities((sign * own_answer + 1) / 2, (sign * own_pass + 1) / 2,
+                           arr != ".", answer)
+    return mr.rule_area(*(np.asarray(v).item() for v in q))
+
+
+def label_game(moves, searches, alt, area, rules):
     """Per rule, how many of the game's scored positions it fires on; and the
     number of scored positions."""
     sgf_moves = [(colour_at(i), to_sgf(m)) for i, m in enumerate(moves) if m != "pass"]
@@ -213,6 +248,7 @@ def label_game(moves, searches, alt, rules):
             sign * np.asarray(child_a["ownership"], dtype=np.float32).reshape(SIZE, SIZE),
             sign * np.asarray(child_b["ownership"], dtype=np.float32).reshape(SIZE, SIZE),
             mover)
+        region = area_verdict(board, a, *area[i], sign)
         verdict = {
             "life and death": mr.rule_life_and_death(own),
             "yose": mr.rule_yose([mover_eval(child_a, mover), mover_eval(child_b, mover)]),
@@ -223,6 +259,8 @@ def label_game(moves, searches, alt, rules):
                 dist(a, a_reply[1]) if a_reply and a_reply[0] != mover else None,
                 dist(b, reply_b) if reply_b != "pass" else None),
             "semeai": mr.rule_semeai(own),
+            "territory": region == "territory",
+            "influence": region == "influence",
         }
         require(set(rules) <= set(verdict),
                 f"no game analogue written for rule(s) {sorted(set(rules) - set(verdict))}")
@@ -250,8 +288,8 @@ def selfplay(rules):
             if g >= N_GAMES or errors:
                 return
             try:
-                moves, searches, alt = play_game(engine, finder, random.Random(SEED + g))
-                results[g] = label_game(moves, searches, alt, rules)
+                moves, searches, alt, area = play_game(engine, finder, random.Random(SEED + g))
+                results[g] = label_game(moves, searches, alt, area, rules)
             except Exception as e:
                 errors.append(f"game {g}: {type(e).__name__}: {e}")
                 return
