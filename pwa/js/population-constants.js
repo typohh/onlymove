@@ -53,9 +53,9 @@ export function loadPopulationConstants() {
 // by the Rank-tab chart/summary (stats-rank-pane.js) and the rank-translation modal
 // (rank-translation.js) so the median feature is defined in exactly ONE place.
 
-// The median feature is a POSITIONAL-WEIGHTED median over the last-500 rank window
+// The median feature is a POSITIONAL-WEIGHTED median over the last-WIN_CAP rank window
 // (no AFK cap), so the client and the EGD-leaderboard Worker compute an IDENTICAL
-// time-adjust from the same window (the Worker only holds a 500 buffer). The window
+// time-adjust from the same window (the Worker only holds a WIN_CAP buffer). The window
 // and weighting do NOT change what the median estimates — the user's central novel
 // solve time — only its variance (fewer effective samples) and recency, so the shipped
 // alpha/center (fit against median solve time) still apply as-is; no refit needed.

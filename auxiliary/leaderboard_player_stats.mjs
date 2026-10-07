@@ -32,7 +32,7 @@
 // pwa/src/leaderboard.js itself (so the curve/coupling/time-adjust data and every
 // helper — RANK_START_MIN, the EGF/AGA couplings, the personal time dock, the
 // rank-dependent SE floor, the verified-activity gate — are the shipped ones) and
-// runs the shared window estimator over each row's STORED buffer (the last <=500
+// runs the shared window estimator over each row's STORED buffer (the last <=250
 // novel attempts, the exact input the Worker's computeRank uses). est. EGF/AGA
 // re-apply the median-solve-time dock to that same shown rank and map through the
 // server's coupling — the frame a real GoR / AGA rating natively speaks — in the

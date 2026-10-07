@@ -35,7 +35,7 @@ import POPULATION_CONSTANTS from '../tsumegos/population_constants.json';
 // "you" marker; re-exported here, where every Worker-side consumer already reads it.
 export { RANK_START_MIN };
 const TIME_MIN_TIMED = 20;              // >= this many valid solve times for a time dock
-export const BUFFER_CAP = WIN_CAP;      // 500 — the buffer + the rank window share it
+export const BUFFER_CAP = WIN_CAP;      // the buffer + the rank window share it
 
 // One shared cross-board curve (map_rating_to_rank writes both size keys identical).
 const CURVE = RATING_RANK_MAP['9'] || Object.values(RATING_RANK_MAP)[0] || null;

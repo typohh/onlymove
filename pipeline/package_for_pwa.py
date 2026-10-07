@@ -1055,7 +1055,7 @@ def emit_se_floor_curve(output_dir):
 # Mirrors of the client's math, so the emitted curve is in the reader's units.
 # pwa/shared/rank-window.js: WIN_CAP / the positional ramp's steady-state weight,
 # and the per-attempt slope conversion; pwa/js/irt.js: anchorInfo.
-_WIN_CAP = 500
+_WIN_CAP = 250
 _WIN_STEADY_WEIGHT = (_WIN_CAP + 1) / 2
 _CALIBRATION_P = 0.8
 

@@ -76,7 +76,7 @@ export function flattenAttempt(rating, aP, floorRaw, correct, curve) {
     };
 }
 
-export const WIN_CAP = 500;                   // hard sample-count window + the ramp's denominator
+export const WIN_CAP = 250;                   // hard sample-count window + the ramp's denominator
 
 // Minimum VALID (still-in-corpus) first-time attempts before a user is treated as
 // carrying a rank at all. Shared because every consumer has to draw the line in the

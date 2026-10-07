@@ -276,7 +276,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_external_ids_egd_pin ON external_ids(egd_p
 CREATE UNIQUE INDEX IF NOT EXISTS idx_external_ids_aga_id  ON external_ids(aga_id);
 
 -- Leaderboard: one row per user (created lazily on their first novel /report).
--- Holds a materialized rank buffer (the user's last 500 novel attempts) + the
+-- Holds a materialized rank buffer (the user's last 250 novel attempts) + the
 -- derived rank scalars, so /report can recompute the rank in-Worker with
 -- +1 read/+1 write. EVERY row is rebuildable from tsumego_reports (registration
 -- lives in external_ids, not here), so idle rows (last_active > 7 days old) are
@@ -285,7 +285,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_external_ids_aga_id  ON external_ids(aga_i
 -- size. The /leaderboard page shows unregistered rows as "Anonymous" and limits
 -- itself to rows active in the past week.
 -- `buffer` is a JSON array of {p: problem_id, s: success 0/1, t: time_used ms},
--- newest first, capped at 500. `pred_rank` stays NULL until the buffer holds
+-- newest first, capped at 250. `pred_rank` stays NULL until the buffer holds
 -- >= RANK_START_MIN valid novel attempts (rank-start gate).
 --
 -- The rank is stored in the window estimator's OWN output frame — `pred_rank` is

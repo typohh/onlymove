@@ -89,7 +89,7 @@ TIER = "about"
 # it). The span figures describe the reach of exactly that many attempts, so a
 # drift between the two would silently re-define the measurement; `_check_win_cap`
 # reads the JS and refuses to run on a disagreement.
-WIN_CAP = 500
+WIN_CAP = 250
 RANK_WINDOW_JS = os.path.join(PROJECT_ROOT, "pwa", "shared", "rank-window.js")
 _WIN_CAP_RE = re.compile(r"export\s+const\s+WIN_CAP\s*=\s*(\d+)\s*;")
 
