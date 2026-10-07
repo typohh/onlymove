@@ -71,24 +71,24 @@ from utils.rating.motif_rules import (  # noqa: E402
     answer_opponent_distance, best_refuted_node, reply_distance,
     reply_kind, rule_fast, rule_gote, rule_ko,
     rule_life_and_death, rule_opening, rule_sacrifice, rule_yose, rule_semeai,
-    rule_sente, rule_shape, rule_tenuki, rule_territory)
+    rule_sente, rule_shape, rule_tenuki, rule_area, area_counts)
 
 OUT = os.path.join(PROJECT_ROOT, "axes", "motif_proxies.npz")
-# The ownership columns the rules read. A projection, not the whole row — the CSV
-# carries thirty-odd fields and the rules use eight.
+# The ownership-swing columns the rules read. A projection, not the whole row —
+# the CSV carries thirty-odd fields and the stone rules use four.
 OWN_COLS = ("own_dead_revived", "own_alive_killed", "opp_alive_killed",
-            "opp_dead_revived", "empty_swing_abs",
-            "score_correct", "score_alt", "stone_swing_abs")
+            "opp_dead_revived")
 
 _OWN = {}
 _PHASE = {}
+_AREA = {}
 
 
-def _init(own, phase):
-    """Worker-side globals: the ownership and phase tables are ~160k rows each and
+def _init(own, phase, area):
+    """Worker-side globals: the ownership and phase tables are ~220k rows each and
     pickling them per task would dominate the run."""
-    global _OWN, _PHASE
-    _OWN, _PHASE = own, phase
+    global _OWN, _PHASE, _AREA
+    _OWN, _PHASE, _AREA = own, phase, area
 
 
 def label_one(args):
@@ -96,8 +96,9 @@ def label_one(args):
     size, tid = args
     own = _OWN.get(tid)
     ph = _PHASE.get(tid)
-    if own is None or ph is None:
+    if own is None or ph is None or tid not in _AREA:
         return None
+    area = _AREA[tid]
     path = os.path.join(PROJECT_ROOT, "tsumegos", str(size), f"{tid}.sgf")
     try:
         raw = open(path, "rb").read()
@@ -143,7 +144,9 @@ def label_one(args):
         "yose": rule_yose(evals),
         "ko": True if root_ko else rule_ko(setup_sgf, variation_nodes, size),
         "opening": rule_opening(ph[1], size),
-        "territory": rule_territory(own),
+        # One verdict over both: what the answer makes of the open area is
+        # territory, influence or neither, never both (rule_area).
+        "territory": area == "territory",
         "shape": rule_shape(resolved),
         "tenuki": rule_tenuki(opp_dist, root_ko),
         "sente": rule_sente(reply_dist, refuted_dist),
@@ -153,6 +156,7 @@ def label_one(args):
         "gote": rule_gote(reply_kind(answer_node)[0], reply_dist, refuted_dist),
         "fast": rule_fast(root_board, correct),
         "sacrifice": rule_sacrifice(own),
+        "influence": area == "influence",
     }
     return tid, size, [bool(hit[k]) for k in LABEL_SET]
 
@@ -163,6 +167,21 @@ def load_ownership():
         for rec in csv.DictReader(fh):
             if rec.get("alt_move"):
                 out[rec["tid"]] = {k: rec[k] for k in OWN_COLS}
+    return out
+
+
+def load_area(sizes):
+    """tid -> "territory" | "influence" | None, from the ownership-map cache.
+
+    Vectorized per board size: the rule reads whole maps, and evaluating it in
+    the workers would ship every map through the pool. A problem the cache lacks
+    has no entry, which label_one reads as a missing input."""
+    from utils.rating import ownership_maps as OM
+    out = {}
+    for size in sizes:
+        d = OM.load_size(size)
+        for tid, *q in zip(d["tid"].tolist(), *area_counts(d)):
+            out[tid] = rule_area(*q)
     return out
 
 
@@ -225,11 +244,13 @@ def main():
     rows = dict(prev)
     if todo:
         own, phase = load_ownership(), load_phase(sorted(SIZES))
-        print(f"  ownership {len(own)}, phase {len(phase)}", flush=True)
+        area = load_area(sorted(SIZES))
+        print(f"  ownership {len(own)}, ownership maps {len(area)}, "
+              f"phase {len(phase)}", flush=True)
         from multiprocessing import Pool
         skipped = 0
         with Pool(args.workers, initializer=_init,
-                  initargs=(own, phase)) as p:
+                  initargs=(own, phase, area)) as p:
             for i, r in enumerate(p.imap_unordered(label_one, todo, chunksize=200)):
                 if r is None:
                     skipped += 1
@@ -252,9 +273,10 @@ def main():
                 f"\n{skipped} of {len(todo)} problems have MISSING INPUTS and "
                 f"were not labelled. The proxies are only correct when the "
                 f"stored tid set EQUALS the corpus, so this run wrote nothing. "
-                f"Ownership rows: {len(own)}, phase rows: {len(phase)}, corpus: "
-                f"{len(todo)}. Bring the short one up to date "
-                f"(`pipeline.extract_ownership_swing` for ownership; phase heals "
+                f"Ownership rows: {len(own)}, ownership maps: {len(area)}, phase "
+                f"rows: {len(phase)}, corpus: {len(todo)}. Bring the short one up "
+                f"to date (`pipeline.extract_ownership_swing` for ownership, "
+                f"`pipeline.extract_ownership_maps` for the maps; phase heals "
                 f"itself through utils.rating.features.load_game_phase) and "
                 f"re-run.")
 

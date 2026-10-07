@@ -72,8 +72,10 @@ SEMEAI_BALANCE = 0.25
 # With the balance bar it also floors the smaller side at (0.5 - balance) * this,
 # which is what stops a one-stone throw-in beside a large group reading as a
 # race. 10 takes ~9% of the corpus; 8 -> 11.3%, 6 -> 14.9%, 12 -> 6.7%. Narrow is
-# the safe side: the fit SPREADS a narrow rule outward from its core and takes a
-# ~20% rule as written (see rule_territory, narrowed for the same reason).
+# the safe side: the fit SPREADS a narrow rule outward from its core (mass
+# participation 1.5-1.85x its share) and takes a ~20% rule essentially as
+# written (1.03-1.20x), so a narrow rule only needs its core right
+# (docs/mirt_benchmark.md).
 SEMEAI_MIN_STONES = 10.0
 
 # sacrifice: own fractional stones the answer gives up, in excess of the best
@@ -155,21 +157,32 @@ SENTE_MIN_DIST = 2     # rule_sente's reply-distance bar (13.5% share at 2)
 # two RESOLVED first moves and can never fire whatever the ceiling.
 SHAPE_WR_GAP = 67.0   # MAXIMUM gap; a wide gap means the answer is obvious
 
-# TERRITORY — the score swing outruns what the stones changing hands can account
-# for, by a wide MULTIPLE rather than a fixed margin.
-TERR_BASE = 0.5      # points of swing required when no stone changes hands at all
-# 8.0, taking ~9% of the corpus. Swept: 4 -> 30.4%, 5 -> 21.5%, 6 -> 15.8%,
-# 8 -> 9.4%, 10 -> 6.2%.
+# TERRITORY / INFLUENCE — what the answer does to the EMPTY points, read off the
+# per-intersection ownership cache against a PASS by the solver. The pass, not the
+# best refutation: a refuted try usually contests the same area and so cancels the
+# very gain being measured, while the pass is the position left alone.
 #
-# Narrowed rather than widened, against the share target, because of what the
-# fitted axes do with a rule of each width: the fit SPREADS a narrow rule (mass
-# participation ratio 1.5-1.85x its share) and leaves a ~20% rule essentially
-# as-stated (1.03-1.20x). So a narrow rule only needs its CORE to be right and the
-# model elaborates outward, while a wide rule has to already BE the concept. At
-# 21.5% territory was the broadest rule, carried the lowest mass lift of the eight
-# (3.2x), and reached N50 `inf` on two seeds — the signature of a rule too vague
-# to pin a direction, which more coverage cannot fix.
-TERR_PER_STONE = 8.0 # points of swing each flipped stone must be beaten by
+# A point is NEUTRAL when it is empty, is not the answer's own point, and the
+# solver owns it with probability inside OWN_NEUTRAL after the pass. The answer
+# turns it into TERRITORY when it lands at TERRITORY_MIN_P or above — the point is
+# now confidently the solver's — and into INFLUENCE when it lands inside
+# INFLUENCE_P — leaning the solver's way without being settled. The gap between
+# 0.9 and 0.95 is deliberate: a point there is neither, rather than letting a hair
+# of ownership decide which motif it seeds.
+OWN_NEUTRAL = (0.4, 0.6)
+TERRITORY_MIN_P = 0.95
+INFLUENCE_P = (0.7, 0.9)
+# Point counts. Influence asks for two because a single leaning point is the
+# commonest by-product of any move; territory asks for one settled point.
+TERRITORY_MIN_POINTS = 1
+INFLUENCE_MIN_POINTS = 2
+# THE AREA GATE: the total ownership change over the empty points must exceed the
+# total over the stones, each summed as |answer - pass| in fractional points. A
+# move that kills or saves stones moves the empty points around them as a matter of
+# course, and without the gate every capture would read as territory; with it the
+# label goes only to a move whose purpose is the area. Absolute on both sides, so a
+# trade of stones does not cancel to look like nothing changed hands.
+AREA_OVER_STONES = 1.0
 
 # The rule set, and its ORDER is the column order of axes/motif_proxies.npz. Names
 # are the key: `components` in axes/labels.json names rules, and readers look them
@@ -180,7 +193,8 @@ TERR_PER_STONE = 8.0 # points of swing each flipped stone must be beaten by
 # not have: it holds several directions called `ko` from different fits, which is
 # why that path is keyed by an `ax_<hex>` content hash instead of by name.)
 LABEL_SET = ["life and death", "yose", "ko", "opening", "territory",
-             "shape", "tenuki", "sente", "semeai", "gote", "fast", "sacrifice"]
+             "shape", "tenuki", "sente", "semeai", "gote", "fast", "sacrifice",
+             "influence"]
 if len(set(LABEL_SET)) != len(LABEL_SET):
     raise ValueError(f"duplicate rule name in LABEL_SET: {LABEL_SET}")
 
@@ -208,6 +222,7 @@ RULE_LABELS = {
     "semeai":         {"zh": "对杀", "ja": "攻め合い", "ko": "수상전"},
     "gote":           {"zh": "后手", "ja": "後手", "ko": "후수"},
     "sacrifice":      {"zh": "弃子", "ja": "捨て石", "ko": "사석"},
+    "influence":      {"zh": "外势", "ja": "厚み", "ko": "세력"},
 }
 _unknown = sorted(set(RULE_LABELS) - set(LABEL_SET))
 if _unknown:
@@ -360,34 +375,52 @@ def rule_sacrifice(own, min_stones=None, net=False):
     return lost - gained >= min_stones
 
 
-def rule_territory(own, base=None, per_stone=None):
-    """Score swings by more than the stones changing hands can pay for.
+def area_counts(d):
+    """Per-problem quantities the territory and influence rules read, vectorized
+    over one board size of the ownership cache (utils.rating.ownership_maps).
 
-        (score_correct - score_alt)  >  base + per_stone * stone_swing_abs
+    Returns (n_territory, n_influence, empty_change, stone_change), each (N,):
+    the neutral points the answer turns into territory and into influence, and
+    the summed |answer - pass| ownership change, in fractional points, over the
+    empty non-answer points and over the stones. See the constants block."""
+    import numpy as np
+    from utils.rating import ownership_maps as OM
+    v = OM.solver_frame(d)
+    n, size = len(d["tid"]), d["stones"].shape[-1]
+    p_ans, p_pass = v["p_own"][:, OM.SLOT_CORRECT], v["p_own"][:, OM.SLOT_PASS]
+    stones = d["stones"] != OM.EMPTY
+    empty = ~stones
+    ans = d["move"][:, OM.SLOT_CORRECT].astype(int)
+    if (ans < 0).any():
+        raise ValueError("an answer slot holds no board point")
+    empty[np.arange(n), ans // size, ans % size] = False
+    neutral = empty & (p_pass >= OWN_NEUTRAL[0]) & (p_pass <= OWN_NEUTRAL[1])
+    n_terr = (neutral & (p_ans >= TERRITORY_MIN_P)).sum((1, 2))
+    n_infl = (neutral & (p_ans >= INFLUENCE_P[0]) & (p_ans <= INFLUENCE_P[1])).sum((1, 2))
+    change = np.abs(p_ans - p_pass)
+    return (n_terr, n_infl, np.where(empty, change, 0).sum((1, 2)),
+            np.where(stones, change, 0).sum((1, 2)))
 
-    MULTIPLICATIVE in the stones, not a fixed remainder. A flipped stone is worth
-    two points on the board, so requiring the swing to beat FOUR times the stones
-    demands the swing be at least twice what capture explains — the position has
-    to be decided by territory, not merely to contain some. A fixed remainder
-    instead admitted any problem with a large enough absolute swing however much
-    of it came from stones, which on a big capture is most of it.
 
-    `stone_swing_abs` is the ABSOLUTE swing summed over occupied points, so a TRADE
-    does not cancel. That is deliberate: stones dying on both sides is a trade
-    whatever the net comes to, and a trade is not a territory problem. Netting them
-    would let a big two-sided capture pass as territory because the sides happened
-    to balance.
+def rule_area(n_territory, n_influence, empty_change, stone_change):
+    """"territory", "influence" or None — the two are EXCLUSIVE, one verdict per
+    problem.
 
-    Empty-point swings are NOT subtracted — they are the territory itself, and
-    charging for them would leave nothing to detect.
-
-    `own` is the raw ownership row, in stones (see rule_life_and_death on why a
-    threshold in stones needs the pre-standardization values).
-    """
-    base = TERR_BASE if base is None else base
-    per_stone = TERR_PER_STONE if per_stone is None else per_stone
-    swing = float(own["score_correct"]) - float(own["score_alt"])
-    return swing > base + per_stone * float(own["stone_swing_abs"])
+    Neither fires unless the area gate holds (AREA_OVER_STONES): the answer must
+    move the empty points more than the stones. Past it, a problem qualifies for
+    territory with TERRITORY_MIN_POINTS settled points and for influence with
+    INFLUENCE_MIN_POINTS leaning ones; where both qualify, the larger count names
+    it, and a tie goes to territory, the stronger of the two claims about the
+    same area. Exclusive because they are two readings of one question — what
+    the answer makes of the open area — and a problem carrying both would seed
+    two axes with the same positions."""
+    if not empty_change > AREA_OVER_STONES * stone_change:
+        return None
+    terr = n_territory >= TERRITORY_MIN_POINTS
+    infl = n_influence >= INFLUENCE_MIN_POINTS
+    if terr and infl:
+        return "territory" if n_territory >= n_influence else "influence"
+    return "territory" if terr else "influence" if infl else None
 
 
 def rule_shape(evals, max_gap=None):

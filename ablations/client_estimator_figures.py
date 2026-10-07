@@ -162,10 +162,11 @@ def named_tail_mask(corpus, motif_z):
     require(len(labels) == K, f"labels carry {len(labels)} components against K={K}")
     named = [bool(c.get("positive")) for c in labels]
     require(any(named), "no axis carries a named positive tail")
-    mask = np.zeros(corpus["emb"].shape[0], dtype=np.uint8)
+    require(K <= 32, f"K={K} axes do not fit the 32-bit tail mask")
+    mask = np.zeros(corpus["emb"].shape[0], dtype=np.uint32)
     for k in range(K):
         if named[k]:
-            mask |= (corpus["emb"][:, k] >= motif_z).astype(np.uint8) << k
+            mask |= (corpus["emb"][:, k] >= motif_z).astype(np.uint32) << np.uint32(k)
     return mask, named
 
 
@@ -232,14 +233,17 @@ def run_helper(corpus, mask):
     require(os.path.exists(HELPER), f"no {HELPER}")
     grid, weights = prior_grid()
     # The helper needs the shipped constants before it can say what a buffer is, so
-    # the community rows are assembled at the shared cap the estimator's window uses.
-    from_cap = 500
+    # the community rows are assembled at the shared cap the estimator's window uses,
+    # read from the mirror serve_log_figures checks against rank-window.js.
+    from ablations.serve_log_figures import WIN_CAP, _check_win_cap
+    _check_win_cap()
+    from_cap = WIN_CAP
     community = community_buffers(corpus, from_cap)
 
     n = corpus["rating"].size
     packed = np.zeros(n, dtype=[("rating", "<f4"), ("slope", "<f4"), ("floor", "<f4"),
-                                ("size", "u1"), ("motif", "u1")])
-    require(packed.dtype.itemsize == 14, "the corpus record is not 14 bytes")
+                                ("size", "u1"), ("motif", "<u4")])
+    require(packed.dtype.itemsize == 17, "the corpus record is not 17 bytes")
     packed["rating"] = corpus["rating"]
     packed["slope"] = corpus["slope"]
     packed["floor"] = corpus["floor"]

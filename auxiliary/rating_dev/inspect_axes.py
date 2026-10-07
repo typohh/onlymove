@@ -102,7 +102,7 @@ def load_dump_npz(path, bank_path=None):
     return tids, components, sizes
 
 
-def load_per_problem_csv(path):
+def load_per_problem_csv(path, labels_path=None):
     """Production-axes mode: components straight from pipeline.build_axes'
     axes/per_problem.csv (one fit, canonical orientation — the
     shipped loadings, exactly what labels.json names)."""
@@ -125,8 +125,10 @@ def load_per_problem_csv(path):
     # decision this CSV was produced under — so the standard no-argument run
     # captions each tail with the motif it was taught, exactly as a --bank run
     # does. Absent or short, the axes stay unnamed rather than mislabelled.
+    # An ablation arm taught from a dev bank passes that bank's labels.json, so
+    # its extra axes are captioned with what they were taught rather than blank.
     labels = []
-    lp = os.path.join(PROJECT_ROOT, "axes", "labels.json")
+    lp = labels_path or os.path.join(PROJECT_ROOT, "axes", "labels.json")
     if os.path.exists(lp):
         labels = [str(x) for x in json.load(open(lp)).get("components", [])]
     components = []
@@ -433,6 +435,10 @@ def main():
                         default="axes/per_problem.csv",
                         help="path to the shipped per_problem.csv (default: "
                              "axes/per_problem.csv)")
+    parser.add_argument("--labels", default=None,
+                        help="the labels.json the --per-problem fit was taught "
+                             "under, for an ablation arm taught from a dev bank "
+                             "(ablation_mirt --bank-labels); default axes/labels.json")
     parser.add_argument("--dump", default=None,
                         help="inspect a --dump-params npz from "
                              "auxiliary.rating_dev.train_joint_mirt instead of a "
@@ -515,7 +521,7 @@ def main():
             src_path = os.path.join(PROJECT_ROOT, src_path)
         if not os.path.exists(src_path):
             raise SystemExit(f"missing {src_path}; run pipeline.train_mirt first")
-        tids, components, sizes = load_per_problem_csv(src_path)
+        tids, components, sizes = load_per_problem_csv(src_path, args.labels)
         source = os.path.basename(src_path)
 
     # BOARDS COME FROM THE CORPUS, so this page does not depend on packaging at

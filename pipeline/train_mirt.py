@@ -900,7 +900,7 @@ def _tail_w(torch, g, at):
     return torch.where(z >= at, z, at * torch.exp((zc - at) / at))
 
 
-def load_bank(key_idx, k_axes=K_AXES):
+def load_bank(key_idx, k_axes=K_AXES, proxies_path=MOTIF_PROXIES, labels_path=LABELS):
     """The proxy directions this fit's axes are taught onto, one row per problem of
     `key_idx` in that order, plus a mask of which rows are supplied.
 
@@ -926,7 +926,7 @@ def load_bank(key_idx, k_axes=K_AXES):
     Returns (tgt, ok, spec) — the spec so the caller can stamp exactly what was
     taught.
     """
-    for path in (MOTIF_PROXIES, LABELS):
+    for path in (proxies_path, labels_path):
         if not os.path.exists(path):
             raise SystemExit(
                 f"NO MOTIF PROXIES at {path}. They are the directions the axes are "
@@ -934,7 +934,7 @@ def load_bank(key_idx, k_axes=K_AXES):
                 f"every name in axes/labels.json would land on a direction it was "
                 f"not written for. Build them with "
                 f"`python -m pipeline.build_motif_proxies`.")
-    meta = json.load(open(LABELS))
+    meta = json.load(open(labels_path))
     spec = [str(x) for x in meta.get("components", [])]
     if len(spec) < k_axes:
         raise SystemExit(
@@ -946,7 +946,7 @@ def load_bank(key_idx, k_axes=K_AXES):
     # the rest, so a sweep over the count varies only the count.
     spec = spec[:k_axes]
 
-    z = np.load(MOTIF_PROXIES, allow_pickle=False)
+    z = np.load(proxies_path, allow_pickle=False)
     rules = [str(x) for x in z["rules"]]
     lab = np.asarray(z["labels"], bool)
     row = {f"{sz}:{t}": i for i, (sz, t) in
@@ -1052,6 +1052,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         avg_start_frac=0.5,
         ema_decay=0.99,
         weight_decay=0.0, weight_decay_fields=None, exclude_users=None,
+        bank_proxies=MOTIF_PROXIES, bank_labels=LABELS,
         out_dir=OUT_DIR, axes_dir=AXES_DIR):
     """The shipped fit, callable. Every keyword defaults to the production
     constant above, so `run()` IS the production run — `main()` passes nothing,
@@ -1208,7 +1209,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
     has_stop = bool(is_stop.any())
     print(f"  stop signal: {int(is_stop.sum())} rows held aside", flush=True)
 
-    bank_tgt, bank_ok, bank_spec = load_bank(key_idx, k_axes)
+    bank_tgt, bank_ok, bank_spec = load_bank(key_idx, k_axes, bank_proxies, bank_labels)
     t_tgt = torch.tensor(bank_tgt, dtype=torch.float32, device=device)
     t_ok = torch.tensor(bank_ok, device=device)
     print(f"  axis bank: {int(bank_ok.sum())}/{len(keys)} problems carry banked "

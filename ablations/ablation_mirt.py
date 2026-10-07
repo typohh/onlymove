@@ -21,7 +21,9 @@ per-problem spread holdout of §1.5), the axis count
 (§1.14), the two dropout sites with the weight decay §1.5 rejects as their
 substitute, the schedule (§1.8: the decay against the constant rate, and
 the opening ramp the axis-space panel measures), and the ability prior and
-the base-rate start (§1.5, §1.8).
+the base-rate start (§1.5, §1.8), and the taught bank's two input files, so a
+candidate rule can be trialled through the production fit before it is written
+into utils.rating.motif_rules.
 
 An arm writes:
 
@@ -103,9 +105,10 @@ def snapshot_pins(cfg=None):
     return {
         "db_max_id": db_max_id,
         "git": git,
-        "labels_sha": _sha16(os.path.join(PROJECT_ROOT, "axes", "labels.json")),
-        "proxies_sha": _sha16(os.path.join(PROJECT_ROOT, "axes",
-                                           "motif_proxies.npz")),
+        # The EFFECTIVE bank files, so an arm taught from a dev bank is pinned to
+        # what it was taught from rather than to the shipped pair.
+        "labels_sha": _sha16(cfg.get("bank_labels", train_mirt.LABELS)),
+        "proxies_sha": _sha16(cfg.get("bank_proxies", train_mirt.MOTIF_PROXIES)),
         "blocks": str(cfg.get("blocks", PRODUCTION_BLOCKS)),
         "pca_dim": int(cfg.get("pca_dim", PCA_DIM)),
         "act_source": str(cfg.get("act_source", "store")),
@@ -322,6 +325,15 @@ def main(argv=None):
                          "often-attempted problems, some whole and some half, "
                          "and writes their rows for the per-problem spread "
                          "(methodology 1.5)")
+    ap.add_argument("--bank-proxies", default=None,
+                    help="a dev motif_proxies.npz to teach from instead of "
+                         "axes/motif_proxies.npz — for trialling a rule before it "
+                         "is written into utils.rating.motif_rules. Pinned by "
+                         "content hash")
+    ap.add_argument("--bank-labels", default=None,
+                    help="a dev labels.json whose `components` say which rules "
+                         "the axes are taught onto, instead of axes/labels.json. "
+                         "Pass --k-axes to match its length. Pinned by content hash")
     args = ap.parse_args(argv)
 
     cfg = {}
@@ -334,7 +346,7 @@ def main(argv=None):
                  "dropout", "input_dropout", "weight_decay",
                  "weight_decay_fields",
                  "lr_schedule", "lr_warmup_epochs", "split_seed", "pca_seed",
-                 "theta_laplace", "init_base_rate"):
+                 "theta_laplace", "init_base_rate", "bank_proxies", "bank_labels"):
         v = getattr(args, flag)
         if v is not None:
             cfg[flag] = v

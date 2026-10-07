@@ -16,7 +16,7 @@ import numpy as np
 from utils.constants import ALL_BOARD_SIZES
 from utils.rating.fit_rank_curves import CALIBRATION_P
 
-K_AXES = 7                       # skill axes fitted alongside the rating; MUST equal
+K_AXES = 9                       # skill axes fitted alongside the rating; MUST equal
                                  # the number of `components` in axes/labels.json,
                                  # which is the shipping decision K follows
 # THE SHIPPED TRUNK INPUT, stated once: which per-problem blocks the feature trunk

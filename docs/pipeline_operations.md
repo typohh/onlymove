@@ -36,6 +36,12 @@ GPU, resumable by file existence, iterates both sizes. Feeds both the rating fea
 
 Resumable by the `tid` column, appended and fsynced periodically. Iterates all board sizes, takes no arguments, and has no alternate evaluator — it is production-lean by design.
 
+### `extract_ownership_maps`
+
+**Mandatory, not diagnostic.** Per problem, the whole ownership map after a solver PASS, the answer and the next `TOP_ALTS` stone-move root variations in SGF order, plus the root board, into `activations/_signal_cache/ownership_maps/<size>/part_*.npz`. The layout, the slot meanings and the BLACK-positive frame are stated once, in the reader `utils/rating/ownership_maps.py` (numpy only). The `territory` and `influence` rules are written over it, so `build_motif_proxies` **aborts** on a live problem the cache lacks, exactly as it does for `ownership_swing.csv`. The point of keeping whole maps is that an ownership rule or a threshold inside one is changed by re-reading the cache, never by re-running the GPU.
+
+Each position is queried as the full MOVE SEQUENCE (territory scoring needs the prisoners a stone snapshot discards) at one visit with all eight symmetries averaged (`--symmetries`), which makes a map deterministic: under one random symmetry a rule thresholding at 0.95 or 0.4–0.6 flips its verdict on a few percent of problems between two identical runs. **Every part is stamped with model, visits, symmetries, rules, komi and layout, and a resume under any other value aborts** — a cache mixing two networks is well-formed and wrong; `--force` wipes the size and starts over. Incremental by id and reconciled both ways (retired ids are dropped). SGF parsing and board replay run in spawn PROCESSES a chunk ahead of the engine, and a chunk's queries are all in flight at once: as threads the parse holds the interpreter against the response reader, and a serial query loop leaves the GPU idle. Parts are written tmp-then-rename, so a killed run loses at most the chunk in flight and resumes from the parts on disk.
+
 ### `cache_rating_features`
 
 Builds **both** aggregate caches the fit depends on, in one command so they cannot drift apart:

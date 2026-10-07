@@ -45,26 +45,26 @@ const CURVE = JSON.parse(readFileSync(PWA + 'tsumegos/rating_to_rank.json', 'utf
 if (!CURVE || !Array.isArray(CURVE.ratings)) throw new Error('rating_to_rank.json has no usable curve');
 
 // --- the shipped corpus ----------------------------------------------------------
-// One 14-byte record per problem, written by the producer from problem_params.bin
+// One 17-byte record per problem, written by the producer from problem_params.bin
 // joined to lookup.txt and lookup.embeddings.bin:
-//   <f4 rating  <f4 slope  <f4 floor  u1 board size  u1 motif-tail bitmask
+//   <f4 rating  <f4 slope  <f4 floor  u1 board size  <u4 motif-tail bitmask
 // The bitmask's bit k is set when the problem's correct-move loading on axis k
 // clears MOTIF_Z on the axis's NAMED (positive) tail — the client's own
 // problem-motif gate (motif-bubble.js).
-const REC = 14;
+const REC = 17;
 const raw = readFileSync(payload.problems_path);
 const N = raw.length / REC;
 if (!Number.isInteger(N)) throw new Error(`problems file is not a multiple of ${REC} bytes`);
 const rating = new Float64Array(N), slope = new Float64Array(N), floor = new Float64Array(N);
 const rank = new Float64Array(N), quality = new Float64Array(N);
-const bsize = new Uint8Array(N), motif = new Uint8Array(N);
+const bsize = new Uint8Array(N), motif = new Uint32Array(N);
 for (let i = 0; i < N; i++) {
     const o = i * REC;
     rating[i] = raw.readFloatLE(o);
     slope[i] = raw.readFloatLE(o + 4);
     floor[i] = raw.readFloatLE(o + 8);
     bsize[i] = raw[o + 12];
-    motif[i] = raw[o + 13];
+    motif[i] = raw.readUInt32LE(o + 13);
     rank[i] = applyM(rating[i], CURVE);
     // problemInfoWeight (rank-decomposition.js): the 4PL Fisher information one
     // at-rank attempt carries, slope²·anchorInfo(floor). Mirrored because its own
