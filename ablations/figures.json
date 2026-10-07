@@ -6188,6 +6188,986 @@
         "data_version": "f6fba7b749bc0ecb"
       }
     },
+    "prior.level_sd_mnat": {
+      "value": 4.507296806142381,
+      "fmt": ".1f",
+      "text": "4.5",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "run-to-run sd of the held-out-problem level, pooled over the configurations, millinats",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.neither_above_calibration_max": {
+      "value": 1743,
+      "fmt": "d",
+      "text": "1743",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "both off: problems whose floor reaches the calibration probability, worst seed",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.neither_floor_agree": {
+      "value": 0.3657222061780645,
+      "fmt": ".2f",
+      "text": "0.37",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "both off: cross-seed Spearman of the per-problem floors, averaged over seed pairs",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.neither_floor_median_hi": {
+      "value": 0.35896775,
+      "fmt": ".2f",
+      "text": "0.36",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "both off: highest median floor over the seeds",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.neither_floor_median_lo": {
+      "value": 0.24819885,
+      "fmt": ".2f",
+      "text": "0.25",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "both off: lowest median floor over the seeds",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.neither_floor_share_hi": {
+      "value": 0.12704038266614656,
+      "fmt": ".3f",
+      "text": "0.127",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "both off: the same, highest seed",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.neither_floor_share_lo": {
+      "value": 0.08056645644851336,
+      "fmt": ".3f",
+      "text": "0.081",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "both off: attempt-weighted floor share of predicted success, lowest seed",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.neither_gain_ci_mnat": {
+      "value": 10.547202851136424,
+      "fmt": ".1f",
+      "text": "10.5",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "half-width of that gain's 95% t-interval, millinats",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.neither_gain_mnat": {
+      "value": -5.251218697854415,
+      "fmt": "+.1f",
+      "text": "-5.3",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "both off: shipped level minus this arm's on held-out problems, paired per seed and averaged, millinats; positive = this arm predicts better",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.neither_gain_p": {
+      "value": 0.2112583820150088,
+      "fmt": ".3f",
+      "text": "0.211",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "two-sided paired t-test p for that gain",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.neither_lapse_hi": {
+      "value": 0.0172,
+      "fmt": ".3f",
+      "text": "0.017",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "both off: highest lapse over the seeds",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.neither_lapse_lo": {
+      "value": 0.0,
+      "fmt": ".3f",
+      "text": "0.000",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "both off: lowest lapse over the seeds",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.neither_parked_attempts_max": {
+      "value": 9590,
+      "fmt": "d",
+      "text": "9590",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "both off: the attempts those users hold, worst seed",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.neither_parked_max": {
+      "value": 23,
+      "fmt": "d",
+      "text": "23",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "both off: users explained mostly by floors, worst seed",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.neither_rating_agree": {
+      "value": 0.9636968664085345,
+      "fmt": ".3f",
+      "text": "0.964",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "both off: the same for ratings",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.neither_seeds_better": {
+      "value": 1,
+      "fmt": "d",
+      "text": "1",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "of 4 seeds, how many this arm beats the shipped fit on",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.neither_slope_agree": {
+      "value": 0.5165136842525948,
+      "fmt": ".2f",
+      "text": "0.52",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "both off: the same for slopes",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.neither_user_share_max": {
+      "value": 0.9999999999999958,
+      "fmt": ".2f",
+      "text": "1.00",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "both off: the largest single user's floor share, worst seed",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.no_prior_above_calibration_max": {
+      "value": 55,
+      "fmt": "d",
+      "text": "55",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "the ability prior off: problems whose floor reaches the calibration probability, worst seed",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.no_prior_floor_agree": {
+      "value": 0.7314823416772737,
+      "fmt": ".2f",
+      "text": "0.73",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "the ability prior off: cross-seed Spearman of the per-problem floors, averaged over seed pairs",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.no_prior_floor_median_hi": {
+      "value": 0.16575141,
+      "fmt": ".2f",
+      "text": "0.17",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "the ability prior off: highest median floor over the seeds",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.no_prior_floor_median_lo": {
+      "value": 0.07826624,
+      "fmt": ".2f",
+      "text": "0.08",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "the ability prior off: lowest median floor over the seeds",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.no_prior_floor_share_hi": {
+      "value": 0.06074422238678065,
+      "fmt": ".3f",
+      "text": "0.061",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "the ability prior off: the same, highest seed",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.no_prior_floor_share_lo": {
+      "value": 0.029779810033796515,
+      "fmt": ".3f",
+      "text": "0.030",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "the ability prior off: attempt-weighted floor share of predicted success, lowest seed",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.no_prior_gain_ci_mnat": {
+      "value": 10.332347396362493,
+      "fmt": ".1f",
+      "text": "10.3",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "half-width of that gain's 95% t-interval, millinats",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.no_prior_gain_mnat": {
+      "value": -12.595482702766128,
+      "fmt": "+.1f",
+      "text": "-12.6",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "the ability prior off: shipped level minus this arm's on held-out problems, paired per seed and averaged, millinats; positive = this arm predicts better",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.no_prior_gain_p": {
+      "value": 0.030333388941903565,
+      "fmt": ".3f",
+      "text": "0.030",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "two-sided paired t-test p for that gain",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.no_prior_lapse_hi": {
+      "value": 0.0045,
+      "fmt": ".3f",
+      "text": "0.004",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "the ability prior off: highest lapse over the seeds",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.no_prior_lapse_lo": {
+      "value": 0.0,
+      "fmt": ".3f",
+      "text": "0.000",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "the ability prior off: lowest lapse over the seeds",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.no_prior_parked_attempts_max": {
+      "value": 0,
+      "fmt": "d",
+      "text": "0",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "the ability prior off: the attempts those users hold, worst seed",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.no_prior_parked_max": {
+      "value": 0,
+      "fmt": "d",
+      "text": "0",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "the ability prior off: users explained mostly by floors, worst seed",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.no_prior_rating_agree": {
+      "value": 0.9722453284165832,
+      "fmt": ".3f",
+      "text": "0.972",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "the ability prior off: the same for ratings",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.no_prior_seeds_better": {
+      "value": 0,
+      "fmt": "d",
+      "text": "0",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "of 4 seeds, how many this arm beats the shipped fit on",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.no_prior_slope_agree": {
+      "value": 0.6572998843229841,
+      "fmt": ".2f",
+      "text": "0.66",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "the ability prior off: the same for slopes",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.no_prior_user_share_max": {
+      "value": 0.2606647554051255,
+      "fmt": ".2f",
+      "text": "0.26",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "the ability prior off: the largest single user's floor share, worst seed",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.no_start_above_calibration_max": {
+      "value": 2904,
+      "fmt": "d",
+      "text": "2904",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "the base-rate start off: problems whose floor reaches the calibration probability, worst seed",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.no_start_floor_agree": {
+      "value": 0.5989527413026824,
+      "fmt": ".2f",
+      "text": "0.60",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "the base-rate start off: cross-seed Spearman of the per-problem floors, averaged over seed pairs",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.no_start_floor_median_hi": {
+      "value": 0.32510042,
+      "fmt": ".2f",
+      "text": "0.33",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "the base-rate start off: highest median floor over the seeds",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.no_start_floor_median_lo": {
+      "value": 0.19611736,
+      "fmt": ".2f",
+      "text": "0.20",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "the base-rate start off: lowest median floor over the seeds",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.no_start_floor_share_hi": {
+      "value": 0.12486246327382042,
+      "fmt": ".3f",
+      "text": "0.125",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "the base-rate start off: the same, highest seed",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.no_start_floor_share_lo": {
+      "value": 0.06582693132528576,
+      "fmt": ".3f",
+      "text": "0.066",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "the base-rate start off: attempt-weighted floor share of predicted success, lowest seed",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.no_start_gain_ci_mnat": {
+      "value": 5.248368295233096,
+      "fmt": ".1f",
+      "text": "5.2",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "half-width of that gain's 95% t-interval, millinats",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.no_start_gain_mnat": {
+      "value": 1.015480075563735,
+      "fmt": "+.1f",
+      "text": "+1.0",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "the base-rate start off: shipped level minus this arm's on held-out problems, paired per seed and averaged, millinats; positive = this arm predicts better",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.no_start_gain_p": {
+      "value": 0.5816203524724186,
+      "fmt": ".3f",
+      "text": "0.582",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "two-sided paired t-test p for that gain",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.no_start_lapse_hi": {
+      "value": 0.0083,
+      "fmt": ".3f",
+      "text": "0.008",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "the base-rate start off: highest lapse over the seeds",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.no_start_lapse_lo": {
+      "value": 0.0,
+      "fmt": ".3f",
+      "text": "0.000",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "the base-rate start off: lowest lapse over the seeds",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.no_start_parked_attempts_max": {
+      "value": 9516,
+      "fmt": "d",
+      "text": "9516",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "the base-rate start off: the attempts those users hold, worst seed",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.no_start_parked_max": {
+      "value": 21,
+      "fmt": "d",
+      "text": "21",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "the base-rate start off: users explained mostly by floors, worst seed",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.no_start_rating_agree": {
+      "value": 0.9614578841961418,
+      "fmt": ".3f",
+      "text": "0.961",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "the base-rate start off: the same for ratings",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.no_start_seeds_better": {
+      "value": 3,
+      "fmt": "d",
+      "text": "3",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "of 4 seeds, how many this arm beats the shipped fit on",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.no_start_slope_agree": {
+      "value": 0.5970796713975638,
+      "fmt": ".2f",
+      "text": "0.60",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "the base-rate start off: the same for slopes",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.no_start_user_share_max": {
+      "value": 0.9958242359041414,
+      "fmt": ".2f",
+      "text": "1.00",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "the base-rate start off: the largest single user's floor share, worst seed",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.park_min_attempts": {
+      "value": 30,
+      "fmt": "d",
+      "text": "30",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "attempts after the opening run a user needs to be read for floor explanation",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.park_share": {
+      "value": 0.5,
+      "fmt": ".1f",
+      "text": "0.5",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "floor share of a user's predicted success above which they count as explained mostly by floors",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.park_skip": {
+      "value": 30,
+      "fmt": "d",
+      "text": "30",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "opening attempts skipped before that reading",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.seeds": {
+      "value": 4,
+      "fmt": "d",
+      "text": "4",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "fits per configuration, paired by seed at one pinned draw",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.shipped_above_calibration_max": {
+      "value": 276,
+      "fmt": "d",
+      "text": "276",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "the shipped fit (ability prior and base-rate start): problems whose floor reaches the calibration probability, worst seed",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.shipped_floor_agree": {
+      "value": 0.5641495046032784,
+      "fmt": ".2f",
+      "text": "0.56",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "the shipped fit (ability prior and base-rate start): cross-seed Spearman of the per-problem floors, averaged over seed pairs",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.shipped_floor_median_hi": {
+      "value": 0.13527821,
+      "fmt": ".2f",
+      "text": "0.14",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "the shipped fit (ability prior and base-rate start): highest median floor over the seeds",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.shipped_floor_median_lo": {
+      "value": 0.014732815,
+      "fmt": ".2f",
+      "text": "0.01",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "the shipped fit (ability prior and base-rate start): lowest median floor over the seeds",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.shipped_floor_share_hi": {
+      "value": 0.04880939490887509,
+      "fmt": ".3f",
+      "text": "0.049",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "the shipped fit (ability prior and base-rate start): the same, highest seed",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.shipped_floor_share_lo": {
+      "value": 0.004845145272318291,
+      "fmt": ".3f",
+      "text": "0.005",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "the shipped fit (ability prior and base-rate start): attempt-weighted floor share of predicted success, lowest seed",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.shipped_lapse_hi": {
+      "value": 0.0128,
+      "fmt": ".3f",
+      "text": "0.013",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "the shipped fit (ability prior and base-rate start): highest lapse over the seeds",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.shipped_lapse_lo": {
+      "value": 0.0001,
+      "fmt": ".3f",
+      "text": "0.000",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "the shipped fit (ability prior and base-rate start): lowest lapse over the seeds",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.shipped_parked_attempts_max": {
+      "value": 0,
+      "fmt": "d",
+      "text": "0",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "the shipped fit (ability prior and base-rate start): the attempts those users hold, worst seed",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.shipped_parked_max": {
+      "value": 0,
+      "fmt": "d",
+      "text": "0",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "the shipped fit (ability prior and base-rate start): users explained mostly by floors, worst seed",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.shipped_rating_agree": {
+      "value": 0.9713436533949905,
+      "fmt": ".3f",
+      "text": "0.971",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "the shipped fit (ability prior and base-rate start): the same for ratings",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.shipped_slope_agree": {
+      "value": 0.7578840298871778,
+      "fmt": ".2f",
+      "text": "0.76",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "the shipped fit (ability prior and base-rate start): the same for slopes",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.shipped_user_share_max": {
+      "value": 0.19253499922315132,
+      "fmt": ".2f",
+      "text": "0.19",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "the shipped fit (ability prior and base-rate start): the largest single user's floor share, worst seed",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
+    "prior.users_read": {
+      "value": 936,
+      "fmt": "d",
+      "text": "936",
+      "producer": "ablations.refit_prior_figures",
+      "tier": "refit",
+      "note": "users with enough attempts to be read for floor explanation",
+      "measured": {
+        "at": "2026-10-07T02:45:53Z",
+        "git": "10419518cde",
+        "db_max_id": 578533,
+        "data_version": "9660d80148d94cf6"
+      }
+    },
     "published.floor_above_calibration": {
       "value": 0,
       "fmt": "d",
