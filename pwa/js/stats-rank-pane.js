@@ -249,12 +249,11 @@ export function buildRatingHistoryChart(history = state.answerHistory, decomp) {
             if (Number.isFinite(y)) winPts.push({ t: e.t, y });
         }
 
-        // Readout = the FRONT-PAGE rank (the amber line's right endpoint = the
-        // window MLE the home page shows) in the selected server's scale — so the
-        // text matches the front page for OnlyMove (time-adjusted + translated for
-        // other servers). Hidden when there's too little data for the line.
-        if (winPts.length >= 1) {
-            const cur = winPts[winPts.length - 1].y;
+        // Readout = the STABLE rank (the blue skill line's right endpoint) in the
+        // selected server's scale (time-adjusted + translated for other servers).
+        // Hidden when there's too little data for the line.
+        if (gd.length >= 1) {
+            const cur = gd[gd.length - 1].S;
             // Shared decimal-rank → {label, percent, nextLabel} (band floor,
             // progress from the band's lower edge; GoR/EGF-consistent).
             const { label, percent, nextLabel } = rankProgress(cur, displayLabel);
