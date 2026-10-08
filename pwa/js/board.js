@@ -130,13 +130,22 @@ export function playTypedMove(x, y) {
     return false;
 }
 
+// A white outline marker's opacity. A translucent stone is a blend with the wood
+// under it, and the wood is far nearer white than black, so at WGo's shared
+// default a white marker barely departs from the board while a black one stands
+// clear; white is drawn more opaque to read as strongly as black does.
+const WHITE_OUTLINE_ALPHA = 0.6;
+
 // Draw a hollow "outline" stone marker in the side-to-move's color at `move` —
 // used identically for the analysis hint, a candidate move, and the ghost-stone
 // confirmation. No-op for a missing or off-board coordinate.
 const drawOutlineMarker = (move) => {
     if (!move || typeof move.x === 'undefined' || typeof move.y === 'undefined') return;
     if (move.x < 0 || move.x >= state.board.size || move.y < 0 || move.y >= state.board.size) return;
-    state.board.addObject({ x: move.x, y: move.y, c: state.kifuReader.game.turn, type: 'outline' });
+    const c = state.kifuReader.game.turn;
+    const marker = { x: move.x, y: move.y, c, type: 'outline' };
+    if (c === WGo.W) marker.alpha = WHITE_OUTLINE_ALPHA;
+    state.board.addObject(marker);
 }
 
 // Mark (as 'SQ') the points adjacent to `move` that are illegal to play due to
