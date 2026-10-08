@@ -71,7 +71,7 @@ from utils.rating.motif_rules import (  # noqa: E402
     answer_opponent_distance, best_refuted_node, reply_distance,
     reply_kind, rule_fast, rule_gote, rule_ko,
     rule_life_and_death, rule_opening, rule_sacrifice, rule_yose, rule_semeai,
-    rule_sente, rule_shape, rule_tenuki, rule_area, area_counts)
+    rule_sente, rule_shape, rule_tenuki, rule_area, area_counts, pass_gain)
 
 OUT = os.path.join(PROJECT_ROOT, "axes", "motif_proxies.npz")
 # The ownership-swing columns the rules read. A projection, not the whole row —
@@ -82,13 +82,14 @@ OWN_COLS = ("own_dead_revived", "own_alive_killed", "opp_alive_killed",
 _OWN = {}
 _PHASE = {}
 _AREA = {}
+_YOSE = {}
 
 
-def _init(own, phase, area):
+def _init(own, phase, area, yose):
     """Worker-side globals: the ownership and phase tables are ~220k rows each and
     pickling them per task would dominate the run."""
-    global _OWN, _PHASE, _AREA
-    _OWN, _PHASE, _AREA = own, phase, area
+    global _OWN, _PHASE, _AREA, _YOSE
+    _OWN, _PHASE, _AREA, _YOSE = own, phase, area, yose
 
 
 def label_one(args):
@@ -130,7 +131,6 @@ def label_one(args):
     from utils.katago.board_render import simulate
     root_board, _last, _ko = simulate(setup_sgf, size)
     root_ko = _ko is not None
-    evals = [e for e in (_mover_eval(n) for n in variation_nodes) if e is not None]
     # `shape` ranks only RESOLVED alternatives: an abandoned line is not a rival,
     # it is a line nobody played out.
     resolved = [e for e in (_mover_eval(n) for n in variation_nodes
@@ -141,7 +141,7 @@ def label_one(args):
         # both statuses decided together rather than one of them — and disjoint
         # from it by construction, so no problem seeds both.
         "semeai": rule_semeai(own),
-        "yose": rule_yose(evals),
+        "yose": _YOSE[tid],
         "ko": True if root_ko else rule_ko(setup_sgf, variation_nodes, size),
         "opening": rule_opening(ph[1], size),
         # One verdict over both: what the answer makes of the open area is
@@ -170,19 +170,22 @@ def load_ownership():
     return out
 
 
-def load_area(sizes):
-    """tid -> "territory" | "influence" | None, from the ownership-map cache.
+def load_map_rules(sizes):
+    """The rules written over the ownership-map cache, as two tid-keyed dicts:
+    "territory" | "influence" | None, and the yose verdict.
 
-    Vectorized per board size: the rule reads whole maps, and evaluating it in
-    the workers would ship every map through the pool. A problem the cache lacks
-    has no entry, which label_one reads as a missing input."""
+    Vectorized per board size: these rules read whole maps, and evaluating them
+    in the workers would ship every map through the pool. A problem the cache
+    lacks has no entry, which label_one reads as a missing input."""
     from utils.rating import ownership_maps as OM
-    out = {}
+    area, yose = {}, {}
     for size in sizes:
         d = OM.load_size(size)
-        for tid, *q in zip(d["tid"].tolist(), *area_counts(d)):
-            out[tid] = rule_area(*q)
-    return out
+        tids = d["tid"].tolist()
+        for tid, *q in zip(tids, *area_counts(d)):
+            area[tid] = rule_area(*q)
+        yose.update(zip(tids, rule_yose(pass_gain(d)).tolist()))
+    return area, yose
 
 
 def load_phase(sizes):
@@ -244,13 +247,13 @@ def main():
     rows = dict(prev)
     if todo:
         own, phase = load_ownership(), load_phase(sorted(SIZES))
-        area = load_area(sorted(SIZES))
+        area, yose = load_map_rules(sorted(SIZES))
         print(f"  ownership {len(own)}, ownership maps {len(area)}, "
               f"phase {len(phase)}", flush=True)
         from multiprocessing import Pool
         skipped = 0
         with Pool(args.workers, initializer=_init,
-                  initargs=(own, phase, area)) as p:
+                  initargs=(own, phase, area, yose)) as p:
             for i, r in enumerate(p.imap_unordered(label_one, todo, chunksize=200)):
                 if r is None:
                     skipped += 1

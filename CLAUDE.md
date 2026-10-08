@@ -45,7 +45,7 @@ Always invoke pipeline modules through the venv's Python so PYTHONPATH resolves 
 ./.venv/bin/python3 -m pipeline.benchmark_bots <size>     # bots solve generated tsumegos → attempts/<size>/
 ./.venv/bin/python3 -m pipeline.extract_activations       # the activation network's final trunk state at every legal cell → activations/<size>/<id>.npz (GPU; resumable)
 ./.venv/bin/python3 -m pipeline.extract_ownership_swing   # ownership swing per problem → activations/_signal_cache/ownership_swing.csv (GPU; resumable). MANDATORY, not diagnostic: two motif rules are written over it and build_motif_proxies aborts without it
-./.venv/bin/python3 -m pipeline.extract_ownership_maps    # ownership map per intersection after a pass, the answer and the next 4 SGF-order moves → activations/_signal_cache/ownership_maps/ (GPU; resumable). MANDATORY: territory and influence are written over it
+./.venv/bin/python3 -m pipeline.extract_ownership_maps    # ownership map per intersection after a pass, the answer and the next 4 SGF-order moves → activations/_signal_cache/ownership_maps/ (GPU; resumable). MANDATORY: territory, influence and yose are written over it
 ./.venv/bin/python3 -m pipeline.cache_rating_features     # both roll-up caches: correct-cell vectors (the trunk's activation block, and the rated-set id list) + move evals (the "all" comparison layout, the axis analyses, the alt-cell coordinate). Incremental, reconciles both ways
 ./.venv/bin/python3 -m pipeline.build_motif_proxies       # rule verdicts per problem → axes/motif_proxies.npz. A rule/threshold change needs --force
 ./.venv/bin/python3 -m pipeline.train_mirt                # single-stage rating + K skill axes in ONE fit → ratings/ + axes/{per_problem.csv,axes.npz}

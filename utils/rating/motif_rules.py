@@ -83,15 +83,15 @@ SEMEAI_MIN_STONES = 10.0
 # 8.2% pooled, 3.6%/12.5% by board.
 SACRIFICE_MIN_STONES = 1.5
 
-# yose: the top two first moves finish within a hair of each other on score
-# while the win probability separates hard — the position turns on a margin you
-# have to count rather than on a status you can see.
-# The winrate bar has to be HIGH to select anything. Admission requires exactly
-# one winning reply, played out, so the corpus has almost no ambiguous-outcome
-# positions: 99.5% of problems clear a 50-point winrate gap and the clause passes
-# everything. At 90 it admits 55%, which is a filter.
-COUNT_SCORE_MAX = 5.0   # points between best and second best
-COUNT_WR_MIN = 90.0     # percentage points of winrate between the same two
+# yose: the answer is worth few POINTS over leaving the position alone — the
+# solver's score after the answer against the solver's score after a PASS, both
+# the engine's own reading from the ownership-map cache, so the two sides are one
+# measurement. A small margin is what makes the move an endgame move: nothing's
+# status turns on it, and finding it is a matter of counting.
+# The pass, not the best refutation, for the reason the area rules give below: a
+# refuted try is usually the next-largest point and cancels most of the value
+# being measured.
+YOSE_MAX_GAIN = 8.0     # points; the answer must gain strictly less than this
 
 # ko: replay each resolved line this many plies and ask whether a ko shape stands.
 # Depth 0 is the root position itself.
@@ -446,9 +446,8 @@ def rule_shape(evals, max_gap=None):
     problem in this corpus has an unambiguous best move and the ones that do not
     are the tail this rule takes.
 
-    Distinct from `rule_yose`, which wants a LARGE winrate gap alongside a
-    small score gap: there the position is decided by a margin and the engine is
-    sure which move takes it."""
+    Distinct from `rule_yose`, which prices the answer in POINTS against a
+    pass and does not look at the rivals at all."""
     if len(evals) < 2:
         return False
     max_gap = SHAPE_WR_GAP if max_gap is None else max_gap
@@ -456,18 +455,21 @@ def rule_shape(evals, max_gap=None):
     return (top[0][0] - top[1][0]) <= max_gap
 
 
-def rule_yose(evals):
-    """Score says the two best first moves are equivalent; winrate says they are
-    not. That gap is the signature of a position decided by a margin.
+def pass_gain(d):
+    """Points the answer is worth over a pass, in the solver's frame, over one
+    board size of the ownership cache (utils.rating.ownership_maps): (N,)."""
+    from utils.rating import ownership_maps as OM
+    sc = OM.solver_frame(d)["eng_score"]
+    return sc[:, OM.SLOT_CORRECT] - sc[:, OM.SLOT_PASS]
 
-    `evals` is [(winrate, score)] over the root variations, mover-framed. Ranked
-    by WINRATE, the axis the answer leads on, so "best and second best" is the
-    answer and its closest rival."""
-    if len(evals) < 2:
-        return False
-    top = sorted(evals, key=lambda t: (t[0], t[1]), reverse=True)[:2]
-    (w1, s1), (w2, s2) = top
-    return (s1 - s2) <= COUNT_SCORE_MAX and (w1 - w2) >= COUNT_WR_MIN
+
+def rule_yose(gain):
+    """The answer gains fewer than YOSE_MAX_GAIN points over a pass.
+
+    `gain` is the solver's score after the answer minus the solver's score after
+    passing instead (pass_gain). One bar on one number: the move is small, so
+    the problem turns on a margin that has to be counted."""
+    return gain < YOSE_MAX_GAIN
 
 
 def rule_ko(base, variation_nodes, size):

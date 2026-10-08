@@ -19,11 +19,11 @@ analogue:
   refuted line      a search of the position after the refuted try; its top
                     move is the reply
   root variations   {answer, refuted try}: their child searches supply the
-                    (winrate, score) pairs yose ranks and the ownership maps
-                    life and death / semeai compare
+                    ownership maps life and death / semeai compare
   pass baseline     the position after the mover passes. Territory and
                     influence compare the ownership after the played move with
-                    the ownership after that pass, both read the way the problem
+                    the ownership after that pass, and yose the two scores,
+                    both read the way the problem
                     set's are (pipeline.extract_ownership_maps: one visit, all
                     eight symmetries averaged), so the two sides of the contrast
                     are the same measurement
@@ -128,8 +128,9 @@ class Engine:
         return r
 
     def ownership_map(self, moves):
-        """The area rules' map after `moves`: one visit, symmetries averaged,
-        BLACK-absolute, [y][x] from the top."""
+        """(map, score) after `moves`, as the pass-referenced rules read them:
+        one visit, symmetries averaged, BLACK-absolute, the map [y][x] from the
+        top."""
         r = self.controller.send_query({
             "moves": [[colour_at(i), m] for i, m in enumerate(moves)],
             "initialStones": [], "rules": RULES, "komi": KOMI,
@@ -138,14 +139,16 @@ class Engine:
             "overrideSettings": {"rootNumSymmetriesToSample": SYMMETRIES},
         })
         require("ownership" in r, f"engine error: {r.get('error', r)}")
-        return np.asarray(r["ownership"], dtype=np.float32).reshape(SIZE, SIZE)
+        return (np.asarray(r["ownership"], dtype=np.float32).reshape(SIZE, SIZE),
+                r["rootInfo"]["scoreLead"])
 
 
 def play_game(engine, finder, rng):
     """(moves, searches, alt, area): searches[i] is the search of the position
     before moves[i]; alt[i] is (refuted try, the search after it) per scored
     position; area[i] is the (after the played move, after a pass) ownership
-    pair the area rules compare."""
+    pair the area rules compare, then the BLACK-absolute score of the played
+    move less that of the pass, which yose reads."""
     moves = finder.generate_initial_position(rng)
     searches, alt, area = {}, {}, {}
     cap = RANDOM_MOVE_COUNT + 2 * SIZE * SIZE
@@ -166,18 +169,13 @@ def play_game(engine, finder, rng):
                         break
             if b is not None:
                 alt[i] = (b, engine.search(moves + [b]))
-                area[i] = (engine.ownership_map(moves + [a]),
-                           engine.ownership_map(moves + ["pass"]))
+                (own_a, score_a) = engine.ownership_map(moves + [a])
+                (own_p, score_p) = engine.ownership_map(moves + ["pass"])
+                area[i] = (own_a, own_p, score_a - score_p)
         moves.append(a)
         if len(moves) >= 2 and moves[-1] == "pass" and moves[-2] == "pass":
             break
     return moves, searches, alt, area
-
-
-def mover_eval(search, mover):
-    ri = search["rootInfo"]
-    wr, sc = 100.0 * ri["winrate"], ri["scoreLead"]
-    return (wr, sc) if mover == "B" else (100.0 - wr, -sc)
 
 
 def ownership_parts(board, good, base, mover):
@@ -248,10 +246,11 @@ def label_game(moves, searches, alt, area, rules):
             sign * np.asarray(child_a["ownership"], dtype=np.float32).reshape(SIZE, SIZE),
             sign * np.asarray(child_b["ownership"], dtype=np.float32).reshape(SIZE, SIZE),
             mover)
-        region = area_verdict(board, a, *area[i], sign)
+        own_a, own_p, gain = area[i]
+        region = area_verdict(board, a, own_a, own_p, sign)
         verdict = {
             "life and death": mr.rule_life_and_death(own),
-            "yose": mr.rule_yose([mover_eval(child_a, mover), mover_eval(child_b, mover)]),
+            "yose": bool(mr.rule_yose(sign * gain)),
             "ko": root_ko or (mr.KO_DEPTH > 0 and ko_line),
             "opening": mr.rule_opening(i, SIZE),
             "tenuki": mr.rule_tenuki(dist(a, opp_last) if opp_last else None, root_ko),
