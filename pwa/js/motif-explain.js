@@ -36,6 +36,8 @@ const DESCRIPTION_KEYS = {
     'tenuki':         'motifDescTenuki',
     'yose':           'motifDescYose',
     'opening':        'motifDescOpening',
+    'territory':      'motifDescTerritory',
+    'influence':      'motifDescInfluence',
 };
 
 function descriptionFor(component, side) {
