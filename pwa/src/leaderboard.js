@@ -215,11 +215,13 @@ function tierRankFromLabel(label) {
     return rankLabelToRank(label);
 }
 
-// EGD Last_Appearance tournament code ("T220122H") -> ISO date, or null. Two-digit
-// year pivots at 70 (EGD data starts in 1996).
+// EGD Last_Appearance tournament code ("T220122H") -> ISO date, or null. The
+// leading letter is EGD's tournament class (T, E, W and G all occur) and the
+// date body is the same under each, so any letter is accepted. Two-digit year
+// pivots at 70 (EGD data starts in 1996).
 export function egdLastAppearanceToIso(code) {
     if (typeof code !== 'string') return null;
-    const m = code.trim().toUpperCase().match(/^T(\d{2})(\d{2})(\d{2})[A-Z]?$/);
+    const m = code.trim().toUpperCase().match(/^[A-Z](\d{2})(\d{2})(\d{2})[A-Z]?$/);
     if (!m) return null;
     const yy = parseInt(m[1], 10), mo = parseInt(m[2], 10), dd = parseInt(m[3], 10);
     if (mo < 1 || mo > 12 || dd < 1 || dd > 31) return null;
