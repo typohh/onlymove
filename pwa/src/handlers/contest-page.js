@@ -45,6 +45,8 @@ const STR = {
         formAccount: 'Account code',
         formAccountHint: 'Filled in from this browser. If you played on another device, enter the code shown in the app under menu → Account.',
         formAccountNone: 'No OnlyMove account in this browser. Enter the code shown in the app under menu → Account.',
+        codeShow: 'Show code',
+        codeHide: 'Hide code',
         acctChecking: 'Checking the account…',
         acctAlias: 'Listed as {alias}.',
         acctNoAlias: 'Listed as Anonymous.',
@@ -101,6 +103,8 @@ const STR = {
         formAccount: '账户代码',
         formAccountHint: '已根据此浏览器自动填写。如果你在其他设备上解题，请输入应用中“菜单 → 账户”显示的代码。',
         formAccountNone: '此浏览器中没有 OnlyMove 账户。请输入应用中“菜单 → 账户”显示的代码。',
+        codeShow: '显示代码',
+        codeHide: '隐藏代码',
         acctChecking: '正在检查账户……',
         acctAlias: '将以“{alias}”列出。',
         acctNoAlias: '将以“匿名”列出。',
@@ -157,6 +161,8 @@ const STR = {
         formAccount: 'アカウントコード',
         formAccountHint: 'このブラウザから自動入力しました。別の端末で解いた場合は、アプリの「メニュー → アカウント」に表示されるコードを入力してください。',
         formAccountNone: 'このブラウザには OnlyMove のアカウントがありません。アプリの「メニュー → アカウント」に表示されるコードを入力してください。',
+        codeShow: 'コードを表示',
+        codeHide: 'コードを隠す',
         acctChecking: 'アカウントを確認しています…',
         acctAlias: '「{alias}」として掲載されます。',
         acctNoAlias: '「匿名」として掲載されます。',
@@ -213,6 +219,8 @@ const STR = {
         formAccount: '계정 코드',
         formAccountHint: '이 브라우저에서 자동으로 채웠습니다. 다른 기기에서 풀었다면 앱의 메뉴 → 계정에 표시된 코드를 입력하세요.',
         formAccountNone: '이 브라우저에는 OnlyMove 계정이 없습니다. 앱의 메뉴 → 계정에 표시된 코드를 입력하세요.',
+        codeShow: '코드 표시',
+        codeHide: '코드 숨기기',
         acctChecking: '계정을 확인하는 중…',
         acctAlias: '"{alias}"(으)로 표시됩니다.',
         acctNoAlias: '"익명"으로 표시됩니다.',
@@ -405,6 +413,14 @@ function renderPage(view) {
   form.enter textarea { min-height: 4.5rem; resize: vertical; }
   form.enter select { font-size: .95rem; padding: .45rem 1.6rem .45rem .6rem; }
   form.enter input#fAccount { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; max-width: 14rem; }
+  /* The account code is a credential, so it is drawn masked until the eye is
+     pressed: a creator filling this form in on stream must not publish it. */
+  form.enter input#fAccount.masked { -webkit-text-security: disc; }
+  .code-row { display: flex; align-items: center; gap: .5rem; }
+  .code-eye { display: inline-flex; padding: .3rem; border-radius: 6px; color: var(--ink-muted); cursor: pointer; }
+  .code-eye:hover { color: var(--ink); }
+  .code-eye:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .code-eye svg { width: 1.25rem; height: 1.25rem; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
   form.enter input#fProblems { max-width: 8rem; }
   .row2 { display: grid; grid-template-columns: auto 1fr; gap: .6rem; align-items: center; }
   .hint { font-size: .88rem; color: var(--ink-muted); margin: .35rem 0 0; }
@@ -469,7 +485,10 @@ function renderPage(view) {
   <form class="enter" id="form" novalidate>
     <div>
       <label class="lbl" for="fAccount" id="formAccount"></label>
-      <input type="text" id="fAccount" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="8">
+      <div class="code-row">
+        <input type="text" id="fAccount" class="masked" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="8">
+        <span class="code-eye" id="codeEye" role="button" tabindex="0"></span>
+      </div>
       <p class="hint" id="acctHint"></p>
       <p class="hint" id="acctInfo" aria-live="polite"></p>
     </div>
@@ -590,6 +609,24 @@ function renderPage(view) {
   try { stored = localStorage.getItem('userId'); } catch (e) { stored = null; }
   if (stored && USER_ID_RE.test(stored)) $('fAccount').value = stored;
   $('acctHint').textContent = t($('fAccount').value ? 'formAccountHint' : 'formAccountNone');
+
+  // The eye beside the code. The reveal lasts for this page view and is never
+  // stored, the same rule as the app's Account dialog.
+  var EYE = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="2.8"/></svg>';
+  var EYE_OFF = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="2.8"/><path d="M4 4l16 16"/></svg>';
+  var codeShown = false;
+  function paintEye() {
+    $('fAccount').classList.toggle('masked', !codeShown);
+    $('codeEye').innerHTML = codeShown ? EYE_OFF : EYE;
+    $('codeEye').setAttribute('aria-label', t(codeShown ? 'codeHide' : 'codeShow'));
+    $('codeEye').setAttribute('aria-pressed', String(codeShown));
+  }
+  function toggleEye() { codeShown = !codeShown; paintEye(); }
+  $('codeEye').addEventListener('click', toggleEye);
+  $('codeEye').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleEye(); }
+  });
+  paintEye();
 
   // The account preview: one /profile read per distinct code, cached here.
   var profiles = {}, lookupTimer = null;
