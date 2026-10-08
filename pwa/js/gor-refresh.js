@@ -11,6 +11,8 @@
 // Best-effort throughout: a failed EGD fetch just leaves that PIN stale for the next
 // client to retry, so nothing is ever permanently lost.
 
+import { isAnonymizedEgdName } from '../shared/egd-anonymized.js';
+
 const EGD_PIN_URL = 'https://www.europeangodatabase.eu/EGD/GetPlayerDataByPIN.php?pin=';
 const MAX_PER_RESPONSE = 20;   // cap EGD fetches kicked off per report response
 
@@ -27,6 +29,7 @@ const inFlight = new Set();    // PINs currently being fetched (dedupe within a 
 // path by which a rating could be asserted.
 export function bufferGorUpdate(update) {
     if (!update || !/^\d+$/.test(String(update.pin || ''))) return;
+    if (isAnonymizedEgdName(update.name)) return;
     if (pending.some((u) => String(u.pin) === String(update.pin))) return;
     pending.push({ ...update, pin: String(update.pin) });
 }
@@ -64,6 +67,9 @@ async function fetchOne(pin) {
         const gor = parseInt(d.Gor, 10);
         if (!Number.isFinite(gor)) return;
         const name = `${d.Name || ''} ${d.Last_Name || ''}`.trim();
+        // An anonymized record is not a reading of this player: skip the week
+        // (the Worker refuses it too, for clients that predate this check).
+        if (isAnonymizedEgdName(name)) return;
         // Grade is EGD's own official rank ("4d"/"7k"/"3p"); Last_Appearance encodes
         // the last tournament date ("T220122H" -> 2022-01-22). Both are passed raw —
         // the Worker validates/parses (applyGorUpdates) before storing.

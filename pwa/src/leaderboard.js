@@ -19,6 +19,7 @@ import {
 } from '../shared/rank-window.js';
 import { anchorInfo } from '../js/irt.js';
 import { fetchAgaPlayer } from './aga.js';
+import { isAnonymizedEgdName } from '../shared/egd-anonymized.js';
 // Inlined at build time (wrangler bundles JSON imports, like src/server-stats.js).
 import RATING_RANK_MAP from '../tsumegos/rating_to_rank.json';
 import RANK_MAP from '../tsumegos/rank_map.json';
@@ -522,6 +523,10 @@ export async function applyGorUpdates(env, updates) {
     for (const u of updates.slice(0, 50)) {
         const pin = String((u && u.pin) || '');
         if (!/^\d+$/.test(pin)) continue;
+        // An anonymized EGD record is ignored WHOLESALE: no heartbeat this week,
+        // so the account's last real one keeps standing (and the pin stays
+        // advertised as stale, which is harmless).
+        if (isAnonymizedEgdName(u && u.name)) continue;
         const gor = Math.round(Number(u && u.gor));
         if (!Number.isFinite(gor) || gor < GOR_MIN || gor > GOR_MAX) continue;
         const cc = (typeof u.country === 'string' ? u.country : '').slice(0, 2).toUpperCase();

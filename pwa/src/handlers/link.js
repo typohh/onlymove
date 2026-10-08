@@ -39,6 +39,7 @@ import {
 } from '../leaderboard.js';
 import { rankToLabel, rankBand, clampRankBand } from '../../shared/rank-math.js';
 import { fetchAgaPlayer, isValidAgaId } from '../aga.js';
+import { isAnonymizedEgdName } from '../../shared/egd-anonymized.js';
 
 const NAME_MAX = 100;
 
@@ -119,7 +120,11 @@ export async function handleLink(request, env) {
     const name = isAga
         ? (agaPlayer.displayName || '')
         : (typeof data.name === 'string' ? data.name.trim().slice(0, NAME_MAX) : '');
-    if (!name) return jsonResponse({ ok: false, error: 'bad_name' }, 400);
+    // An anonymized EGD record names nobody; the search never offers one, and
+    // this refuses a client that predates that filter.
+    if (!name || (!isAga && isAnonymizedEgdName(name))) {
+        return jsonResponse({ ok: false, error: 'bad_name' }, 400);
+    }
     // AGA's Explorer reports a US STATE, not a country, so an AGA link carries no
     // country and the leaderboard's edge geo-IP fallback supplies the flag.
     const country = isAga ? null

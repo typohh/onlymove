@@ -18,6 +18,8 @@
 // Best-effort throughout: a database that errors or times out contributes nothing
 // and the other's results still show. A caller gets an array, never a rejection.
 
+import { isAnonymizedEgdName } from '../shared/egd-anonymized.js';
+
 const EGD = 'https://www.europeangodatabase.eu/EGD/';
 const AGA = 'https://aga-ratings-explorer.azurewebsites.net/api/ratings-explorer/';
 const TIMEOUT_MS = 8000;
@@ -51,8 +53,10 @@ async function fetchJson(url) {
 
 // One EGD player record (from either endpoint) -> a result row. `pinFallback`
 // covers GetPlayerDataByPIN.php, whose payload is the player itself and omits
-// Pin_Player on some records.
+// Pin_Player on some records. An ANONYMIZED record maps to null and is never
+// offered: it names nobody, so it cannot be anyone's account to link.
 function mapEgd(p, pinFallback) {
+    if (isAnonymizedEgdName(`${p.Name || ''} ${p.Last_Name || ''}`)) return null;
     const gor = parseInt(p.Gor, 10);
     const pin = p.Pin_Player || pinFallback || '';
     return {
@@ -95,7 +99,8 @@ async function egdByName(q) {
         for (const p of d.players) {
             if (p.Pin_Player && !seen.has(p.Pin_Player)) {
                 seen.add(p.Pin_Player);
-                out.push(mapEgd(p));
+                const row = mapEgd(p);
+                if (row) out.push(row);
             }
         }
     }
@@ -104,7 +109,8 @@ async function egdByName(q) {
 
 async function egdByPin(pin) {
     const d = await fetchJson(EGD + 'GetPlayerDataByPIN.php?pin=' + encodeURIComponent(pin));
-    return (d && d.retcode === 'Ok') ? [mapEgd(d, pin)] : [];
+    const row = (d && d.retcode === 'Ok') ? mapEgd(d, pin) : null;
+    return row ? [row] : [];
 }
 
 function mapAga(p) {
