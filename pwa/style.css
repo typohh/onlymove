@@ -2330,6 +2330,13 @@ body {
    structured body has to be freed from, and the grid inside brings its own
    muted tones, which are mixed toward the bubble's own ink so they read on the
    blue fill instead of against the app's background. */
+/* The total rule in the capture-score breakdown: the bubble's own ink, muted. */
+.ui-bubble-body hr {
+    border: 0;
+    border-top: 1px solid currentColor;
+    opacity: 0.5;
+    margin: 0.3em 0;
+}
 .ui-bubble-body.ui-bubble-rich {
     max-width: min(24em, calc(0.9 * var(--app-w)));
     white-space: normal;

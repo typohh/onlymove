@@ -1,8 +1,8 @@
 // pwa/src/handlers/leaderboard-page.js
 //
 // GET /leaderboard — a standalone, directly-linkable, server-rendered page (loads
-// without booting the tsumego SPA). Computes on read (no cron blob); a short edge
-// cache bounds D1 reads under traffic. The default board is the WEEKLY one: every
+// without booting the tsumego SPA). Computes on read (no cron blob) and is served
+// `no-store`, so every view reads D1 and shows the current ranks. The default board is the WEEKLY one: every
 // player active in the past week who has at least RANK_START_MIN solves here (so
 // their onlymove rank is known). A PERIOD selector switches to any finished month
 // that has been frozen into `monthly_leaderboards` (`?month=YYYY-MM`), which shows
@@ -16,8 +16,8 @@
 // first (so /leaderboard?units=Fox opens on Fox), then the per-device preference in
 // localStorage; the selection is mirrored back into the URL, so the address bar is
 // always shareable. The RESPONSE does not depend on the param — every frame is
-// inlined in the row data and the switch is pure client work — so the param costs
-// only its own edge-cache entry, never a second D1 read path. The PERIOD, in
+// inlined in the row data and the switch is pure client work — so the param never
+// opens a second D1 read path. The PERIOD, in
 // contrast, does change the response (a different frozen month), so selecting one
 // is a navigation rather than a pure client switch.
 // Every value cell renders as "rank" or "rank (pct%)", the percent being
@@ -56,9 +56,9 @@ const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;   // a calendar-month key, 'YYYY-MM'
 // regional-indicator glyph like every other flag; swap to '🏴‍☠️' etc. here to taste.
 const UNKNOWN_FLAG = '🇺🇳';
 
-// Localization for this server-rendered page. The page is edge-cached for 60s, so
-// language MUST be resolved on the CLIENT (navigator.language) — an Accept-Language
-// server split would cache one language and serve it to every viewer. The dict is
+// Localization for this server-rendered page. Language is resolved on the CLIENT
+// (navigator.language), so the response is one body for every viewer and any cache
+// in front of it can never serve one viewer's language to another. The dict is
 // inlined into the page and applied by the prelude script; it mirrors the SPA's
 // getLang() prefix match (zh/ja/ko/en) and {param} interpolation (js/i18n.js).
 // "onlymove" is a brand name and stays untranslated (it names one of the units
@@ -151,7 +151,7 @@ export async function handleLeaderboard(request, env) {
         status: 200,
         headers: {
             'Content-Type': 'text/html; charset=utf-8',
-            'Cache-Control': 'public, max-age=60',
+            'Cache-Control': 'no-store',
         },
     });
 }
@@ -208,7 +208,7 @@ function renderPage({ rows, belowMin = 0, month = null, months = [] }) {
             // Identity precedence is resolved HERE so the client's render is a
             // plain pick: a linked federation name wins, then the player's own
             // alias, then Anonymous. The alias is pre-composed in all four
-            // languages because the page is edge-cached and resolves its
+            // languages because the page resolves its
             // language on the CLIENT (see the STR note). `anon` is the THIRD
             // state — no name AND no alias — not the negation of `registered`.
             // Anonymous (unregistered, alias-less) rows carry anon: true and no
@@ -367,8 +367,8 @@ function renderPage({ rows, belowMin = 0, month = null, months = [] }) {
     return s;
   }
   // A 'YYYY-MM' key -> the viewer's own month name. Intl rather than four
-  // hand-written month tables: the page is edge-cached, so the language is only
-  // known here, and Intl already carries every language's names and order.
+  // hand-written month tables: the page resolves its language on the client, so
+  // it is only known here, and Intl already carries every language's names and order.
   function monthLabel(key) {
     try {
       var p = String(key).split('-');

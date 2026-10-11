@@ -600,17 +600,27 @@ import { displayOverlay, fadeOverlay, showModal, modalTitle } from './overlays.j
 /**
  * The bubble body behind the header's capture score: how the one number shown
  * is arrived at. Returns null with no position loaded, which the hint anchor
- * reads as "nothing to say", so the readout is inert rather than empty.
+ * reads as "nothing to say", so the readout is inert rather than empty. The
+ * adjustment sits under a rule, like a sum's total line, so it reads as the
+ * result of the three inputs above it rather than a fourth one.
  */
 export function captureDetailsText() {
     if (!state.kifuReader) return null;
     const { komi, blackCaptures, whiteCaptures, score } = computeCaptureScore();
-    return [
-        `${getTerm('komi')}: ${komi}`,
-        `${getTerm('blackCaptures')}: ${blackCaptures}`,
-        `${getTerm('whiteCaptures')}: ${whiteCaptures}`,
-        `${getTerm('whiteAdjustment')}: ${formatScore(score)}`,
-    ].join('\n');
+    const line = (text) => {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div;
+    };
+    const body = document.createDocumentFragment();
+    body.append(
+        line(`${getTerm('komi')}: ${komi}`),
+        line(`${getTerm('blackCaptures')}: ${blackCaptures}`),
+        line(`${getTerm('whiteCaptures')}: ${whiteCaptures}`),
+        document.createElement('hr'),
+        line(`${getTerm('whiteAdjustment')}: ${formatScore(score)}`),
+    );
+    return body;
 }
 
 export function updateBoardSize() {
