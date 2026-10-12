@@ -379,7 +379,9 @@ async function doLoadZipProblems(zipFilename) {
                 return; // Prevent further execution
             }
         }
-        throw new Error(`Invalid response for ${zipFilename}: status ${zipResponse.status}, type ${contentType}`);
+        const invalid = new Error(`Invalid response for ${zipFilename}: status ${zipResponse.status}, type ${contentType}`);
+        invalid.status = zipResponse.status;
+        throw invalid;
     }
 
     const zipData = await zipResponse.arrayBuffer();
@@ -464,7 +466,66 @@ function serveModeToast(termKey) {
 function enterOffRankServing() {
     if (offRankServing) return;
     offRankServing = true;
+    reportServeNotice('off_rank');
     serveModeToast('offRankServingStart');
+}
+
+// --- Serve-notice telemetry ---------------------------------------------------
+// Both "can't reach the server" notices (the off-rank toast and the stale
+// re-serve overlay) are INFERRED from selection coming up empty, not from an
+// observed fetch failure: an expansion that loads every shard it tries but finds
+// them all inside the recent-answer window, or runs out of its network budget,
+// ends on the same path as one that is genuinely offline. So each notice sends
+// what the last challenge assignment actually saw, and `serveCause` separates a
+// real failure from an exhausted neighbourhood. Once per notice per page load —
+// the event counts sessions that hit it, not serves.
+let serveDiag = null;
+const reportedServeNotices = new Set();
+
+function describeZipError(error) {
+    if (error && error.aborted) return 'abort';
+    if (error && error.networkError) return 'network';
+    if (error && error.status != null) return `http_${error.status}`;
+    return 'parse';
+}
+
+function serveCause(diag) {
+    if (!diag) return 'unknown';
+    if (diag.metadataError) return 'metadata_failed';
+    const exp = diag.expansion;
+    if (exp && exp.tried.some(t => !t.ok)) return 'zip_fetch_failed';
+    if (exp && exp.skippedByCap > 0) return 'network_cap';
+    if (exp) return 'neighbourhood_exhausted';
+    if (diag.buildError) return 'build_failed';
+    return 'unknown';
+}
+
+function reportServeNotice(notice) {
+    if (reportedServeNotices.has(notice)) return;
+    reportedServeNotices.add(notice);
+    try {
+        const cause = serveCause(serveDiag);
+        const conn = navigator.connection || {};
+        captureMessage(`Serve notice shown: ${notice} (${cause})`, {
+            level: 'warning',
+            fingerprint: ['serve-notice', notice, cause],
+            tags: { serveNotice: notice, serveCause: cause, boardSize: String(state.boardSize) },
+            extra: {
+                diag: serveDiag,
+                online: navigator.onLine,
+                effectiveType: conn.effectiveType,
+                saveData: conn.saveData,
+                swControlled: !!(navigator.serviceWorker && navigator.serviceWorker.controller),
+                visibility: document.visibilityState,
+                dataVersion: DATA_VERSION,
+                serveRank: state.serveRank,
+                answerHistoryLength: state.answerHistory.length,
+                loadedZips: Object.keys(state.loadedZips).length,
+                shardCount: state.zipMetadata.length,
+                unavailableProblems: state.unavailableProblemIds.size,
+            },
+        });
+    } catch (_) { /* telemetry only */ }
 }
 
 function exitOffRankServing() {
@@ -518,18 +579,25 @@ const EXPAND_ZIP_LOADS = 8;
 async function expandPoolForCandidate() {
     let loads = 0;
     let networkAttempts = 0;
+    const diag = { tried: [], skippedByCap: 0, loadedBefore: Object.keys(state.loadedZips).length };
+    if (serveDiag) serveDiag.expansion = diag;
     for (const zip of unloadedZipsByDistance()) {
         if (loads >= EXPAND_ZIP_LOADS) break;
-        if (!(await isZipCached(zip.filename))) {
-            if (networkAttempts >= EXPAND_NETWORK_ATTEMPTS) continue;
+        const cached = await isZipCached(zip.filename);
+        if (!cached) {
+            if (networkAttempts >= EXPAND_NETWORK_ATTEMPTS) { diag.skippedByCap++; continue; }
             networkAttempts++;
         }
+        const t0 = Date.now();
         try {
             await loadZipProblems(zip.filename);
         } catch (error) {
             console.error(`expandPoolForCandidate: zip load failed for ${zip.filename}:`, error);
+            diag.tried.push({ zip: zip.filename, cached, ok: false, ms: Date.now() - t0,
+                error: describeZipError(error), message: String(error && error.message).slice(0, 200) });
             continue;
         }
+        diag.tried.push({ zip: zip.filename, cached, ok: true, ms: Date.now() - t0 });
         loads++;
         // A loaded shard can still leave the run empty — it wasn't the covering
         // band, or everything in it was recently answered. Keep walking outward.
@@ -726,6 +794,7 @@ export async function assignNewChallenge() {
     // (it would later be reported with the wrong size and a mis-framed
     // canonical move).
     const sizeAtStart = state.boardSize;
+    serveDiag = { at: new Date().toISOString() };
     // A failed metadata fetch (offline) flows into the normal failure path —
     // the caller's challenge-less handling ends in handleLoadFailure, which
     // restores clicks — instead of escaping as an unhandled rejection that
@@ -734,6 +803,7 @@ export async function assignNewChallenge() {
         await loadZipMetadata();
     } catch (error) {
         console.error('assignNewChallenge: metadata load failed:', error);
+        serveDiag.metadataError = String(error && error.message).slice(0, 200);
         return state.challengeProblem;
     }
     let lastError = null;
@@ -760,6 +830,7 @@ export async function assignNewChallenge() {
         }
     }
     console.error('assignNewChallenge exhausted retries:', lastError);
+    serveDiag.buildError = String(lastError && lastError.message).slice(0, 200);
     return state.challengeProblem; // possibly null — advanceToNextProblem handles it
 }
 
@@ -897,6 +968,7 @@ async function selectNextProblem() {
 // correct, red = wrong).
 function warnIfServedAnsweredChallenge() {
     if (!challengeAlreadyAnswered()) return;
+    reportServeNotice('stale_reserve');
     displayOverlay(getTerm('outOfProblemsMessage'), 0, null,
         'rgb(128, 128, 128)', getTerm('outOfProblemsButton'));
 }
