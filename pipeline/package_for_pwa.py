@@ -867,6 +867,16 @@ def process_size(board_size, output_dir, n_workers=None,
     return embedding_meta, ratings_hash, inputs_hash
 
 
+# Folded into data_version ahead of the files. Packaging is deterministic, so
+# re-running it over unchanged inputs reproduces the same data_version — which is
+# right until a deploy has served DIFFERENT files under that value, after which
+# clients hold the wrong metadata.json / lookup.txt under a key that will never
+# move again by itself. Bumping this and repackaging is the one way to make every
+# client re-fetch from identical inputs. Mirrored as DATA_VERSION_EPOCH in
+# pwa/scripts/data-check.mjs.
+DATA_VERSION_EPOCH = b"epoch-2"
+
+
 def compute_data_version(output_dir):
     """Content hash over the per-size directory metadata.json files — the PWA's
     `data_version`, the single value it cache-busts metadata.json + lookup.txt by.
@@ -877,6 +887,7 @@ def compute_data_version(output_dir):
     drive the immediate re-derive). Stable across pure code deploys, so a JS-only
     ship doesn't needlessly re-pull the (multi-MB) lookup.txt."""
     h = hashlib.sha256()
+    h.update(DATA_VERSION_EPOCH)
     for size in ALL_BOARD_SIZES:
         p = os.path.join(output_dir, "tsumegos", str(size), "metadata.json")
         try:

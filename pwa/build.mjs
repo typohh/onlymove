@@ -6,6 +6,7 @@ import path from 'path';
 import crypto from 'node:crypto';
 import { buildMethodologyPage } from './scripts/methodology-to-html.mjs';
 import { checkFigures } from './scripts/figures-check.mjs';
+import { checkServedData } from './scripts/data-check.mjs';
 
 const EMBEDDING_META_PATH = 'tsumegos/embedding_meta.json';
 
@@ -219,6 +220,14 @@ async function oneShotBuild() {
     console.log('🚀 Starting production build...');
     const version = computeVersion();
     console.log(`✅ Version: ${version}`);
+
+    // Before anything is copied: the data_version this bundle will carry must be
+    // the hash of the data files it ships with (scripts/data-check.mjs).
+    const served = checkServedData();
+    if (served) {
+        console.log(`✅ Served data is one packaging run (data_version ${served.dataVersion}, `
+            + `${served.shards} shards, ${served.rows} lookup rows).`);
+    }
 
     await writeWorkerVersion(version);
     await clearDistContents();
