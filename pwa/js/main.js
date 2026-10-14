@@ -142,6 +142,7 @@ import { showLoading, hideLoading, showModal, modalTitle, modalButton, modalButt
 import { hasPendingAccountSwitch, pendingAccountSwitchKind, maybeFinishAccountSwitch, consumeAccountSwitchFailure, startBackgroundSync, syncedAttemptTotal } from './account-sync.js';
 import { showAccountModal } from './account-ui.js';
 import { performShare } from './share.js';
+import { onUserReturn } from './user-return.js';
 import { APP_MODES } from './constants.js';
 
 window.addEventListener('beforeinstallprompt', (e) => {
@@ -793,12 +794,13 @@ function wireLifecycleRecovery() {
         } else if (document.visibilityState === 'visible') {
             sawVisibleEvent = true;
             recoverOnce('visibilitychange');
-            // First-run onboarding: re-evaluate ambient bubbles on resume (a new
-            // session may have crossed the install/notify thresholds while
-            // hidden). No-op for existing users.
-            onboardingResume();
         }
     });
+
+    // First-run onboarding: re-evaluate ambient bubbles on every return (a new
+    // session may have crossed the install/notify thresholds while away).
+    // No-op for existing users.
+    onUserReturn(() => onboardingResume());
 }
 
 document.addEventListener('DOMContentLoaded', async () => {

@@ -61,6 +61,7 @@ import { calculateAndStoreStatsResults } from './recall-model.js';
 import { reanchorRank } from './rank-decomposition.js';
 import { fillSyncedHistoryFields, stampVersionsForFreshHistory } from './backfill.js';
 import { refreshShownProblemAfterSync } from './problem-loader.js';
+import { onUserReturn } from './user-return.js';
 import { getTailSyncIndex, getTailDigestInfo, pruneTail } from './history-store.js';
 import { rowHash } from '../shared/sync-digest.js';
 import { readJSON, writeJSON } from './persist.js';
@@ -1059,7 +1060,8 @@ export async function flushOutbox({ force = false } = {}) {
     }
 }
 
-// Regular syncs: app load, tab becoming visible, and regaining connectivity.
+// Regular syncs: app load, the user returning (tab re-shown, or input after an
+// idle gap — user-return.js), and regaining connectivity.
 // No interval polling: an active session is kept in sync by the per-report
 // seq+digest signal (checkSyncSignal). Each trigger pulls unthrottled — an
 // up-to-date incremental poll reads ~0–1 D1 rows, and pullInFlight collapses
@@ -1072,19 +1074,17 @@ export function startBackgroundSync() {
     pullReports()
         .then(() => flushOutbox())
         .catch(() => {});
-    window.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible') {
-            // Refresh the shown problem on EVERY resume, merge or not: a recall
-            // can enter its window from time alone while the tab was hidden
-            // (single-client case). Runs after the pull so a merged foreign
-            // batch is reflected too (a merge already fires the refresh itself;
-            // the second run no-ops via its in-flight/same-problem guards), and
-            // before the outbox flush, whose full-pull path is slow.
-            pullReports()
-                .then(() => refreshShownProblemAfterSync())
-                .then(() => flushOutbox())
-                .catch(() => {});
-        }
+    onUserReturn(() => {
+        // Refresh the shown problem on EVERY return, merge or not: a recall
+        // can enter its window from time alone while the user was away
+        // (single-client case). Runs after the pull so a merged foreign
+        // batch is reflected too (a merge already fires the refresh itself;
+        // the second run no-ops via its in-flight/same-problem guards), and
+        // before the outbox flush, whose full-pull path is slow.
+        pullReports()
+            .then(() => refreshShownProblemAfterSync())
+            .then(() => flushOutbox())
+            .catch(() => {});
     });
     window.addEventListener('online', () => {
         pullReports().then(() => flushOutbox({ force: true })).catch(() => {});
