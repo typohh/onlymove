@@ -144,6 +144,26 @@ const anchors = {
     motifBubble: () => el('motif-bubble'),
 };
 
+// The answer's intersection as a stone-sized viewport rect, or null when there
+// is none to point at (no board, a pass answer) or it must not be shown (a
+// linked problem: a shared puzzle is someone else's to give away). The answer
+// is the decision node's first child by the corpus contract (isCorrectMove's
+// rule). WGo's getX/getY are in canvas pixels relative to its element, so they
+// come back to CSS pixels through its pixelRatio.
+function answerRect() {
+    if (state.currentProblem?.linked) return null;
+    const board = state.board;
+    const move = state.kifuReader?.node?.children?.[0]?.move;
+    if (!board || !board.element || !move || move.x == null || move.y == null) return null;
+    const r = board.element.getBoundingClientRect();
+    if (!(r.width > 0 && r.height > 0)) return null;
+    const ratio = board.pixelRatio || 1;
+    const cx = r.left + board.getX(move.x) / ratio;
+    const cy = r.top + board.getY(move.y) / ratio;
+    const half = Math.min(board.fieldWidth, board.fieldHeight) / ratio / 2;
+    return new DOMRect(cx - half, cy - half, 2 * half, 2 * half);
+}
+
 const isVisible = (node) => {
     if (!node) return false;
     const r = node.getBoundingClientRect();
@@ -159,7 +179,7 @@ const isVisible = (node) => {
 // time gap); 'ambient' additionally waits SPACING_PROBLEMS and is what the
 // per-session SESSION_CAP counts. `anchor` names an
 // entry in `anchors`; 'board' places the bubble over the board pointing at its
-// centre. `eligible(ctx)` is the context gate on top of the fire-once flag.
+// centre, or at the answer's intersection with `pointAt: 'answer'`. `eligible(ctx)` is the context gate on top of the fire-once flag.
 // `text` is an i18n key, or a function returning one when the wording depends
 // on the device (resolved at render time, not module-eval).
 
@@ -168,8 +188,9 @@ const BUBBLES = {
     // board.js: two clicks to play, the first setting a ghost stone.
     // Offered on a shared problem too — for a newcomer arriving through a link
     // that IS the first board.
+    // Its arrow points at the answer's intersection.
     intro: {
-        kind: 'trigger', anchor: 'board', placement: 'above',
+        kind: 'trigger', anchor: 'board', pointAt: 'answer', placement: 'above',
         text: 'onbIntro',
         eligible: () => historyLen() <= 1,
     },
@@ -447,6 +468,14 @@ function render(id, def) {
 function position(bubble, def) {
     const target = def.anchor === 'board' ? anchors.board() : anchors[def.anchor]();
     if (!isVisible(target)) return;
+    // A single intersection is small enough to stand clear of, like any other
+    // control; without one (a pass answer, a linked problem) the tip falls back
+    // to the centre.
+    const point = def.pointAt === 'answer' ? answerRect() : null;
+    if (point) {
+        placeBubble(bubble, point, { placement: def.placement });
+        return;
+    }
     placeBubble(bubble, target.getBoundingClientRect(), {
         placement: def.placement,
         overAnchor: def.anchor === 'board',
