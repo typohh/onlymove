@@ -103,15 +103,19 @@ async function postJson(route, body) {
 // local tree's. The Worker stamps every write response with the APP_VERSION its
 // bundle was built with, which folds in those inlined files, so equality is what
 // makes the local client the one that server's players run.
-// A build from a dirty tree stamps `<commit>-dirty-<nonce>-<data>`; it is still
-// the served client when the commit and the data hash match and nothing under
-// pwa/ differs from that commit (the dirt is elsewhere in the repo).
+// APP_VERSION is `<commit>[-dirty-<nonce>]-<data hash>`. The local client is the
+// served one when the data hash matches and pwa/ in the working tree is identical
+// to the commit the server was built from — the commit stamps can differ (a dirty
+// build, or commits since that touch nothing under pwa/).
 function sameClient(served) {
     if (served === APP_VERSION) return true;
-    const m = APP_VERSION.match(/^([0-9a-f]+)-dirty-[^-]+-(.+)$/);
-    if (!m || served !== `${m[1]}-${m[2]}`) return false;
-    const st = spawnSync('git', ['status', '--porcelain', '--', 'pwa'], { cwd: ROOT, encoding: 'utf8' });
-    return st.status === 0 && st.stdout.trim() === '';
+    const parse = (v) => v.match(/^([0-9a-f]+)(?:-dirty-[^-]+)?-([^-]+)$/);
+    const s = parse(served), l = parse(APP_VERSION);
+    if (!s || !l || s[2] !== l[2]) return false;
+    const diff = spawnSync('git', ['diff', '--quiet', s[1], '--', 'pwa'], { cwd: ROOT });
+    const untracked = spawnSync('git', ['ls-files', '--others', '--exclude-standard', '--', 'pwa'],
+                                { cwd: ROOT, encoding: 'utf8' });
+    return diff.status === 0 && untracked.status === 0 && untracked.stdout.trim() === '';
 }
 
 function checkVersion(resp) {
