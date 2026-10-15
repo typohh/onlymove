@@ -84,7 +84,7 @@ from utils.rating.fit_rank_curves import (  # noqa: E402
 from utils.rating.ratings_io import load_rating_rank_curve, load_size_value_maps  # noqa: E402
 from utils.rating import se_floor  # noqa: E402
 from utils.rating import skill_smoother  # noqa: E402
-from utils.constants import ALL_BOARD_SIZES  # noqa: E402
+from utils.constants import ALL_BOARD_SIZES, not_ignored_sql  # noqa: E402
 
 # --- Constants matching the client (pwa/js/model.js, rank-decomposition.js) ---
 # CALIBRATION_P (the 80%-clear margin) is the single source in utils.rating.fit_rank_curves.
@@ -181,6 +181,7 @@ def load_rows(db_path):
     rows = con.execute(
         "SELECT user_id, problem, success, size, time_used, review_time, "
         "is_repeat, created_at, move FROM tsumego_reports "
+        f"WHERE {not_ignored_sql()} "
         "ORDER BY user_id, problem, created_at"
     ).fetchall()
     con.close()

@@ -5,6 +5,7 @@ read it, so an import here would load one side into every process of the other.
 """
 import functools
 import os
+import re
 from datetime import datetime
 
 from utils.paths import PROJECT_ROOT
@@ -39,6 +40,45 @@ def read_retired_ids():
     except FileNotFoundError:
         pass
     return retired
+
+
+# Accounts whose attempts are in the DB but must not shape any fit: the LLM
+# players (auxiliary/llm_player/), which play through /report like a person so
+# the Worker can rank them on the leaderboard. Their rows stay in D1 and in the
+# local mirror — the leaderboard refresh rebuilds their rank from them — and
+# every pipeline reader of the attempt log drops them instead.
+IGNORED_USERS_PATH = os.path.join(PROJECT_ROOT, "db", "ignored_users.txt")
+_USER_ID_RE = re.compile(r"^[A-Za-z0-9_-]{8}$")   # pwa/src/guards.js USER_ID_RE
+
+
+@functools.lru_cache(maxsize=1)
+def read_ignored_users():
+    """The ignored user ids, read once per process: one per line, `#` starts a
+    comment. A malformed id raises rather than being skipped, since a typo here
+    would silently let that account back into the fit."""
+    ignored = set()
+    try:
+        with open(IGNORED_USERS_PATH) as fh:
+            for n, line in enumerate(fh, 1):
+                uid = line.split("#", 1)[0].strip()
+                if not uid:
+                    continue
+                if not _USER_ID_RE.match(uid):
+                    raise ValueError(f"{IGNORED_USERS_PATH}:{n}: {uid!r} is not a user id")
+                ignored.add(uid)
+    except FileNotFoundError:
+        pass
+    return frozenset(ignored)
+
+
+def not_ignored_sql(column="user_id"):
+    """A SQL condition keeping only rows whose `column` is not an ignored user.
+    The ids are inlined: read_ignored_users has already held each to the
+    user-id alphabet, which has no quote in it."""
+    ids = sorted(read_ignored_users())
+    if not ids:
+        return "1"
+    return f"{column} NOT IN ({', '.join(repr(i) for i in ids)})"
 
 
 def debug(message: str):

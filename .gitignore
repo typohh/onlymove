@@ -139,6 +139,9 @@ axes/rule_quantities.csv
 # Timestamped pre-change backups of the production DB (manual `cp` snapshots);
 # local insurance only, never committed.
 /db/d1.backup-*.sqlite
+# auxiliary/llm_player/: downloaded served data and per-account play state and
+# solver logs. db/ignored_users.txt beside it IS tracked.
+/db/llm_player/
 
 # Rating pipeline output (pipeline.train_rating / map_rating_to_egf): regenerable,
 # and model.pt is a multi-MB binary. The training code is tracked; its outputs

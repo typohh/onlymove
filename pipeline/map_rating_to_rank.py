@@ -144,7 +144,7 @@ from utils.rating.fit_rank_curves import (  # noqa: E402
     CALIBRATION_P, fit_user_rating, interp_extrap_vec, junk_posterior_vec,
     ordinal_nll_vec, separated_head, _unpack_thresholds,
 )
-from utils.constants import ALL_BOARD_SIZES  # noqa: E402
+from utils.constants import ALL_BOARD_SIZES, not_ignored_sql  # noqa: E402
 from utils.rating.ratings_io import (  # noqa: E402
     FLOOR_CSV, RATINGS_CSV, SLOPE_CSV, load_lapse, load_value_map,
 )
@@ -239,7 +239,8 @@ def load_user_median_solve_minutes(sqlite_path):
     con = sqlite3.connect(sqlite_path)
     try:
         cur = con.execute(
-            "SELECT user_id, is_repeat, time_used FROM tsumego_reports ORDER BY created_at, id")
+            "SELECT user_id, is_repeat, time_used FROM tsumego_reports "
+            f"WHERE {not_ignored_sql()} ORDER BY created_at, id")
         windows = defaultdict(lambda: deque(maxlen=WORKING_SET))
         for uid, is_repeat, t in cur:
             windows[uid[:8]].append((is_repeat, t))

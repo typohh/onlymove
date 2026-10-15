@@ -30,7 +30,7 @@ import pandas as pd
 from utils.rating.model_constants import ACT_STORE_DIM, PRODUCTION_BLOCKS
 from utils.rating.ratings_io import FLOOR_CSV, RATINGS_CSV, SLOPE_CSV
 
-from utils.constants import RETIRED_IDS_PATH, read_retired_ids
+from utils.constants import RETIRED_IDS_PATH, not_ignored_sql, read_retired_ids
 from utils.paths import DB_SQL, DB_SQLITE, PROJECT_ROOT
 
 SQL_PATH = DB_SQL
@@ -882,7 +882,7 @@ def load_first_time_attempts(with_move=False, max_id=None):
     cols = "user_id, problem, success, size, created_at"
     if with_move:
         cols += ", move"
-    sql = f"SELECT {cols} FROM tsumego_reports WHERE is_repeat = 0"
+    sql = f"SELECT {cols} FROM tsumego_reports WHERE is_repeat = 0 AND {not_ignored_sql()}"
     params = ()
     if max_id is not None:
         sql += " AND id <= ?"

@@ -17,6 +17,7 @@ from collections import defaultdict, deque
 import numpy as np
 import pandas as pd
 
+from utils.constants import not_ignored_sql, read_ignored_users
 from utils.paths import DB_SQL, PROJECT_ROOT
 
 SQL_PATH_DEFAULT = DB_SQL
@@ -199,6 +200,9 @@ def load_rank_surveys(sql_path):
             f"{sql_path} not found. Run `./.venv/bin/python3 "
             f"-m pipeline.fetch_database` first.")
     rows = []
+    # An ignored account's declarations go with its attempts: every anchor the
+    # mapping builds is keyed by the users found here.
+    ignored = read_ignored_users()
     with open(sql_path, "r") as f:
         for line in f:
             m = RANK_SURVEY_RE.match(line)
@@ -206,6 +210,8 @@ def load_rank_surveys(sql_path):
                 continue
             (user_id, server, rank, created_at,
              country, rank_label, last_game_at) = m.groups()
+            if user_id in ignored:
+                continue
             rows.append({
                 "user_id": user_id,
                 "server": server,
@@ -285,7 +291,7 @@ def load_user_median_solve_minutes(sqlite_path, working_set=WORKING_SET):
         # cursor note in CLAUDE.md.
         cur = con.execute(
             "SELECT user_id, is_repeat, time_used FROM tsumego_reports "
-            "ORDER BY created_at, id")
+            f"WHERE {not_ignored_sql()} ORDER BY created_at, id")
         windows = defaultdict(lambda: deque(maxlen=working_set))
         for uid, is_repeat, t in cur:
             windows[uid[:8]].append((is_repeat, t))
