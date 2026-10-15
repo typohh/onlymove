@@ -14,6 +14,7 @@
 //   drive.mjs status --server URL --user ID
 //   drive.mjs name <TEXT> --server URL --user ID [--country CC]
 //                                                    leaderboard name + flag (default UN), via wrangler
+//   drive.mjs unname --server URL --user ID          remove them (the row falls back to anonymous)
 //   drive.mjs play [N] --server URL --user ID [--model M] [--effort E]
 //                                                    N problems (default 1), solved by `claude -p`;
 //                                                    a call with a tool round trip, no parsable answer
@@ -574,6 +575,27 @@ function setName(userId, name, country) {
     console.log(`${userId} → ${JSON.stringify(row)}`);
 }
 
+function d1(sql) {
+    const where = isLocal(server) ? '--local' : '--remote';
+    const r = spawnSync('npx', ['wrangler', 'd1', 'execute', 'tsumego-reports', where, '--json', '--command', sql],
+                        { cwd: path.join(ROOT, 'pwa'), encoding: 'utf8' });
+    let out = null;
+    try { out = JSON.parse(r.stdout)[0]; } catch { /* reported below */ }
+    if (r.status !== 0 || !out) die(`wrangler failed (exit ${r.status}):\n${r.stdout}${r.stderr}`);
+    return out;
+}
+
+// Deleting the binding takes the name and the flag with it: the board then shows
+// the account as Anonymous with its geo-IP flag, exactly as an unlink does.
+function unsetName(userId) {
+    if (!/^[A-Za-z0-9_-]{8}$/.test(userId)) die(`${userId} is not a user id`, 2);
+    console.log(`${isLocal(server) ? '--local' : '--remote'}: DELETE FROM external_ids WHERE user_id = '${userId}'`);
+    d1(`DELETE FROM external_ids WHERE user_id = '${userId}' AND egd_pin IS NULL AND aga_id IS NULL`);
+    const left = d1(`SELECT display_name, egd_pin, aga_id FROM external_ids WHERE user_id = '${userId}'`).results;
+    if (left.length) die(`the row is still there: ${JSON.stringify(left)}`);
+    console.log(`${userId} → no name`);
+}
+
 const isLocal = (url) => ['localhost', '127.0.0.1', '[::1]'].includes(new URL(url).hostname);
 
 async function main() {
@@ -625,6 +647,12 @@ async function main() {
         setName(userId, positional[0], opt('country', 'UN').toUpperCase());
         break;
     }
+    case 'unname': {
+        const userId = opt('user');
+        if (!userId) die('--user ID is required', 2);
+        unsetName(userId);
+        break;
+    }
     case 'play': {
         // `play N` is `play` run N times: each problem is the whole cycle.
         const n = positional[0] === undefined ? 1 : Number(positional[0]);
@@ -640,7 +668,7 @@ async function main() {
         break;
     }
     default:
-        die('commands: init | next | answer <MOVE> | status | name <TEXT> | play [N]   (all take --server URL; see the header)', 2);
+        die('commands: init | next | answer <MOVE> | status | name <TEXT> | unname | play [N]   (all take --server URL; see the header)', 2);
     }
 }
 
