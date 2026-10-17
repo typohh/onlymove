@@ -15,8 +15,9 @@
 //
 // Per entry, resolved off the ACCOUNT rather than stored on the entry:
 //   name     — linked EGD/AGA display_name, else the leaderboard alias, else null
-//              (Anonymous). A hidden profile (hidden_profiles) withholds both —
-//              which is how an entrant stays anonymous; there is no contest flag.
+//              (Anonymous). A hidden profile (hidden_profiles) withholds the
+//              linked name but keeps the alias — which is how an entrant stays
+//              pseudonymous or anonymous; there is no contest flag.
 //   peakRank — a replay of the account's novel attempts through rankWalkFromAttempts,
 //              the shown (untimed) OnlyMove rank after each one, peaked over the
 //              first `video_problems` of them — the ones solved on camera.
@@ -82,7 +83,7 @@ async function computeContest(env) {
         video.push({
             listedAt: r.listed_at,
             name: hidden ? null : (r.display_name || null),
-            alias: hidden ? null : alias,
+            alias,
             country: hidden ? null
                 : resolveRowCountry({ declared: r.declared, country_code: r.country_code, country: null }),
             url: r.video_url || null,

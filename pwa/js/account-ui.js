@@ -490,8 +490,8 @@ class AccountPanel {
         return valueEl(text, () => this.showSearch());
     }
 
-    // Alias: what the public board shows while no federation record is linked,
-    // rendered in the user's own language. Muted when unset, like the other
+    // Alias: what the public board shows while no federation record is linked or
+    // the profile is Anonymous, rendered in the user's own language. Muted when unset, like the other
     // "nothing chosen yet" values — an unset alias is Anonymous, not a name.
     aliasValue() {
         if (this.loadFailed) return valueEl(UNKNOWN, () => this.retry(), { muted: true });

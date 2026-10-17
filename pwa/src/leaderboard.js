@@ -1088,16 +1088,18 @@ export async function readLeaderboardRows(env, { activeDays = 7 } = {}) {
             if (Number.isFinite(v)) decl.AGA = { v, exact: true };
         }
         // A hidden user is stripped of name/country and reported as unlinked, so the
-        // page renders them as an anonymous ranked row.
+        // page renders them under their alias, or as an anonymous ranked row.
         const name = isHidden ? null : r.display_name;
         const country = isHidden ? null : resolveRowCountry(r);
         const registered = isHidden ? false : !!r.registered;
-        // The self-chosen alias, withheld from a hidden profile exactly like the
-        // name and the declared ranks. It rides ALONGSIDE `registered` rather
-        // than replacing it: which one the page shows is the page's precedence
-        // decision (linked name > alias > Anonymous), and a linked player who
-        // keeps an alias still has it to fall back on after an unlink.
-        const alias = (!isHidden && r.adjective && r.color && r.animal)
+        // The self-chosen alias is NOT withheld from a hidden profile: it is a
+        // pseudonym by construction, so it is how a hidden player stays on the
+        // board without their linked name. It rides ALONGSIDE `registered`
+        // rather than replacing it: which one the page shows is the page's
+        // precedence decision (linked name > alias > Anonymous), and a linked
+        // player who keeps an alias still has it to fall back on after an
+        // unlink or a hide.
+        const alias = (r.adjective && r.color && r.animal)
             ? { adjective: r.adjective, color: r.color, animal: r.animal }
             : null;
         visible.push({ name, country, registered, alias, currentInternal, est, decl });
@@ -1249,9 +1251,9 @@ export async function listMonthlyLeaderboards(env) {
 // Declared column.
 //
 // Identity is stitched here, off the same three small tables the weekly board
-// reads, and ONLY for the ids in the blob: a hidden profile withholds name, alias
-// and country exactly as it does live, and a row with neither a linked name nor an
-// alias renders Anonymous. `country` is the CURRENT one (resolveRowCountry) while
+// reads, and ONLY for the ids in the blob: a hidden profile withholds name and
+// country (but not the alias) exactly as it does live, and a row with neither a
+// shown name nor an alias renders Anonymous. `country` is the CURRENT one (resolveRowCountry) while
 // the user's live row survives, else the snapshot's baked one (the entry's fourth
 // element; absent in a pre-country snapshot) — withheld from a hidden user either
 // way. The live rows are fetched for the blob's ids only, by primary key.
@@ -1310,7 +1312,7 @@ export async function readMonthlyLeaderboard(env, month) {
                 : live.has(userId)
                     ? resolveRowCountry({ ...live.get(userId), country_code: x ? x.country_code : null })
                     : (normalizeCountry(e[3]) || null),
-            alias: (!isHidden && a) ? { adjective: a.adjective, color: a.color, animal: a.animal } : null,
+            alias: a ? { adjective: a.adjective, color: a.color, animal: a.animal } : null,
             currentInternal: bestRank,
             est,
             decl: {},

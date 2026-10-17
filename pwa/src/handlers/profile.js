@@ -3,8 +3,9 @@
 // Per-user "hide my profile" preference for the public /leaderboard page.
 // Presence of a hidden_profiles row = hidden: the user's display name, country,
 // and declared / verified ranks are withheld from readLeaderboardRows (see
-// src/leaderboard.js). A hidden player still appears on /leaderboard as an
-// anonymous row carrying only their predicted rank.
+// src/leaderboard.js). A hidden player still appears on /leaderboard carrying
+// only their predicted rank, under their self-chosen alias if they have one and
+// as Anonymous otherwise.
 //
 // Two entry points, one flag: the checkbox in the app's Account dialog
 // (js/account-ui.js), which is also where the leaderboard identity is linked, and

@@ -402,8 +402,8 @@ CREATE TABLE IF NOT EXISTS invitation (
 -- Per-user "hide my profile" opt-out for the public /leaderboard + /tournament
 -- pages. Presence of a row = hidden: the user's display name, country, and
 -- self-declared / GoR survey ranks are withheld from readLeaderboardRows (a
--- hidden player still appears on /leaderboard as an anonymous row carrying only
--- their onlymove estimate, and is dropped from the registered-centric
+-- hidden player still appears on /leaderboard carrying only their onlymove
+-- estimate, under their self-chosen alias (user_aliases) if any, else Anonymous, and is dropped from the registered-centric
 -- /tournament listing). Keyed by user_id, applying to ANY account — a
 -- never-registered player can still have declared ranks in rank_surveys that
 -- this hides — so it is its own table rather than a column on external_ids.
@@ -476,7 +476,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_google_accounts_user ON google_accounts(us
 -- without a row here keeps rendering as "Anonymous" exactly as before.
 --
 -- Precedence on the board: a linked EGD/AGA display_name wins, then a chosen
--- alias, then Anonymous; a hidden profile (hidden_profiles) withholds all three.
+-- alias, then Anonymous; a hidden profile (hidden_profiles) withholds the linked
+-- name, so a hidden player shows their alias, or Anonymous without one.
 --
 -- The three word tables are the LEGAL set and hold ENGLISH only — the Worker
 -- validates a submission against them, and the client picks from the same words
