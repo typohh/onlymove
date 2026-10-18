@@ -65,13 +65,16 @@ const handleBoardClick = (x, y, event) => {
 // alternating black, white, black… from black on every fresh press, so a
 // sequence can be pointed out move by move; releasing Shift removes it. Pure
 // display — it never touches the game, the two-click ghost, or a report, and
-// works in every mode. Shift is the key because it is the one the typed
+// works in every mode. It may sit on an existing stone: that stone is then
+// left out of the drawing (with its last-move mark), so the sketch always
+// reads the same translucent stone on wood — a translucent stone over a solid
+// one is invisible in the same colour and a muddy grey in the other — and the
+// real stone returns with the next click or the release. Shift is the key because it is the one the typed
 // coordinate entry (coord-input.js) can never want: that path is triggered by
 // unmodified column letters and digits, and a bare Shift press is neither.
 function handleSketchClick(x, y) {
     if (!state.kifuReader) return;
     if (x < 0 || x >= state.board.size || y < 0 || y >= state.board.size) return;
-    if (state.kifuReader.game.getPosition().get(x, y) !== 0) return;
     const c = state.sketchStone && state.sketchStone.c === WGo.B ? WGo.W : WGo.B;
     setSketchStone({ x, y, c });
     redraw();
@@ -276,15 +279,18 @@ export function redraw() {
     applyWear(state.board);
     state.board.removeAllObjects();
 
+    const sketch = state.sketchStone;
+    const underSketch = (x, y) => !!sketch && sketch.x === x && sketch.y === y;
+
     for (let x = 0; x < position.size; x++) {
         for (let y = 0; y < position.size; y++) {
-            if (position.get(x, y) !== 0) {
+            if (position.get(x, y) !== 0 && !underSketch(x, y)) {
                 state.board.addObject({ x, y, c: position.get(x, y) });
             }
         }
     }
 
-    if (state.kifuReader.node.move) {
+    if (state.kifuReader.node.move && !underSketch(state.kifuReader.node.move.x, state.kifuReader.node.move.y)) {
         state.board.addObject({ x: state.kifuReader.node.move.x, y: state.kifuReader.node.move.y, type: 'CR' });
     }
 
