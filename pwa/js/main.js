@@ -38,7 +38,7 @@ import { getRecallCandidates, calculateAndStoreStatsResults } from './recall-mod
 import { showDetailedStats } from './stats-ui.js';
 import { maybeUploadSchedule, syncRecallNotification } from './notifications.js';
 import { recordShareEvent } from './attempt-recorder.js';
-import { redraw, initializeBoard } from './board.js';
+import { redraw, initializeBoard, initSketchKeys } from './board.js';
 import { tsumegoIdOf } from './sgf.js';
 import { getTerm } from './i18n.js';
 import { hintAnchor } from './hint-bubble.js';
@@ -821,6 +821,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     wireRoleButtonKeys();
     initMotifBubble();
     initCoordInput();
+    initSketchKeys();
     wireHeaderReadingHints();
     wireActionButtons();
     wireNoDrag();

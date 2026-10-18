@@ -1,6 +1,6 @@
 // js/board.js
 
-import { state, setBoard, setKifuReader, setGhostMove, getMergedAnswerHistory } from './state.js';
+import { state, setBoard, setKifuReader, setGhostMove, setSketchStone, getMergedAnswerHistory } from './state.js';
 // NOTE: the next three imports are deliberate ESM cycles — game-logic.js,
 // analysis.js, and ui.js all import board primitives back from this module.
 // They work only because every imported name is called at runtime, never at
@@ -17,7 +17,17 @@ WGo.DIR = 'lib/wgo/';
 
 const boardContainer = document.getElementById('board-container');
 
-const handleBoardClick = (x, y) => {
+const handleBoardClick = (x, y, event) => {
+    if (event && event.shiftKey) {
+        handleSketchClick(x, y);
+        return;
+    }
+    // A sketch still standing without Shift means its keyup was missed
+    // (released outside the window): drop it, then treat this as a plain click.
+    if (state.sketchStone) {
+        setSketchStone(null);
+        redraw();
+    }
     if (state.appMode === APP_MODES.SOLVING || state.appMode === APP_MODES.LINKED) {
         // Honor the click-lock here too. The confirming click delegates to
         // handleTsumegoClick (which guards on acceptClicks), but the first
@@ -49,6 +59,40 @@ const handleBoardClick = (x, y) => {
     } else if (state.appMode === APP_MODES.ANALYZING) {
         handleAnalysisClick(x, y);
     }
+}
+
+// Sketch stones: while Shift is held, each click shows ONE outline stone,
+// alternating black, white, black… from black on every fresh press, so a
+// sequence can be pointed out move by move; releasing Shift removes it. Pure
+// display — it never touches the game, the two-click ghost, or a report, and
+// works in every mode. Shift is the key because it is the one the typed
+// coordinate entry (coord-input.js) can never want: that path is triggered by
+// unmodified column letters and digits, and a bare Shift press is neither.
+function handleSketchClick(x, y) {
+    if (!state.kifuReader) return;
+    if (x < 0 || x >= state.board.size || y < 0 || y >= state.board.size) return;
+    if (state.kifuReader.game.getPosition().get(x, y) !== 0) return;
+    const c = state.sketchStone && state.sketchStone.c === WGo.B ? WGo.W : WGo.B;
+    setSketchStone({ x, y, c });
+    redraw();
+}
+
+function clearSketch() {
+    if (!state.sketchStone) return;
+    setSketchStone(null);
+    redraw();
+}
+
+export function initSketchKeys() {
+    // A fresh press always restarts at black; auto-repeat keydowns must not.
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Shift' && !e.repeat) clearSketch();
+    });
+    document.addEventListener('keyup', (e) => {
+        if (e.key === 'Shift') clearSketch();
+    });
+    // A release while the window is unfocused never delivers a keyup.
+    window.addEventListener('blur', clearSketch);
 }
 
 // Tiny always-on coordinate labels at the very edge of the board. Geometry:
@@ -94,6 +138,10 @@ export function initializeBoard(size) {
     boardWrapper.id = 'board-wrapper';
     boardWrapper.className = 'board-wrapper';
     boardContainer.appendChild(boardWrapper);
+    // Shift+mousedown would otherwise extend the page's text selection.
+    boardWrapper.addEventListener('mousedown', (e) => {
+        if (e.shiftKey) e.preventDefault();
+    });
 
     const board = new WGo.Board(boardWrapper, {
         size,
@@ -136,13 +184,12 @@ export function playTypedMove(x, y) {
 // clear; white is drawn more opaque to read as strongly as black does.
 const WHITE_OUTLINE_ALPHA = 0.6;
 
-// Draw a hollow "outline" stone marker in the side-to-move's color at `move` —
-// used identically for the analysis hint, a candidate move, and the ghost-stone
-// confirmation. No-op for a missing or off-board coordinate.
-const drawOutlineMarker = (move) => {
+// Draw a hollow "outline" stone marker at `move`, in the side-to-move's color
+// unless `c` is given — used identically for the analysis hint, a candidate
+// move, and the ghost-stone confirmation; the sketch stone passes its own. No-op for a missing or off-board coordinate.
+const drawOutlineMarker = (move, c = state.kifuReader.game.turn) => {
     if (!move || typeof move.x === 'undefined' || typeof move.y === 'undefined') return;
     if (move.x < 0 || move.x >= state.board.size || move.y < 0 || move.y >= state.board.size) return;
-    const c = state.kifuReader.game.turn;
     const marker = { x: move.x, y: move.y, c, type: 'outline' };
     if (c === WGo.W) marker.alpha = WHITE_OUTLINE_ALPHA;
     state.board.addObject(marker);
@@ -255,6 +302,9 @@ export function redraw() {
     if (state.ghostMove) {
         drawOutlineMarker(state.ghostMove);
     }
+    if (state.sketchStone) {
+        drawOutlineMarker(state.sketchStone, state.sketchStone.c);
+    }
     updateCapturesUI();
 }
 
@@ -263,6 +313,7 @@ export function loadSgf(sgfContent) {
     // previous problem; otherwise it survives the load and redraw() paints it
     // (colored by the new game's turn) on top of whatever stone now sits there.
     setGhostMove(null);
+    setSketchStone(null);
     pinnedRun = solvingRun();
 
     const kifu = WGo.Kifu.fromSgf(sgfContent);

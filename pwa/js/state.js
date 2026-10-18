@@ -432,6 +432,9 @@ export const state = {
 
     initialAnalysisNode: null,
     ghostMove: null,
+    // Shift-held sketch stone {x, y, c} (board.js): a demonstration mark,
+    // never a move. Lives only while Shift is down.
+    sketchStone: null,
     analysisHintMove: null,
     candidateMoves: [],
     reviewStartTime: null,
@@ -710,6 +713,10 @@ export function setInitialAnalysisNode(node) {
 
 export function setGhostMove(move) {
     state.ghostMove = move;
+}
+
+export function setSketchStone(stone) {
+    state.sketchStone = stone;
 }
 
 export function setAnalysisHintMove(move) {
