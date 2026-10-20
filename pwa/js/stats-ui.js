@@ -379,6 +379,16 @@ function showStatsModal(tabs) {
         }, 200);
     };
     window.addEventListener('resize', onResize);
+
+    // The bar's scrollbar is hidden; fade whichever edge has tabs past it.
+    const updateTabbarEdges = () => {
+        const max = tabbar.scrollWidth - tabbar.clientWidth;
+        tabbar.classList.toggle('more-left', tabbar.scrollLeft > 1);
+        tabbar.classList.toggle('more-right', tabbar.scrollLeft < max - 1);
+    };
+    tabbar.addEventListener('scroll', updateTabbarEdges, { passive: true });
+    new ResizeObserver(updateTabbarEdges).observe(tabbar);
+
     const renderTabbar = () => {
         // The bar is omitted when only one pane remains.
         tabbar.style.display = entries.length > 1 ? '' : 'none';
@@ -395,6 +405,7 @@ function showStatsModal(tabs) {
             };
             tabbar.append(b);
         }
+        updateTabbarEdges();
     };
 
     card.append(tabbar, body, closeBtn);

@@ -1693,9 +1693,12 @@ input, textarea, [contenteditable],
     background-color: var(--surface);
 }
 
-/* One row that scrolls: four labels do not fit a phone, and a wrapped second
-   row read as a separate control. The scrollbar is hidden; the cut-off tab at
-   the edge is the affordance, and activating a tab scrolls it fully in. */
+/* One row that scrolls: the labels do not fit a phone, and a wrapped second
+   row read as a separate control. The scrollbar is hidden, so the affordance
+   is a fade on whichever edge has more tabs past it (.more-left/.more-right,
+   kept current by the bar's scroll and size) — a cut-off tab alone is not
+   one, since at some widths a tab boundary lands exactly on the edge and the
+   row looks complete. Activating a tab scrolls it fully in. */
 .stats-tabbar {
     display: flex;
     flex-wrap: nowrap;
@@ -1704,6 +1707,16 @@ input, textarea, [contenteditable],
     gap: 0.25em;
     border-bottom: 1px solid var(--hairline);
     flex: 0 0 auto;
+    --fade-l: 0px;
+    --fade-r: 0px;
+    -webkit-mask-image: linear-gradient(to right, transparent, #000 var(--fade-l), #000 calc(100% - var(--fade-r)), transparent);
+    mask-image: linear-gradient(to right, transparent, #000 var(--fade-l), #000 calc(100% - var(--fade-r)), transparent);
+}
+.stats-tabbar.more-left {
+    --fade-l: 2.5em;
+}
+.stats-tabbar.more-right {
+    --fade-r: 2.5em;
 }
 .stats-tabbar::-webkit-scrollbar {
     display: none;
