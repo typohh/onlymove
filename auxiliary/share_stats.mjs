@@ -59,6 +59,14 @@
 //   node auxiliary/share_stats.mjs
 //   node auxiliary/share_stats.mjs --top 30 --months 6 --countries 10
 //   node auxiliary/share_stats.mjs --json
+//   node auxiliary/share_stats.mjs --days 30          # only the trailing 30 days
+//   node auxiliary/share_stats.mjs --since 2026-09-01 # only events on/after a UTC date
+//
+// A WINDOW (--days / --since) restricts every event count — totals, both per-country
+// tables, the progress table and the top-sharers ranking — to events inside it, and
+// the progress table then buckets by UTC DAY instead of month when the window spans
+// at most 92 days. Identity, rank and the sharer-country fallback are NOT windowed:
+// they describe the person, not the period.
 //
 // Run with --help for every flag.
 
@@ -79,6 +87,8 @@ Usage: node auxiliary/share_stats.mjs [options]
   --top N           how many top sharers to list (default 20; 0 = all)
   --months N        how many recent months in the progress table (default 12; 0 = all)
   --countries N     how many rows per per-country table (default 15; 0 = all)
+  --days N          only events in the trailing N days (N >= 1)
+  --since DATE      only events on/after this UTC date (YYYY-MM-DD); not with --days
   --json            machine-readable JSON instead of the text report
   --no-user-ids     omit the user_id column (for a copy that can leave this machine)
   --help, -h        show this message
@@ -87,7 +97,8 @@ Reads db/d1.sqlite and pwa/tsumegos/problem_params.bin. Run
 \`./.venv/bin/python3 -m pipeline.fetch_database\` first for fresh numbers.`;
 
 const argv = process.argv.slice(2);
-const opts = { db: DB_PATH, top: 20, months: 12, countries: 15, json: false, noUserIds: false };
+const opts = { db: DB_PATH, top: 20, months: 12, countries: 15, json: false, noUserIds: false,
+    days: null, since: null };
 for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--help' || a === '-h') { console.log(USAGE); process.exit(0); }
@@ -95,6 +106,8 @@ for (let i = 0; i < argv.length; i++) {
     else if (a === '--top') opts.top = Number(argv[++i]);
     else if (a === '--months') opts.months = Number(argv[++i]);
     else if (a === '--countries') opts.countries = Number(argv[++i]);
+    else if (a === '--days') opts.days = Number(argv[++i]);
+    else if (a === '--since') opts.since = argv[++i];
     else if (a === '--json') opts.json = true;
     else if (a === '--no-user-ids') opts.noUserIds = true;
     else { console.error(`unknown arg: ${a}\n\n${USAGE}`); process.exit(1); }
@@ -103,6 +116,24 @@ for (const [name, v] of [['--top', opts.top], ['--months', opts.months], ['--cou
     if (!Number.isInteger(v) || v < 0) { console.error(`${name} needs an integer >= 0`); process.exit(1); }
 }
 if (opts.db === undefined) { console.error('--db needs a path'); process.exit(1); }
+if (opts.days !== null && opts.since !== null) {
+    console.error('--days and --since are mutually exclusive'); process.exit(1);
+}
+if (opts.days !== null && (!Number.isInteger(opts.days) || opts.days < 1)) {
+    console.error('--days needs an integer >= 1'); process.exit(1);
+}
+if (opts.since !== null && !(/^\d{4}-\d{2}-\d{2}$/.test(opts.since || '') && Number.isFinite(Date.parse(opts.since)))) {
+    console.error('--since needs a date YYYY-MM-DD'); process.exit(1);
+}
+// The window's lower bound as an ISO-8601 UTC string. created_at is ISO-8601 UTC, so
+// a plain string comparison is a time comparison.
+const sinceIso = opts.days !== null
+    ? new Date(Date.now() - opts.days * 86400000).toISOString()
+    : (opts.since !== null ? `${opts.since}T00:00:00.000Z` : null);
+const windowDesc = opts.days !== null ? `last ${opts.days} day(s), since ${sinceIso.slice(0, 16)}Z`
+    : (opts.since !== null ? `since ${opts.since}` : null);
+// Daily buckets when the window is short enough to read as a table.
+const dailyProgress = sinceIso !== null && (Date.now() - Date.parse(sinceIso)) <= 92 * 86400000;
 
 // --- formatting -----------------------------------------------------------------
 const pad = (s, n) => { s = String(s); return s.length >= n ? s : s + ' '.repeat(n - s.length); };
@@ -122,6 +153,13 @@ const UNKNOWN = '(unknown)';
 // Month helpers: created_at is ISO-8601 UTC, and SQLite's date functions read it as
 // UTC, so months bucket on the UTC calendar. Fill the gaps between the first and last
 // month so "progress" reads as a continuous series.
+function dayRange(first, last) {
+    const out = [];
+    for (let t = Date.parse(`${first}T00:00:00Z`); t <= Date.parse(`${last}T00:00:00Z`); t += 86400000) {
+        out.push(new Date(t).toISOString().slice(0, 10));
+    }
+    return out;
+}
 function monthRange(first, last) {
     const out = [];
     let [y, m] = first.split('-').map(Number);
@@ -169,6 +207,9 @@ async function main() {
     // single (unknown) bucket instead of failing the query.
     const hasCountry = tableColumns('share_events', opts.db).has('country');
     const ccExpr = hasCountry ? "COALESCE(NULLIF(country, ''), NULL)" : 'NULL';
+    // The event window, as a WHERE fragment (W) and an AND fragment (AW).
+    const W = sinceIso !== null ? `WHERE created_at >= '${sinceIso}'` : '';
+    const AW = sinceIso !== null ? `AND created_at >= '${sinceIso}'` : '';
 
     const totals = q(
         `SELECT COUNT(*) AS events,
@@ -179,11 +220,15 @@ async function main() {
                 COUNT(DISTINCT CASE WHEN event_type = 'create' THEN problem_id END) AS sharedProblems,
                 MIN(created_at) AS firstAt,
                 MAX(created_at) AS lastAt
-           FROM share_events`)[0];
-    if (!totals.events) { console.log('share_events is empty.'); return; }
-    const ageMs = Date.now() - Date.parse(totals.lastAt || 0);
+           FROM share_events ${W}`)[0];
+    if (!totals.events) {
+        console.log(windowDesc ? `share_events has no events in the window (${windowDesc}).` : 'share_events is empty.');
+        return;
+    }
+    const newestAt = q(`SELECT MAX(created_at) AS t FROM share_events`)[0].t;
+    const ageMs = Date.now() - Date.parse(newestAt || 0);
     if (!Number.isFinite(ageMs) || ageMs > STALE_WARN_MS) {
-        console.warn(`WARNING: local mirror's newest share event is ${totals.lastAt || 'unknown'} `
+        console.warn(`WARNING: local mirror's newest share event is ${newestAt || 'unknown'} `
             + `(${Number.isFinite(ageMs) ? Math.round(ageMs / 3600000) : '?'}h old). `
             + 'Run pipeline.fetch_database first for fresh numbers.\n');
     }
@@ -195,7 +240,7 @@ async function main() {
                 COUNT(DISTINCT user_id) AS users,
                 COUNT(DISTINCT problem_id) AS problems
            FROM share_events
-          WHERE event_type = '${type}'
+          WHERE event_type = '${type}' ${AW}
           GROUP BY cc
           ORDER BY n DESC, cc`).map((r) => ({ ...r, cc: r.cc || null }));
     const createdByCountry = byCountry('create');
@@ -209,20 +254,26 @@ async function main() {
         opens: (openedByCountry.find((r) => !r.cc) || {}).n || 0,
     };
 
-    // --- monthly progress --------------------------------------------------------
+    // --- progress (monthly, or daily inside a short window) ------------------------
+    const bucketFmt = dailyProgress ? '%Y-%m-%d' : '%Y-%m';
     const monthlyRows = q(
-        `SELECT strftime('%Y-%m', created_at) AS month,
+        `SELECT strftime('${bucketFmt}', created_at) AS month,
                 SUM(event_type = 'create') AS creates,
                 SUM(event_type = 'open')   AS opens,
                 COUNT(DISTINCT CASE WHEN event_type = 'create' THEN user_id END) AS sharers,
                 COUNT(DISTINCT CASE WHEN event_type = 'open'   THEN user_id END) AS viewers
-           FROM share_events
+           FROM share_events ${W}
           GROUP BY month
           ORDER BY month`);
     const byMonth = new Map(monthlyRows.map((r) => [r.month, r]));
     let months = [];
     if (monthlyRows.length) {
-        for (const m of monthRange(monthlyRows[0].month, monthlyRows[monthlyRows.length - 1].month)) {
+        // A window's series runs from its own first day to today, so a quiet stretch
+        // at either end reads as zeros instead of disappearing.
+        const range = dailyProgress
+            ? dayRange(sinceIso.slice(0, 10), new Date().toISOString().slice(0, 10))
+            : monthRange(monthlyRows[0].month, monthlyRows[monthlyRows.length - 1].month);
+        for (const m of range) {
             const r = byMonth.get(m);
             months.push({
                 month: m,
@@ -233,7 +284,7 @@ async function main() {
             });
         }
     }
-    if (opts.months > 0) months = months.slice(-opts.months);
+    if (opts.months > 0 && !dailyProgress) months = months.slice(-opts.months);
     let cumCreates = 0, cumOpens = 0;
     for (const m of months) {
         cumCreates += m.creates; cumOpens += m.opens;
@@ -249,7 +300,7 @@ async function main() {
                 MIN(created_at) AS firstAt,
                 MAX(created_at) AS lastAt
            FROM share_events
-          WHERE event_type = 'create'
+          WHERE event_type = 'create' ${AW}
           GROUP BY user_id
           ORDER BY creates DESC, lastAt DESC`);
     const sharers = opts.top > 0 ? sharerRows.slice(0, opts.top) : sharerRows;
@@ -415,6 +466,7 @@ async function main() {
     const result = {
         generatedAt: new Date().toISOString(),
         db: opts.db,
+        window: sinceIso !== null ? { since: sinceIso, days: opts.days, buckets: dailyProgress ? 'day' : 'month' } : null,
         totals: { ...totals, countries: nCountries, unknownCountry: unknown },
         createdByCountry,
         openedByCountry,
@@ -426,6 +478,7 @@ async function main() {
 
     // --- render ------------------------------------------------------------------
     console.log('=== Share-link activity (share_events) ===');
+    if (windowDesc) console.log(`Window:            ${windowDesc} (all event counts below)`);
     console.log(`Events:            ${int(totals.events)}  `
         + `(${int(totals.creates)} created, ${int(totals.opens)} opened)`);
     console.log(`Range:             ${day(totals.firstAt)} → ${day(totals.lastAt)}`);
@@ -462,18 +515,20 @@ async function main() {
     countryTable('Shares opened, per country (viewer location)',
         openedByCountry, openedTotal, 'Viewers');
 
-    console.log('\n=== Monthly progress (UTC months; both bars share one scale; cum. = within window) ===');
-    console.log(pad('Month', 10) + padl('Created', 9) + '  ' + pad('', 22)
+    console.log(`\n=== ${dailyProgress ? 'Daily' : 'Monthly'} progress (UTC ${dailyProgress ? 'days' : 'months'}; `
+        + 'both bars share one scale; cum. = within window) ===');
+    const bucketW = dailyProgress ? 12 : 10;
+    console.log(pad(dailyProgress ? 'Day' : 'Month', bucketW) + padl('Created', 9) + '  ' + pad('', 22)
         + padl('Opened', 8) + '  ' + pad('', 22)
         + padl('Sharers', 9) + padl('Viewers', 9) + padl('cum. cr', 9) + padl('cum. op', 9));
     for (const m of months) {
-        console.log(pad(m.month, 10) + padl(int(m.creates), 9) + '  ' + pad(bar(m.creates, monthMax, 22), 22)
+        console.log(pad(m.month, bucketW) + padl(int(m.creates), 9) + '  ' + pad(bar(m.creates, monthMax, 22), 22)
             + padl(int(m.opens), 8) + '  ' + pad(bar(m.opens, monthMax, 22), 22)
             + padl(int(m.sharers), 9) + padl(int(m.viewers), 9)
             + padl(int(m.cumCreates), 9) + padl(int(m.cumOpens), 9));
     }
 
-    console.log('\n=== Top sharers (by links created) ===');
+    console.log(`\n=== Top sharers (by links created${windowDesc ? ' in the window' : ''}) ===`);
     if (!top.length) {
         console.log('(no create events)');
         return;
