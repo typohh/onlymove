@@ -23,6 +23,8 @@ import { createBubble, placeBubble, absorbDismissTap } from './bubble.js';
 import { getTerm } from './i18n.js';
 import { APP_MODES, HISTORY_BACKFILL_DONE_KEY } from './constants.js';
 import { waitingRecallCount } from './recall-model.js';
+import { flattenAttempts } from './rank-decomposition.js';
+import { RANK_START_MIN } from '../shared/rank-window.js';
 import { supportsNotifications, notificationPermission, getCurrentSubscription } from './notifications.js';
 
 // --- tunables ---------------------------------------------------------------
@@ -96,6 +98,9 @@ let _shownAtMs = 0;              // when the current bubble painted (for swat de
 
 const historyLen = () => {
     try { return getMergedAnswerHistory().length; } catch { return 0; }
+};
+const usableAttempts = () => {
+    try { return flattenAttempts(getMergedAnswerHistory()).length; } catch { return 0; }
 };
 
 const isInstalled = () =>
@@ -286,11 +291,13 @@ const BUBBLES = {
         kind: 'ambient', anchor: 'menu', placement: 'below', text: 'onbStats',
         eligible: () => _sessionCount >= 2 && historyLen() >= 15 && isVisible(anchors.menu()),
     },
-    // Every active player has an anonymous leaderboard row from their first
-    // report, so this can come early; the text names the way to a named row.
+    // The text says "you're already on the leaderboard", which is true only past
+    // the Worker's list-entry gate: RANK_START_MIN first-time attempts, counted as
+    // the Community "you" marker counts them (flattenAttempts). Below it the
+    // player has a row but no rank and is only tallied in the page footer.
     leaderboard: {
         kind: 'ambient', anchor: 'menu', placement: 'below', text: 'onbLeaderboard',
-        eligible: () => historyLen() >= 10 && isVisible(anchors.menu()),
+        eligible: () => usableAttempts() >= RANK_START_MIN && isVisible(anchors.menu()),
     },
     account: {
         // Cross-device sync only matters to an invested, returning user — few
