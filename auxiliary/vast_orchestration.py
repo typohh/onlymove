@@ -32,6 +32,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 from utils.constants import ALL_BOARD_SIZES
+from utils.paths import TSUMEGOS_DIR, tsumego_dir
 
 VASTAI_BIN = ".venv/bin/vastai"
 REMOTE_DIR = "/workspace/onlymove"
@@ -97,6 +98,17 @@ MODEL_DOWNLOADS = {
 # Output dirs to rsync back. Each contains per-size subdirs (e.g. tsumegos/13/).
 REMOTE_OUTPUT_DIRS = ["tsumegos", "attempts"]
 
+
+def _local_path(rel):
+    """Where a remote-tree path lives locally. The remote keeps the corpus at
+    <REMOTE_DIR>/tsumegos; locally it is wherever utils.paths.TSUMEGOS_DIR
+    points, which need not be inside this checkout. Everything else is the
+    same repo-relative path on both sides."""
+    head, _, rest = rel.partition("/")
+    if head == "tsumegos":
+        return os.path.join(TSUMEGOS_DIR, rest) if rest else TSUMEGOS_DIR
+    return rel
+
 # Freshly generated SGFs land HERE, not in tsumegos/<size>/, so that a generator
 # running on a schedule cannot change the corpus underneath work in progress.
 # Every derived artifact — activations, bot results, ownership, the rated set —
@@ -109,7 +121,7 @@ REMOTE_OUTPUT_DIRS = ["tsumegos", "attempts"]
 # only), which is the whole point. The one scanner that MUST look here is
 # generate_tsumegos.tsumego_id_taken: a staged id is taken, and reissuing it
 # would hand a new problem another problem's history.
-TSUMEGO_STAGING = os.path.join("tsumegos", "new")
+TSUMEGO_STAGING = os.path.join(TSUMEGOS_DIR, "new")
 
 # Per-step input dirs pushed TO the remote before launching a step. These are
 # state dirs the step reads to resume incrementally. For benchmark, attempts/
@@ -159,7 +171,9 @@ ABLATE_PIP_PACKAGES = ["torch~=2.7.1", "pandas~=2.3.1", "scikit-learn~=1.7.1"]
 #   axes/labels.json                the shipping decision K_AXES must match
 #   axes/motif_proxies.npz          the directions the axes are taught onto
 #   tsumegos/retired_ids.txt        the id-uniqueness check features.py runs
-#                                   before it will build a problem set at all
+#                                   before it will build a problem set at all;
+#                                   shipped with the corpus listing, since the
+#                                   local corpus need not sit in this checkout
 #
 # THE PER-PROBLEM STORES ARE NOT SHIPPED. activations/<size>/ is already rolled
 # up into the signal cache. Of tsumegos/<size>/ this layout reads only the
@@ -170,7 +184,6 @@ ABLATE_INPUT_FILES = [
     "db/d1.sqlite",
     "axes/labels.json",
     "axes/motif_proxies.npz",
-    "tsumegos/retired_ids.txt",
 ] + [f"activations/_signal_cache/correct_{kind}_{size}.{ext}"
      for size in ALL_BOARD_SIZES
      for kind, ext in (("ids", "json"), ("vecs", "npy"))] + [
@@ -624,11 +637,12 @@ def upload_input_dirs(host, base_ssh, base_rsync, dirs, size=None):
     excludes = ["--exclude", "__pycache__/", "--exclude", "*.pyc",
                 "--exclude", "new/"]
     for d in dirs:
-        local = os.path.join(d, str(size)) if size is not None else d
+        rel = f"{d}/{size}" if size is not None else d
+        local = _local_path(rel)
         if not os.path.isdir(local):
             print(f"  {local}/ not present locally, skipping upload")
             continue
-        remote = f"{REMOTE_DIR}/{local}"
+        remote = f"{REMOTE_DIR}/{rel}"
         subprocess.run(base_ssh + [f"mkdir -p {remote}"], capture_output=True)
         try:
             res = subprocess.run(
@@ -1234,7 +1248,7 @@ def _report_staged():
         n = sum(1 for f in os.listdir(d) if f.endswith(".sgf"))
         if n:
             print(f"  STAGED: {n} SGFs in {d}/ — adopt with "
-                  f"`mv {d}/*.sgf tsumegos/{size}/` when you want them in the corpus")
+                  f"`mv {d}/*.sgf {tsumego_dir(size)}/` when you want them in the corpus")
 
 
 def cmd_sync(target, sgf_only=False, size=None):
@@ -1288,11 +1302,11 @@ def cmd_sync(target, sgf_only=False, size=None):
             if size is not None:
                 src_sub = f"{d}/new/{size}"
                 dest = os.path.join(TSUMEGO_STAGING, str(size)) + os.sep
-                compare = os.path.abspath(os.path.join(d, str(size)))
+                compare = tsumego_dir(size)
             else:
                 src_sub = f"{d}/new"
                 dest = TSUMEGO_STAGING + os.sep
-                compare = os.path.abspath(d)
+                compare = TSUMEGOS_DIR
             excludes += ["--include", "*/", "--include", "*.sgf",
                          "--exclude", "*", "--compare-dest", compare]
         else:
@@ -1670,16 +1684,28 @@ def _ablate_git_stamp(base_ssh, dry):
 
 
 def _ablate_stub_corpus(host, base_ssh, base_rsync, dry):
-    """Ship the corpus LISTING and materialise it as empty files.
+    """Ship retired_ids.txt and the corpus LISTING, materialising the listing as
+    empty files.
 
     features.corpus_tids_by_size is the fit's problem set and it is the .sgf
     filenames in tsumegos/<size>/; the PRODUCTION_BLOCKS layout opens none of
     them. So the names travel and the files are made on arrival, which keeps the
     two per-problem stores off the wire entirely.
     """
+    retired = os.path.join(TSUMEGOS_DIR, "retired_ids.txt")
+    if not os.path.isfile(retired):
+        print(f"  {retired} not present locally; the fit refuses to run without it.")
+        return False
+    remote_corpus = f"{REMOTE_DIR}/tsumegos"
+    _run_or_show(base_ssh + [f"mkdir -p {remote_corpus}"], dry, capture_output=True)
+    res = _run_or_show(base_rsync + [retired, f"root@{host}:{remote_corpus}/"],
+                       dry, timeout=600)
+    if res is not None and res.returncode != 0:
+        print("  retired_ids.txt upload failed.")
+        return False
     with tempfile.TemporaryDirectory() as tmp:
         for size in ALL_BOARD_SIZES:
-            local_corpus = os.path.join("tsumegos", str(size))
+            local_corpus = tsumego_dir(size)
             if not os.path.isdir(local_corpus):
                 print(f"  {local_corpus}/ not present locally; cannot list the corpus.")
                 return False

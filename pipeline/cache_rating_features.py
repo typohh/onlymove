@@ -66,6 +66,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
+from utils.paths import tsumego_dir  # noqa: E402
 from utils.rating.features import (  # noqa: E402
     CACHE_DIR, _cache_ids_path, build_correct_vec_cache,
 )
@@ -382,7 +383,7 @@ def _process_chunk(task):
     the cache from correct_ids — train_mirt would then score a different
     problem set than it thinks — so a bad input must be fixed, not skipped."""
     size, tids = task
-    tdir = os.path.join(PROJECT_ROOT, "tsumegos", str(size))
+    tdir = tsumego_dir(size)
     out = np.empty((len(tids), N_FEATS), dtype=np.float32)
     cont = np.empty((len(tids), N_CONT), dtype=np.float32)
     axy = np.empty((len(tids), 2), dtype=np.int32)

@@ -19,7 +19,7 @@ the captured point — the opponent may not immediately recapture.
 import os
 import re
 
-from utils.paths import PROJECT_ROOT
+from utils.paths import PROJECT_ROOT, tsumego_dir
 
 _STAR_POINTS = {
     9: [(2, 2), (2, 6), (6, 2), (6, 6), (4, 4)],
@@ -294,7 +294,7 @@ def fetch_sgf(tsumego_id, zip_id=None, size=None):
 
     `zip_id` is accepted and ignored, so existing callers need no change.
     """
-    path = os.path.join(PROJECT_ROOT, "tsumegos", str(size), f"{tsumego_id}.sgf")
+    path = os.path.join(tsumego_dir(size), f"{tsumego_id}.sgf")
     with open(path, encoding="utf-8") as f:
         return f.read()
 

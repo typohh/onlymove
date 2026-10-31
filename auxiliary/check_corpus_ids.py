@@ -47,6 +47,7 @@ if PROJECT_ROOT not in sys.path:
 
 from sgfmill import sgf, boards  # noqa: E402
 
+from utils.paths import tsumego_dir  # noqa: E402
 from pipeline.generate_tsumegos import get_orientation_invariant_hash  # noqa: E402
 from utils.constants import ALL_BOARD_SIZES  # noqa: E402
 
@@ -186,7 +187,7 @@ def main():
 
     paths = []
     for size in args.sizes:
-        d = os.path.join(PROJECT_ROOT, "tsumegos", str(size))
+        d = tsumego_dir(size)
         with os.scandir(d) as it:
             paths.extend((size, e.path) for e in it
                          if e.name.endswith(".sgf") and e.is_file())

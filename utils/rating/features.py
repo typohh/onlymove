@@ -31,7 +31,7 @@ from utils.rating.model_constants import ACT_STORE_DIM, PRODUCTION_BLOCKS
 from utils.rating.ratings_io import FLOOR_CSV, RATINGS_CSV, SLOPE_CSV
 
 from utils.constants import RETIRED_IDS_PATH, not_ignored_sql, read_retired_ids
-from utils.paths import DB_SQL, DB_SQLITE, PROJECT_ROOT
+from utils.paths import DB_SQL, DB_SQLITE, PROJECT_ROOT, tsumego_dir
 
 SQL_PATH = DB_SQL
 SQLITE_PATH = DB_SQLITE
@@ -135,7 +135,7 @@ def _assert_activations_subset_of_corpus(size, ids):
     single 13x13 .npz left behind by a pre-canonical-id removal; it had been feeding a
     phantom problem through the whole rating chain since May.
     """
-    corpus_dir = os.path.join(PROJECT_ROOT, "tsumegos", str(size))
+    corpus_dir = tsumego_dir(size)
     if not os.path.isdir(corpus_dir):
         raise SystemExit(
             f"size {size}: activations exist but the corpus dir is missing ({corpus_dir}); "
@@ -1372,7 +1372,7 @@ def load_game_phase(rebuild=False, sizes=(9, 13)):
     res = {}
     for size in sizes:
         cache = _game_phase_cache_path(size)
-        sgf_dir = os.path.join(PROJECT_ROOT, "tsumegos", str(size))
+        sgf_dir = tsumego_dir(size)
         ids = sorted(n[:-4] for n in os.listdir(sgf_dir) if n.endswith(".sgf"))
         old = {}
         if os.path.exists(cache) and not rebuild:
@@ -1666,7 +1666,7 @@ def corpus_tids_by_size(sizes):
     """
     out = {}
     for size in sizes:
-        d = os.path.join(PROJECT_ROOT, "tsumegos", str(size))
+        d = tsumego_dir(size)
         if not os.path.isdir(d):
             raise SystemExit(f"corpus dir missing: {d}")
         out[size] = sorted(f[:-4] for f in os.listdir(d) if f.endswith(".sgf"))
@@ -1709,7 +1709,7 @@ def _assert_ids_unique(tids_by_size):
     retired = read_retired_ids()
     for t in sorted(set(seen) & retired):
         clashes.append(f"{t}: in tsumegos/{seen[t]}/ AND listed in "
-                       f"{os.path.relpath(RETIRED_IDS_PATH, PROJECT_ROOT)}")
+                       f"{RETIRED_IDS_PATH}")
     if clashes:
         shown = "\n  ".join(clashes[:20])
         more = f"\n  ... and {len(clashes) - 20} more" if len(clashes) > 20 else ""
@@ -1726,7 +1726,7 @@ def _assert_ids_unique(tids_by_size):
 def _missing_block_error(name, key):
     """Classify a gap before raising, because the two causes need opposite fixes."""
     size, tid = key
-    corpus = os.path.join(PROJECT_ROOT, "tsumegos", str(size))
+    corpus = tsumego_dir(size)
     if not os.path.exists(os.path.join(corpus, f"{tid}.sgf")):
         return KeyError(
             f"{name} has no row for {tid} (size {size}), and NEITHER DOES THE CORPUS — "

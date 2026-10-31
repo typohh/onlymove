@@ -51,6 +51,8 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
+from utils.paths import TSUMEGOS_DIR  # noqa: E402
+
 REMOVED_BACKUP = os.path.join(PROJECT_ROOT, 'surgery', 'removed_2026-08-09')
 LOSER_BACKUP = os.path.join(PROJECT_ROOT, 'surgery', 'loser_backup')
 
@@ -100,8 +102,8 @@ def main():
                   sgf_back=0, npz_back=0, npz_missing=0)
 
     for size, tid in remove:
-        if move(f'{PROJECT_ROOT}/tsumegos/{size}/{tid}.sgf',
-                f'{PROJECT_ROOT}/tsumegos/broken/{size}/{tid}.sgf', args.apply):
+        if move(f'{TSUMEGOS_DIR}/{size}/{tid}.sgf',
+                f'{TSUMEGOS_DIR}/broken/{size}/{tid}.sgf', args.apply):
             counts['sgf_out'] += 1
         if move(f'{PROJECT_ROOT}/activations/{size}/{tid}.npz',
                 f'{REMOVED_BACKUP}/activations/{size}/{tid}.npz', args.apply):
@@ -111,8 +113,8 @@ def main():
             counts['cell_out'] += 1
 
     for size, tid in restore:
-        if move(f'{PROJECT_ROOT}/tsumegos/broken/{size}/{tid}.sgf',
-                f'{PROJECT_ROOT}/tsumegos/{size}/{tid}.sgf', args.apply):
+        if move(f'{TSUMEGOS_DIR}/broken/{size}/{tid}.sgf',
+                f'{TSUMEGOS_DIR}/{size}/{tid}.sgf', args.apply):
             counts['sgf_back'] += 1
         if copy(f'{LOSER_BACKUP}/activations/{size}/{tid}.npz',
                 f'{PROJECT_ROOT}/activations/{size}/{tid}.npz', args.apply):
@@ -134,7 +136,7 @@ def main():
     # The invariant the next cache build asserts, checked here while the cause
     # is still obvious rather than three steps downstream.
     for size in (9, 13):
-        with os.scandir(f'{PROJECT_ROOT}/tsumegos/{size}') as it:
+        with os.scandir(f'{TSUMEGOS_DIR}/{size}') as it:
             corpus = {e.name[:-4] for e in it if e.name.endswith('.sgf')}
         with os.scandir(f'{PROJECT_ROOT}/activations/{size}') as it:
             act = {e.name[:-4] for e in it if e.name.endswith('.npz')}

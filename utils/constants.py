@@ -8,7 +8,7 @@ import os
 import re
 from datetime import datetime
 
-from utils.paths import PROJECT_ROOT
+from utils.paths import PROJECT_ROOT, TSUMEGOS_DIR
 
 DEBUG = False
 ALL_BOARD_SIZES = (9, 13)
@@ -20,7 +20,7 @@ RULES = "japanese"
 # nothing from each other: the WRITER (pipeline.generate_tsumegos, which must
 # never reissue one) and the READERS (utils.rating.features, which must never
 # find one back in the corpus).
-RETIRED_IDS_PATH = os.path.join(PROJECT_ROOT, "tsumegos", "retired_ids.txt")
+RETIRED_IDS_PATH = os.path.join(TSUMEGOS_DIR, "retired_ids.txt")
 
 
 @functools.lru_cache(maxsize=1)

@@ -48,6 +48,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
+from utils.paths import tsumego_dir  # noqa: E402
 from pipeline.extract_activations import (  # noqa: E402
     BATCH, PARSE_WORKERS, batch_forward, prepare_problem)
 from katago.train.load_model import load_model  # noqa: E402
@@ -92,7 +93,7 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     for size in ALL_BOARD_SIZES:
         ids = json.load(open(_cache_ids_path(size)))
-        in_dir = os.path.join(PROJECT_ROOT, "tsumegos", str(size))
+        in_dir = tsumego_dir(size)
         model, _, _ = load_model(args.ckpt, use_swa=False, device=device,
                                  pos_len=size, verbose=False)
         model.eval()

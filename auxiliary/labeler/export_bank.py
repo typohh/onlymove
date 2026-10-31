@@ -46,6 +46,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(HERE))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
+from utils.paths import tsumego_dir  # noqa: E402
 from utils.rating.features import load_joint_mirt_features  # noqa: E402
 from utils.rating.model_constants import PCA_DIM, SEED, SIZES  # noqa: E402
 
@@ -130,7 +131,7 @@ def main():
         load = np.stack(cols, axis=1)
         sizes, tids = [], []
         for size in (9, 13):
-            d = os.path.join(PROJECT_ROOT, "tsumegos", str(size))
+            d = tsumego_dir(size)
             have = {f[:-4] for f in os.listdir(d) if f.endswith(".sgf")}
             for t in keys:
                 if t in have:

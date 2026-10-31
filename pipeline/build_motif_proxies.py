@@ -63,6 +63,7 @@ if PROJECT_ROOT not in sys.path:
 
 import sgfmill.sgf  # noqa: E402
 
+from utils.paths import tsumego_dir  # noqa: E402
 from utils.katago.board_render import parse_sgf  # noqa: E402
 from utils.katago.sgf_parsing import parse_tsumego_sgf  # noqa: E402
 from utils.rating.model_constants import SIZES  # noqa: E402
@@ -100,7 +101,7 @@ def label_one(args):
     if own is None or ph is None or tid not in _AREA:
         return None
     area = _AREA[tid]
-    path = os.path.join(PROJECT_ROOT, "tsumegos", str(size), f"{tid}.sgf")
+    path = os.path.join(tsumego_dir(size), f"{tid}.sgf")
     try:
         raw = open(path, "rb").read()
         game = sgfmill.sgf.Sgf_game.from_bytes(raw)
@@ -206,7 +207,7 @@ def load_phase(sizes):
 def corpus():
     out = []
     for size in SIZES:
-        d = os.path.join(PROJECT_ROOT, "tsumegos", str(size))
+        d = tsumego_dir(size)
         out += [(size, f[:-4]) for f in os.listdir(d) if f.endswith(".sgf")]
     return sorted(out, key=lambda t: t[1])
 

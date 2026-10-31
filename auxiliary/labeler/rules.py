@@ -59,6 +59,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(HERE))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
+from utils.paths import tsumego_dir  # noqa: E402
 from utils.rating.model_constants import SIZES  # noqa: E402
 from utils.rating.motif_rules import LABEL_SET  # noqa: E402
 
@@ -175,7 +176,7 @@ def main():
         # instead of a sample.
         tids, sizes = [], []
         for size in sorted(SIZES):
-            d = os.path.join(PROJECT_ROOT, "tsumegos", str(size))
+            d = tsumego_dir(size)
             for f in sorted(os.listdir(d)):
                 if f.endswith(".sgf"):
                     tids.append(f[:-4])

@@ -22,7 +22,7 @@ from utils.rating.model_constants import (
 from utils.rating.features import (
     SIZE_FLAG_COLS, corpus_tids_by_size, joint_feature_tail,
     load_joint_activation_basis, load_joint_blocks)
-from utils.paths import PROJECT_ROOT
+from utils.paths import PROJECT_ROOT, tsumego_dir
 
 MODEL_PT = os.path.join(PROJECT_ROOT, "ratings", "mirt_model.pt")
 
@@ -133,7 +133,7 @@ def variation_npz_rows(size, tid, xys):
     from utils.katago.coords import gtp_to_xy, sgf_to_gtp
     from utils.katago.sgf_parsing import parse_tsumego_sgf
 
-    sgf_path = os.path.join(PROJECT_ROOT, "tsumegos", str(size), tid + ".sgf")
+    sgf_path = os.path.join(tsumego_dir(size), tid + ".sgf")
     try:
         with open(sgf_path, "rb") as f:
             game = sgfmill.sgf.Sgf_game.from_bytes(f.read())

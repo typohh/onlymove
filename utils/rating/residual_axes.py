@@ -48,7 +48,7 @@ from utils.rating.features import (
 from utils.rating.fit_rank_curves import interp_extrap
 from utils.rating.slope_calibration import load_client_lapse
 
-from utils.paths import PROJECT_ROOT
+from utils.paths import PROJECT_ROOT, tsumego_dir
 
 # training regimen
 # EPOCHS sits at the plateau of the held-out gain, and stopping short of it is
@@ -138,7 +138,7 @@ def corpus_tid_size():
     from utils.rating.model_constants import SIZES
     out = {}
     for s in SIZES:
-        d = os.path.join(PROJECT_ROOT, "tsumegos", str(s))
+        d = tsumego_dir(s)
         for f in os.listdir(d):
             if f.endswith(".sgf"):
                 out[f[:-4]] = s

@@ -19,6 +19,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
+from utils.paths import tsumego_dir
 from utils.constants import ALL_BOARD_SIZES
 from utils.katago.coords import gtp_to_xy, sgf_to_gtp
 from utils.rating.ratings_io import FLOOR_CSV, RATINGS_CSV, SLOPE_CSV, load_size_value_maps, load_value_map
@@ -642,7 +643,7 @@ def size_inputs_hash(board_size):
     if embed_dir:
         _hash_file_into(h, os.path.join(embed_dir, "per_problem.csv"))
         h.update((shipped_embedding_version(embed_dir) or "noemb").encode())
-    tdir = os.path.join(PROJECT_ROOT, "tsumegos", str(board_size))
+    tdir = tsumego_dir(board_size)
     names = sorted(f for f in os.listdir(tdir)
                    if f.endswith(".sgf")) if os.path.isdir(tdir) else []
     h.update(("\n".join(names)).encode())
@@ -776,7 +777,7 @@ def process_size(board_size, output_dir, n_workers=None,
     n_workers → create_packages."""
     print(f"\n========== Packaging board size {board_size} ==========")
 
-    TSUMEGOS_DIR = os.path.join(PROJECT_ROOT, "tsumegos", str(board_size))
+    corpus_dir = tsumego_dir(board_size)
     # The backend rating set is always ratings/ (combined MLP-2PL). Output
     # lands in the served pwa/tsumegos/ structure.
     RATINGS_DIR = os.path.join(PROJECT_ROOT, RATINGS_ROOT, str(board_size))
@@ -785,8 +786,8 @@ def process_size(board_size, output_dir, n_workers=None,
 
     # Every size in ALL_BOARD_SIZES is expected to have a full set of artifacts; a
     # missing one is a misconfigured run, not something to skip past.
-    if not os.path.isdir(TSUMEGOS_DIR):
-        raise FileNotFoundError(f"no tsumegos dir at {TSUMEGOS_DIR}")
+    if not os.path.isdir(corpus_dir):
+        raise FileNotFoundError(f"no tsumegos dir at {corpus_dir}")
     ratings_csv = os.path.join(RATINGS_DIR, RATINGS_CSV)
     if not os.path.exists(ratings_csv):
         raise FileNotFoundError(f"no ratings at {ratings_csv} — run train_mirt")
@@ -840,10 +841,10 @@ def process_size(board_size, output_dir, n_workers=None,
 
     # Final per-problem metadata — every SGF joined to its rating, slope, floor and
     # correct-cell embedding (aborts on any gap; see assemble_metadata).
-    sgf_files = [f for f in os.listdir(TSUMEGOS_DIR) if f.endswith(".sgf")]
-    print(f"  found {len(sgf_files)} SGFs in {TSUMEGOS_DIR}")
+    sgf_files = [f for f in os.listdir(corpus_dir) if f.endswith(".sgf")]
+    print(f"  found {len(sgf_files)} SGFs in {corpus_dir}")
     if not sgf_files:
-        raise RuntimeError(f"no SGFs in {TSUMEGOS_DIR}")
+        raise RuntimeError(f"no SGFs in {corpus_dir}")
     all_metadata = assemble_metadata(
         sgf_files, board_size, ratings_map, slope_map, floor_map, embedding_map)
     print(f"  metadata built for all {len(all_metadata)} tsumegos (no gaps)")
@@ -855,7 +856,7 @@ def process_size(board_size, output_dir, n_workers=None,
 
     print(f"  building shards ...")
     create_packages(
-        all_metadata, board_size, TSUMEGOS_DIR, output_dir,
+        all_metadata, board_size, corpus_dir, output_dir,
         per_cell_dir=per_cell_arg, n_workers=n_workers,
     )
     size_dir = os.path.join(output_dir, 'tsumegos', str(board_size))

@@ -68,11 +68,12 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
+from utils.paths import TSUMEGOS_DIR  # noqa: E402
 from utils.katago.add_variations import parse_eval_comment, parse_eval_visits  # noqa: E402
 from utils.katago.coords import sgf_to_gtp, gtp_to_xy  # noqa: E402
 
 DB_PATH = os.path.join(PROJECT_ROOT, "db", "d1.sqlite")
-TSUMEGO_DIR = os.path.join(PROJECT_ROOT, "tsumegos")
+TSUMEGO_DIR = TSUMEGOS_DIR
 PER_CELL_DIR = os.path.join(PROJECT_ROOT, "axes", "per_cell")
 LABELS_JSON = os.path.join(PROJECT_ROOT, "axes", "labels.json")
 

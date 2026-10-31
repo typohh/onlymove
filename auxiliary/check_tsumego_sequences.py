@@ -58,6 +58,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
+from utils.paths import tsumego_dir  # noqa: E402
 from utils.katago.add_variations import parse_eval_comment  # noqa: E402
 from utils.constants import ALL_BOARD_SIZES  # noqa: E402
 
@@ -506,7 +507,7 @@ def main():
     args = parser.parse_args()
 
     targets = ([(args.dir, args.dir)] if args.dir
-               else [(s, os.path.join(PROJECT_ROOT, "tsumegos", str(s))) for s in args.sizes])
+               else [(s, tsumego_dir(s)) for s in args.sizes])
 
     csv_writer = csv_file = None
     if args.csv:

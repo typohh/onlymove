@@ -60,10 +60,14 @@
 import { DatabaseSync } from 'node:sqlite';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { homedir } from 'node:os';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, '..');
+// The corpus root, resolved as utils/paths.py TSUMEGOS_DIR resolves it.
+const TSUMEGOS_DIR = resolve((process.env.ONLYMOVE_TSUMEGOS_DIR || join(ROOT, 'tsumegos'))
+  .replace(/^~(?=$|\/)/, homedir()));
 const { rowHash, ID_HASH_SQL } = await import(
   join(ROOT, 'pwa', 'shared', 'sync-digest.js'));
 
@@ -474,7 +478,7 @@ if (EMIT_MAP) {
   for (const t of ids) {
     let size = null;
     for (const s of [9, 13]) {
-      if (existsSync(join(ROOT, 'tsumegos', String(s), `${t}.sgf`))) { size = s; break; }
+      if (existsSync(join(TSUMEGOS_DIR, String(s), `${t}.sgf`))) { size = s; break; }
     }
     if (size === null) { missing++; continue; }
     entries.push({ size, old_id: t, new_id: null, action: 'quarantine' });

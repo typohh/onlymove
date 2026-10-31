@@ -32,6 +32,7 @@ if PROJECT_ROOT not in sys.path:
 
 import sgfmill.sgf  # noqa: E402
 
+from utils.paths import tsumego_dir  # noqa: E402
 from utils.katago.board_render import parse_sgf, simulate  # noqa: E402
 from utils.katago.sgf_parsing import parse_tsumego_sgf  # noqa: E402
 from utils.rating.model_constants import SIZES  # noqa: E402
@@ -44,7 +45,7 @@ FIELDS = ["tid", "size", "opp_dist", "root_ko", "adj_stones",
 
 def one(args):
     size, tid = args
-    path = os.path.join(PROJECT_ROOT, "tsumegos", str(size), f"{tid}.sgf")
+    path = os.path.join(tsumego_dir(size), f"{tid}.sgf")
     try:
         raw = open(path, "rb").read()
         game = sgfmill.sgf.Sgf_game.from_bytes(raw)
@@ -89,7 +90,7 @@ def main():
 
     todo = []
     for size in SIZES:
-        d = os.path.join(PROJECT_ROOT, "tsumegos", str(size))
+        d = tsumego_dir(size)
         todo += [(size, f[:-4]) for f in os.listdir(d) if f.endswith(".sgf")]
     print(f"{len(todo)} problems, {args.workers} workers")
 

@@ -64,6 +64,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
+from utils.paths import tsumego_dir
 import utils.katago.torch_model  # noqa: F401,E402  -- adds vendored katago/ to sys.path
 
 # ONLY LIGHT IMPORTS AT MODULE LEVEL. The parse workers are SPAWNED, so each
@@ -287,7 +288,7 @@ def reconcile(size, corpus, meta):
 
 
 def run_size(size, visits, symmetries, force, limit):
-    in_dir = os.path.join(PROJECT_ROOT, "tsumegos", str(size))
+    in_dir = tsumego_dir(size)
     out_dir = OM.size_dir(size)
     if force and os.path.isdir(out_dir):
         shutil.rmtree(out_dir)

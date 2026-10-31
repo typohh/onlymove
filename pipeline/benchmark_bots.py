@@ -16,6 +16,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
+from utils.paths import tsumego_dir
 from utils.constants import ALL_BOARD_SIZES
 from utils.katago.coords import sgf_to_gtp, sgfmill_point_to_sgf
 from utils.katago.sgf_parsing import parse_tsumego_sgf
@@ -440,7 +441,7 @@ def main():
     args = parser.parse_args()
 
     global TSUMEGO_DIR, ATTEMPTS_DIRECTORY
-    TSUMEGO_DIR = args.corpus_dir or os.path.join(PROJECT_ROOT, "tsumegos", str(args.size))
+    TSUMEGO_DIR = args.corpus_dir or tsumego_dir(args.size)
     if not os.path.isabs(TSUMEGO_DIR):
         TSUMEGO_DIR = os.path.join(PROJECT_ROOT, TSUMEGO_DIR)
     if not os.path.isdir(TSUMEGO_DIR):

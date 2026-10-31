@@ -156,6 +156,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
+from utils.paths import tsumego_dir
 import utils.katago.torch_model  # noqa: F401  -- adds vendored katago/ to sys.path
 
 from katago.game.board import Board
@@ -552,7 +553,7 @@ def load_done(path):
 # ---------------------------------------------------------------- driver
 
 def run_size(size):
-    in_dir = os.path.join(PROJECT_ROOT, "tsumegos", str(size))
+    in_dir = tsumego_dir(size)
     if not os.path.isdir(in_dir):
         print(f"\n[size {size}] no tsumegos dir at {in_dir}; skipping", flush=True)
         return

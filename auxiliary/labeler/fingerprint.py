@@ -21,6 +21,8 @@ detect, so the trade goes this way deliberately.
 import hashlib
 import os
 
+from utils.paths import tsumego_dir
+
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 CACHE_DIR = os.path.join(PROJECT_ROOT, "activations", "_signal_cache")
 
@@ -43,7 +45,7 @@ def _corpus_digest(size):
     """Over the id LISTING, not the file count: a purge that removes one problem
     and a top-up that adds another leaves the count identical while every pooled
     z-score and the PCA basis move."""
-    d = os.path.join(PROJECT_ROOT, "tsumegos", str(size))
+    d = tsumego_dir(size)
     if not os.path.isdir(d):
         return None
     tids = sorted(f[:-4] for f in os.listdir(d) if f.endswith(".sgf"))

@@ -75,6 +75,8 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
+from utils.paths import TSUMEGOS_DIR  # noqa: E402
+
 from auxiliary.audit_solution_lines import (           # noqa: E402
     WIN_THRESHOLD, MAX_DEPTH, RECURSION_LIMIT,
     parse_sgf, normalize, node_move, node_eval, has_eval, make_is_pass,
@@ -296,7 +298,9 @@ def main():
                     help='write the files (default is a dry run)')
     ap.add_argument('--unmark', action='store_true',
                     help='remove every TE property (the only mode still live)')
-    ap.add_argument('--dirs', nargs='+', default=['tsumegos', 'tsumegos/broken'])
+    ap.add_argument('--dirs', nargs='+',
+                    default=[TSUMEGOS_DIR, os.path.join(TSUMEGOS_DIR, 'broken')],
+                    help='corpus directories, absolute or repo-relative')
     ap.add_argument('--workers', type=int, default=os.cpu_count())
     args = ap.parse_args()
 

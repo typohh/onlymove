@@ -61,6 +61,8 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
+from utils.paths import TSUMEGOS_DIR  # noqa: E402
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 # A winrate at or above this counts as a win for black. Comments are
@@ -410,8 +412,8 @@ def main():
         return
 
     print("auditing:")
-    live = collect('tsumegos', args.sample, args.workers)
-    quarantined = collect('tsumegos/broken', args.sample, args.workers)
+    live = collect(TSUMEGOS_DIR, args.sample, args.workers)
+    quarantined = collect(os.path.join(TSUMEGOS_DIR, 'broken'), args.sample, args.workers)
     summarise('LIVE CORPUS', live)
     summarise('QUARANTINE', quarantined)
     if args.out:

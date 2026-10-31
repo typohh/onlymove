@@ -51,6 +51,8 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(HERE))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
+from utils.paths import tsumego_dir  # noqa: E402
+
 ANCHORS = os.path.join(PROJECT_ROOT, "axes", "label_anchors.npz")
 LABELS = os.path.join(PROJECT_ROOT, "axes", "labels.json")
 
@@ -98,7 +100,7 @@ def mirror_of(col, ids, M, bank):
 def corpus_tids():
     out = {}
     for size in (9, 13):
-        d = os.path.join(PROJECT_ROOT, "tsumegos", str(size))
+        d = tsumego_dir(size)
         for f in os.listdir(d):
             if f.endswith(".sgf"):
                 out[f[:-4]] = size

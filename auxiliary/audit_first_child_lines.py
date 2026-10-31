@@ -47,7 +47,8 @@ Writes, next to this file:
     first_child_line_defects.txt
 
 Options:
-    --dir SUBDIR   audit one repo-relative directory instead of `tsumegos`
+    --dir DIR      audit one corpus directory (absolute or repo-relative)
+                   instead of the configured corpus
     --out PATH     write somewhere else
     --workers N    process count
 """
@@ -67,6 +68,7 @@ from auxiliary.audit_solution_lines import (make_is_pass, node_eval, node_move,
                                             normalize, parse_sgf,
                                             RECURSION_LIMIT, WIN_THRESHOLD)
 from utils.constants import ALL_BOARD_SIZES
+from utils.paths import TSUMEGOS_DIR
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PACKAGED = os.path.join(PROJECT_ROOT, "pwa", "tsumegos")
@@ -212,8 +214,8 @@ def main():
     ap = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--dir", default="tsumegos",
-                    help="repo-relative corpus directory")
+    ap.add_argument("--dir", default=TSUMEGOS_DIR,
+                    help="corpus directory, absolute or repo-relative")
     ap.add_argument("--out", default=os.path.join(
         HERE, "first_child_line_defects.txt"))
     ap.add_argument("--workers", type=int, default=os.cpu_count())

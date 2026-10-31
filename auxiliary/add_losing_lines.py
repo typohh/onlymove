@@ -84,6 +84,7 @@ from auxiliary.check_tsumego_sequences import (  # noqa: E402
     subtree_has_complete_line,
     to_solver,
 )
+from utils.paths import tsumego_dir  # noqa: E402
 from utils.constants import ALL_BOARD_SIZES, DEBUG  # noqa: E402
 from utils.katago.add_variations import (  # noqa: E402
     VariationDepthExceeded,
@@ -265,7 +266,7 @@ def report_progress(counts, state):
 
 
 def corpus_paths(size, ids, limit):
-    directory = os.path.join(PROJECT_ROOT, "tsumegos", str(size))
+    directory = tsumego_dir(size)
     if ids:
         paths = [os.path.join(directory, f"{tid}.sgf") for tid in ids]
         missing = [p for p in paths if not os.path.exists(p)]

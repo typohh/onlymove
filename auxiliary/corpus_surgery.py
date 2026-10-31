@@ -21,7 +21,8 @@ correct_ids, unused by production) are left untouched.
 Usage:
     ./.venv/bin/python3 -m auxiliary.corpus_surgery --map surgery/id_map.json           # dry run
     ./.venv/bin/python3 -m auxiliary.corpus_surgery --map surgery/id_map.json --apply
-    # optional roots override for rehearsal on a copied tree:
+    # optional roots override for rehearsal on a copied tree (the corpus is then
+    # <root>/tsumegos unless --tsumegos-dir says otherwise):
     ./.venv/bin/python3 -m auxiliary.corpus_surgery --map ... --root /tmp/rehearsal --apply
 
 Idempotent: a re-run after an interruption treats an entry whose old file is
@@ -47,14 +48,21 @@ if PROJECT_ROOT not in sys.path:
 
 import numpy as np  # noqa: E402
 
+from utils.paths import TSUMEGOS_DIR  # noqa: E402
 from utils.rating.ratings_io import FLOOR_CSV, RATINGS_CSV, SLOPE_CSV  # noqa: E402
 
-# Per-id file artifacts: (relative dir template, extension).
+# Per-id file artifacts: (dir template, extension). {corpus} is the tsumego
+# corpus root, which need not sit under {root}.
 FILE_ARTIFACTS = [
-    ("tsumegos/{size}", ".sgf"),
-    ("activations/{size}", ".npz"),
-    ("axes/per_cell/{size}", ".npz"),
+    ("{corpus}/{size}", ".sgf"),
+    ("{root}/activations/{size}", ".npz"),
+    ("{root}/axes/per_cell/{size}", ".npz"),
 ]
+
+
+def _label(tmpl, size):
+    """An artifact template as a log key: tsumegos/9, activations/9, ..."""
+    return tmpl.format(root="", corpus="tsumegos", size=size).lstrip("/")
 
 TMP_SUFFIX = ".surgery-tmp"
 
@@ -105,8 +113,13 @@ def load_map(path):
 
 # ---------------------------------------------------------------- file ops
 
-def backup_file(src, backup_root, log, apply):
-    rel = os.path.relpath(src, PROJECT_ROOT)
+def backup_file(src, backup_root, log, apply, root, corpus):
+    """Copy src under backup_root at its path relative to the tree it belongs
+    to: corpus files under tsumegos/, everything else relative to root."""
+    if os.path.commonpath([os.path.abspath(src), corpus]) == corpus:
+        rel = os.path.join("tsumegos", os.path.relpath(src, corpus))
+    else:
+        rel = os.path.relpath(src, root)
     dst = os.path.join(backup_root, rel)
     if apply:
         os.makedirs(os.path.dirname(dst), exist_ok=True)
@@ -114,16 +127,17 @@ def backup_file(src, backup_root, log, apply):
     log.hit("backup: files copied")
 
 
-def delete_losers(entries, root, backup_root, log, apply):
+def delete_losers(entries, root, corpus, backup_root, log, apply):
     for e in entries:
         if e["action"] not in ("merge", "quarantine"):
             continue
         for tmpl, ext in FILE_ARTIFACTS:
-            p = os.path.join(root, tmpl.format(size=e["size"]), e["old_id"] + ext)
-            is_sgf = tmpl.startswith("tsumegos/")
+            p = os.path.join(tmpl.format(root=root, corpus=corpus, size=e["size"]),
+                             e["old_id"] + ext)
+            is_sgf = ext == ".sgf"
             if e["action"] == "quarantine" and is_sgf:
                 # The SGF is preserved in the quarantine dir, not deleted.
-                dst_dir = os.path.join(root, "tsumegos", "broken", str(e["size"]))
+                dst_dir = os.path.join(corpus, "broken", str(e["size"]))
                 dst = os.path.join(dst_dir, e["old_id"] + ext)
                 if os.path.exists(p):
                     if apply:
@@ -136,15 +150,15 @@ def delete_losers(entries, root, backup_root, log, apply):
                     log.hit("quarantine MISSING sgf")
                 continue
             if os.path.exists(p):
-                backup_file(p, backup_root, log, apply)
+                backup_file(p, backup_root, log, apply, root, corpus)
                 if apply:
                     os.remove(p)
-                log.hit(f"delete {e['action']} artifact {tmpl.format(size=e['size'])}")
+                log.hit(f"delete {e['action']} artifact {_label(tmpl, e['size'])}")
             else:
-                log.hit(f"delete {e['action']} artifact MISSING {tmpl.format(size=e['size'])}")
+                log.hit(f"delete {e['action']} artifact MISSING {_label(tmpl, e['size'])}")
 
 
-def rename_files(entries, root, log, apply):
+def rename_files(entries, root, corpus, log, apply):
     """Two-phase: mv every old -> new+TMP_SUFFIX (freeing all old names), then
     tmp -> final. Immune to rename chains and to targets equal to deleted loser
     names. An entry with old gone + new present counts as already applied."""
@@ -152,20 +166,20 @@ def rename_files(entries, root, log, apply):
     for tmpl, ext in FILE_ARTIFACTS:
         phase2 = []
         for e in renames:
-            d = os.path.join(root, tmpl.format(size=e["size"]))
+            d = tmpl.format(root=root, corpus=corpus, size=e["size"])
             old = os.path.join(d, e["old_id"] + ext)
             new = os.path.join(d, e["new_id"] + ext)
             if not os.path.exists(old):
                 if os.path.exists(new):
-                    log.hit(f"rename already-applied {tmpl.format(size=e['size'])}")
+                    log.hit(f"rename already-applied {_label(tmpl, e['size'])}")
                 else:
-                    log.hit(f"rename MISSING {tmpl.format(size=e['size'])}")
+                    log.hit(f"rename MISSING {_label(tmpl, e['size'])}")
                 continue
             assert not os.path.exists(new), f"rename target occupied: {new}"
             if apply:
                 os.rename(old, new + TMP_SUFFIX)
             phase2.append(new)
-            log.hit(f"rename {tmpl.format(size=e['size'])}")
+            log.hit(f"rename {_label(tmpl, e['size'])}")
         for new in phase2:
             if apply:
                 os.rename(new + TMP_SUFFIX, new)
@@ -409,10 +423,10 @@ def delete_joint_pca_caches(log, apply, root):
 
 # ---------------------------------------------------------------- verify
 
-def verify(entries, root, log):
+def verify(entries, corpus, log):
     bad = 0
     for e in entries:
-        d = os.path.join(root, "tsumegos", str(e["size"]))
+        d = os.path.join(corpus, str(e["size"]))
         old = os.path.join(d, e["old_id"] + ".sgf")
         new = os.path.join(d, (e["new_id"] or e["old_id"]) + ".sgf")
         if os.path.exists(old):
@@ -425,7 +439,7 @@ def verify(entries, root, log):
             print(f"VERIFY FAIL: merge survivor absent: {new}")
             bad += 1
         if e["action"] == "quarantine" and not os.path.exists(
-                os.path.join(root, "tsumegos", "broken", str(e["size"]), e["old_id"] + ".sgf")):
+                os.path.join(corpus, "broken", str(e["size"]), e["old_id"] + ".sgf")):
             print(f"VERIFY FAIL: quarantined sgf absent from broken/: {e['old_id']}")
             bad += 1
     print(f"verify: {'OK' if bad == 0 else f'{bad} FAILURES'}")
@@ -440,9 +454,15 @@ def main():
     ap.add_argument("--root", default=PROJECT_ROOT,
                     help="tree to operate on (default: the repo; point at a "
                          "copy for rehearsal)")
+    ap.add_argument("--tsumegos-dir", default=None,
+                    help="corpus to operate on (default: the configured corpus, "
+                         "or <root>/tsumegos when --root is given)")
     ap.add_argument("--backup-dir", default=None,
                     help="loser backup destination (default: <map dir>/loser_backup)")
     args = ap.parse_args()
+    root = os.path.abspath(args.root)
+    corpus = os.path.abspath(args.tsumegos_dir or (
+        TSUMEGOS_DIR if root == PROJECT_ROOT else os.path.join(root, "tsumegos")))
 
     m, entries, old_to_final, survivor_old, quarantined = load_map(args.map)
     backup_root = args.backup_dir or os.path.join(
@@ -451,7 +471,7 @@ def main():
     log = Log()
     print(f"map: {m['renames']} renames, {m['merges']} merges, "
           f"{m.get('quarantines', 0)} quarantines (generated {m['generated_at']}); "
-          f"{'APPLY' if args.apply else 'DRY RUN'} on {args.root}")
+          f"{'APPLY' if args.apply else 'DRY RUN'} on {args.root} (corpus {corpus})")
 
     # Back up the small table artifacts once, before any rewrite.
     table_files = ([os.path.join(args.root, "axes", n)
@@ -471,10 +491,10 @@ def main():
                       if n.endswith(".txt")])
     for p in table_files:
         if os.path.exists(p):
-            backup_file(p, backup_root, log, args.apply)
+            backup_file(p, backup_root, log, args.apply, root, corpus)
 
-    delete_losers(entries, args.root, backup_root, log, args.apply)
-    rename_files(entries, args.root, log, args.apply)
+    delete_losers(entries, args.root, corpus, backup_root, log, args.apply)
+    rename_files(entries, args.root, corpus, log, args.apply)
 
     for size in sizes:
         for n in (RATINGS_CSV, SLOPE_CSV, FLOOR_CSV):
@@ -499,7 +519,7 @@ def main():
     log.dump()
     if args.apply:
         print()
-        ok = verify(entries, args.root, log)
+        ok = verify(entries, corpus, log)
         print("\nNext: re-run auxiliary.check_corpus_ids (expect 0 misnamed, "
               "0 dup groups), then pipeline.package_for_pwa --force.")
         sys.exit(0 if ok else 1)

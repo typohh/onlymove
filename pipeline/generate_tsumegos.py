@@ -12,6 +12,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
+from utils.paths import TSUMEGOS_DIR  # noqa: E402
 from utils.katago.add_variations import (  # noqa: E402
     DEEP_ENTRY_PLAYOUTS,
     VariationDepthExceeded,
@@ -209,8 +210,8 @@ def tsumego_id_taken(filename):
     tid = os.path.splitext(filename)[0]
     if tid in read_retired_ids():
         return True
-    roots = (os.path.join(PROJECT_ROOT, "tsumegos"),
-             os.path.join(PROJECT_ROOT, "tsumegos", "new"))
+    roots = (TSUMEGOS_DIR,
+             os.path.join(TSUMEGOS_DIR, "new"))
     return any(
         os.path.exists(os.path.join(root, str(s), filename))
         for root in roots for s in ALL_BOARD_SIZES)
@@ -348,7 +349,7 @@ def main():
 
     global max_problems, OUTPUT_DIR
     max_problems = args.max_problems
-    OUTPUT_DIR = os.path.join(PROJECT_ROOT, "tsumegos", "new", str(args.size))
+    OUTPUT_DIR = os.path.join(TSUMEGOS_DIR, "new", str(args.size))
 
     # Treat SIGHUP / SIGTERM as KeyboardInterrupt so the main try/finally runs
     # and KataGo gets stop_engine'd. tmux kill-session sends SIGHUP; without
