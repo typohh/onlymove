@@ -40,7 +40,6 @@ import {
 
 const { state } = stateMod;
 const BASE_DIR = path.join(ROOT, 'db', 'llm_player');
-const IGNORED_USERS = path.join(ROOT, 'db', 'ignored_users.txt');
 
 // --- arguments ------------------------------------------------------------------
 const argv = process.argv.slice(2);
@@ -50,6 +49,16 @@ const opt = (name, dflt = null) => {
     return i >= 0 ? argv[i + 1] : dflt;
 };
 const positional = argv.slice(1).filter((a, i, all) => !a.startsWith('--') && !(i > 0 && all[i - 1].startsWith('--')));
+
+function addIgnoredUser(userId, label) {
+    const q = (v) => `'${String(v).replace(/'/g, "''")}'`;
+    const sql = 'INSERT INTO ignored_users (user_id, label, created_at) VALUES '
+        + `(${q(userId)}, ${q(label)}, ${q(new Date().toISOString().slice(0, 10))})`;
+    const res = spawnSync('npx', ['wrangler', 'd1', 'execute', 'tsumego-reports', '--remote',
+        '--command', sql], { cwd: path.join(ROOT, 'pwa'), stdio: ['ignore', 'ignore', 'inherit'] });
+    if (res.status !== 0) die(`could not add ${userId} to the remote ignored_users table; no account was created`);
+    console.error(`added ${userId} to the remote ignored_users table`);
+}
 
 function die(msg, code = 1) {
     console.error(msg);
@@ -603,13 +612,12 @@ async function main() {
     case 'init': {
         // state.js minted a fresh id at import (getOrCreateUserId), as a new device does.
         const acct = { userId: state.userId, server, size: Number(opt('size', 9)), rows: [], pending: null };
+        // Listed in the production ignored_users table BEFORE the account exists
+        // anywhere, so it can never post an attempt the fits would read.
+        // pipeline.fetch_database brings the row into the local mirror.
+        if (!isLocal(server)) addIgnoredUser(acct.userId, `${opt('label', 'llm player')} (${server})`);
         saveAccount(acct);
         console.log(acct.userId);
-        if (!isLocal(server)) {
-            const label = opt('label', 'llm player');
-            appendFileSync(IGNORED_USERS, `${acct.userId}  # ${label} (${server}, ${new Date().toISOString().slice(0, 10)})\n`);
-            console.error(`added ${acct.userId} to db/ignored_users.txt — commit it`);
-        }
         break;
     }
     case 'next': {

@@ -3,7 +3,7 @@
 // The Account dialog (hamburger menu → More). Five values, each one a thing the
 // user can change by clicking it:
 //
-//     Code       <user-id>            (?)
+//     Code       ab12cd34            (?)
 //     Google     you@gmail.com       (?)
 //     Profile    Henry Hemming · 4d  (?)
 //     Alias      Brave Crimson Fox   (?)

@@ -116,31 +116,14 @@ axes/bank_*.npz
 axes/rule_bank_*.npz
 axes/rule_quantities.csv
 
-# Local snapshot of the REMOTE production D1: a large (~50 MB) dump pulled by
-# pipeline.fetch_database. Regenerable on demand and changes constantly, so it is
-# not version-controlled. d1.sqlite is the canonical binary (query this one);
-# d1.sql is the text dump regenerated from it. It sat under attempts/ until
-# 2026-08-03, next to the TRACKED per-size bot benchmark results — those are a
-# pipeline input and stay in attempts/<size>/.
-/db/d1.sql
-/db/d1.sqlite
-# Pinned baseline snapshots of the attempts DB, named by their sha256 prefix.
-# docs/mirt_benchmark.md's held-out sets are DRAWN from this DB, so a
-# pipeline.fetch_database changes the universe, changes the draw, and voids
-# every comparison recorded there. These copies are the only way back to a
-# baseline; they are large binaries and never belong in git.
-/db/d1.baseline-*.sqlite
-# SQLite's own write-ahead-log sidecars, which exist only while a connection is
-# open — a `git status` that catches them mid-query would otherwise offer to
-# commit the engine's scratch space.
-/db/d1.sqlite-shm
-/db/d1.sqlite-wal
-# Timestamped pre-change backups of the production DB (manual `cp` snapshots);
-# local insurance only, never committed.
-/db/d1.backup-*.sqlite
-# auxiliary/llm_player/: downloaded served data and per-account play state and
-# solver logs. db/ignored_users.txt beside it IS tracked.
-/db/llm_player/
+# db/ is local state only, and none of it is tracked: the snapshot of the
+# REMOTE production D1 pulled by pipeline.fetch_database (d1.sqlite canonical,
+# d1.sql the text dump), the pinned baseline snapshots docs/mirt_benchmark.md's
+# held-out sets are drawn from (d1.baseline-<sha>.sqlite, the only way back to a
+# baseline), the manual d1.backup-*.sqlite insurance copies, SQLite's -shm/-wal
+# sidecars, and auxiliary/llm_player/'s per-account play state. It holds real
+# account codes, which are credentials.
+/db/
 
 # Rating pipeline output (pipeline.train_rating / map_rating_to_egf): regenerable,
 # and model.pt is a multi-MB binary. The training code is tracked; its outputs

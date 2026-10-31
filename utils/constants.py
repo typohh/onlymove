@@ -5,10 +5,9 @@ read it, so an import here would load one side into every process of the other.
 """
 import functools
 import os
-import re
 from datetime import datetime
 
-from utils.paths import PROJECT_ROOT, TSUMEGOS_DIR
+from utils.paths import DB_SQLITE, TSUMEGOS_DIR
 
 DEBUG = False
 ALL_BOARD_SIZES = (9, 13)
@@ -46,39 +45,35 @@ def read_retired_ids():
 # players (auxiliary/llm_player/), which play through /report like a person so
 # the Worker can rank them on the leaderboard. Their rows stay in D1 and in the
 # local mirror — the leaderboard refresh rebuilds their rank from them — and
-# every pipeline reader of the attempt log drops them instead.
-IGNORED_USERS_PATH = os.path.join(PROJECT_ROOT, "db", "ignored_users.txt")
-_USER_ID_RE = re.compile(r"^[A-Za-z0-9_-]{8}$")   # pwa/src/guards.js USER_ID_RE
-
-
-@functools.lru_cache(maxsize=1)
-def read_ignored_users():
-    """The ignored user ids, read once per process: one per line, `#` starts a
-    comment. A malformed id raises rather than being skipped, since a typo here
-    would silently let that account back into the fit."""
-    ignored = set()
-    try:
-        with open(IGNORED_USERS_PATH) as fh:
-            for n, line in enumerate(fh, 1):
-                uid = line.split("#", 1)[0].strip()
-                if not uid:
-                    continue
-                if not _USER_ID_RE.match(uid):
-                    raise ValueError(f"{IGNORED_USERS_PATH}:{n}: {uid!r} is not a user id")
-                ignored.add(uid)
-    except FileNotFoundError:
-        pass
-    return frozenset(ignored)
-
-
+# every pipeline reader of the attempt log drops them instead. The list is the
+# `ignored_users` table (pwa/schema.sql), mirrored by pipeline.fetch_database
+# with the rest of the database: an account code is the account's credential,
+# so it is never committed.
 def not_ignored_sql(column="user_id"):
     """A SQL condition keeping only rows whose `column` is not an ignored user.
-    The ids are inlined: read_ignored_users has already held each to the
-    user-id alphabet, which has no quote in it."""
-    ids = sorted(read_ignored_users())
-    if not ids:
-        return "1"
-    return f"{column} NOT IN ({', '.join(repr(i) for i in ids)})"
+    A subquery against the database the query reads, so a snapshot other than
+    db/ filters by its own list, and a mirror without the table fails the query
+    rather than letting those accounts back into the fit."""
+    return f"{column} NOT IN (SELECT user_id FROM ignored_users)"
+
+
+@functools.lru_cache(maxsize=None)
+def read_ignored_users(db_path=DB_SQLITE):
+    """The ignored user ids in the sqlite mirror at `db_path`, read once per
+    process. Raises when the mirror has no such table — one fetched before it
+    existed — rather than returning an empty set."""
+    import sqlite3
+    if not os.path.exists(db_path):
+        raise FileNotFoundError(f"{db_path} not found — run pipeline.fetch_database")
+    con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    try:
+        rows = con.execute("SELECT user_id FROM ignored_users").fetchall()
+    except sqlite3.OperationalError as e:
+        raise RuntimeError(f"{db_path} has no ignored_users table — "
+                           f"re-run pipeline.fetch_database") from e
+    finally:
+        con.close()
+    return frozenset(r[0] for r in rows)
 
 
 def debug(message: str):

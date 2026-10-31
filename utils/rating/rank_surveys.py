@@ -17,7 +17,7 @@ from collections import defaultdict, deque
 import numpy as np
 import pandas as pd
 
-from utils.constants import not_ignored_sql, read_ignored_users
+from utils.constants import not_ignored_sql
 from utils.paths import DB_SQL, PROJECT_ROOT
 
 SQL_PATH_DEFAULT = DB_SQL
@@ -30,6 +30,8 @@ SERVERS = ["OGS", "KGS", "Fox", "Tygem", "WBaduk", "IGS", "GoQuest", "EGF", "AGA
 # INSERT INTO "rank_surveys" VALUES(123,'<user-id>','OGS','5k','2025-09-12T…');
 # country, rank_label and last_game_at are optional trailing columns (quoted, or
 # NULL, or absent on an older dump); anything after them (future adds) is ignored.
+IGNORED_USER_RE = re.compile(r"INSERT INTO [\"`]?ignored_users[\"`]?\s*(?:\([^)]*\))?\s*VALUES\('([^']+)'")
+IGNORED_TABLE_RE = re.compile(r"CREATE TABLE (?:IF NOT EXISTS )?[\"`]?ignored_users[\"`]?[\s(]")
 RANK_SURVEY_RE = re.compile(
     r"INSERT INTO [\"`]?rank_surveys[\"`]?\s*(?:\([^)]*\))?\s*VALUES\("
     r"\d+,'([^']+)','([^']+)','([^']+)','([^']+)'"
@@ -188,6 +190,26 @@ def is_verified_active(tier_rank, last_game_at, today=None):
     return days <= window
 
 
+def _dump_ignored_users(sql_path):
+    """The ignored_users ids in a D1 dump — the same snapshot the surveys come
+    from, which the sqlite mirror beside it need not be. Raises on a dump with
+    no trace of the table (one fetched before it existed)."""
+    ids, seen_table = set(), False
+    with open(sql_path, "r") as f:
+        for line in f:
+            if not line.startswith(("INSERT", "CREATE")):
+                continue
+            m = IGNORED_USER_RE.match(line)
+            if m:
+                ids.add(m.group(1))
+            elif IGNORED_TABLE_RE.match(line):
+                seen_table = True
+    if not (ids or seen_table):
+        raise RuntimeError(f"{sql_path} carries no ignored_users table — "
+                           f"re-run pipeline.fetch_database")
+    return ids
+
+
 def load_rank_surveys(sql_path):
     """Return DataFrame [user_id, server, rank, rank_value, created_at, country,
     rank_label, last_game_at]. country is Cloudflare's edge geo-IP recorded
@@ -202,7 +224,7 @@ def load_rank_surveys(sql_path):
     rows = []
     # An ignored account's declarations go with its attempts: every anchor the
     # mapping builds is keyed by the users found here.
-    ignored = read_ignored_users()
+    ignored = _dump_ignored_users(sql_path)
     with open(sql_path, "r") as f:
         for line in f:
             m = RANK_SURVEY_RE.match(line)

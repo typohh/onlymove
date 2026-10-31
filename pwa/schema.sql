@@ -414,6 +414,18 @@ CREATE TABLE IF NOT EXISTS hidden_profiles (
     user_id    TEXT PRIMARY KEY,
     created_at TEXT NOT NULL
 );
+-- Accounts whose attempts must not shape any fit: the LLM players
+-- (auxiliary/llm_player/), which play through /report like a person so the
+-- Worker ranks them on the leaderboard. Their rows stay in tsumego_reports and
+-- every pipeline reader of the attempt log drops them (utils/constants.py
+-- read_ignored_users, which reads the local mirror). Kept HERE rather than in a
+-- tracked file because an account code is the account's credential. Written by
+-- `drive.mjs init`; nothing in the Worker reads it.
+CREATE TABLE IF NOT EXISTS ignored_users (
+    user_id    TEXT PRIMARY KEY,
+    label      TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
 -- Contribution-rewards entries (the /contest page, src/contest.js). One row per
 -- (category, account). Only 'video' (the content-creators category) is written;
 -- the CHECK's 'strength' is unused. A player creates the row from the page's
