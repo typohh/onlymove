@@ -22,6 +22,17 @@ Where to go deeper: **`docs/overview.md`** describes what each subsystem is for 
 
 The repository is complete as source and deliberately incomplete as a deployment: the packaged shards, the network weights, the KataGo binary and the human attempt log are all gitignored because they are generated, large, or private. Read [What a fork can run](#what-a-fork-can-run) below before installing anything — roughly half the pipeline reproduces outside this project and half does not, and it is better to know which half in advance. To understand the system rather than run it, `docs/methodology.md` is self-contained and needs no setup at all.
 
+### The corpus
+
+The generated problems are their own repository, [onlymove-data](https://github.com/typohh/onlymove-data), and every step reads it from a checkout beside this one:
+
+```bash
+git clone git@github.com:typohh/YoseTsumego.git onlymove
+git clone git@github.com:typohh/onlymove-data.git onlymove-data
+```
+
+To keep it elsewhere, set `ONLYMOVE_TSUMEGOS_DIR` to its path. Below, `tsumegos/` means that checkout.
+
 ### Runtimes
 
 - **Python 3.11 or newer** (developed on 3.12). NumPy and SciPy set that floor. Create a virtualenv, install `requirements.txt` into it, and invoke every pipeline step through it — `./.venv/bin/python3 -m pipeline.<step>` — so the repo-rooted absolute imports resolve.

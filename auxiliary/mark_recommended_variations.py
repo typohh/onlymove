@@ -61,8 +61,9 @@ USAGE
     ./.venv/bin/python3 auxiliary/mark_recommended_variations.py --apply
     ./.venv/bin/python3 auxiliary/mark_recommended_variations.py --unmark --apply
 
-`tsumegos/` is tracked in git, so `git checkout -- tsumegos/` reverts it.
-`tsumegos/broken/` is NOT tracked -- back it up before applying there.
+The corpus is tracked in its own repository (utils.paths.TSUMEGOS_DIR), so
+`git -C ../onlymove-data checkout -- .` reverts it. Its `broken/` is NOT
+tracked -- back it up before applying there.
 """
 import argparse
 import os

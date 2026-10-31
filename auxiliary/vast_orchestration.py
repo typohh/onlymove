@@ -36,6 +36,11 @@ from utils.paths import TSUMEGOS_DIR, tsumego_dir
 
 VASTAI_BIN = ".venv/bin/vastai"
 REMOTE_DIR = "/workspace/onlymove"
+# The remote keeps the corpus INSIDE its tree, wherever the local one lives, and
+# every remote launch says so: utils.paths defaults to a sibling checkout of the
+# corpus repository, which a box never has.
+REMOTE_TSUMEGOS_DIR = f"{REMOTE_DIR}/tsumegos"
+REMOTE_CORPUS_ENV = f"ONLYMOVE_TSUMEGOS_DIR={REMOTE_TSUMEGOS_DIR}"
 # Local bookkeeping only: step labels per instance and the per-GPU concurrency
 # cache. Losing it loses nothing billed — prune_state reconciles against vast.ai's
 # own instance list — so it lives in the gitignored scratch dir.
@@ -101,8 +106,8 @@ REMOTE_OUTPUT_DIRS = ["tsumegos", "attempts"]
 
 def _local_path(rel):
     """Where a remote-tree path lives locally. The remote keeps the corpus at
-    <REMOTE_DIR>/tsumegos; locally it is wherever utils.paths.TSUMEGOS_DIR
-    points, which need not be inside this checkout. Everything else is the
+    REMOTE_TSUMEGOS_DIR; locally it is wherever utils.paths.TSUMEGOS_DIR
+    points, by default the corpus repository's own checkout. Everything else is the
     same repo-relative path on both sides."""
     head, _, rest = rel.partition("/")
     if head == "tsumegos":
@@ -687,7 +692,7 @@ def _spawn_pipeline_session(base_ssh, idx, module, extra=""):
         f": > {log_path} && "
         f"cd {REMOTE_DIR} && "
         f"tmux new-session -d -s {session} "
-        f"'KATAGO_PATH={REMOTE_KATAGO_PATH} PYTHONUNBUFFERED=1 "
+        f"'KATAGO_PATH={REMOTE_KATAGO_PATH} {REMOTE_CORPUS_ENV} PYTHONUNBUFFERED=1 "
         f"python3 -u -m {module} {extra} "
         f">> {log_path} 2>&1'"
     )
@@ -1696,7 +1701,7 @@ def _ablate_stub_corpus(host, base_ssh, base_rsync, dry):
     if not os.path.isfile(retired):
         print(f"  {retired} not present locally; the fit refuses to run without it.")
         return False
-    remote_corpus = f"{REMOTE_DIR}/tsumegos"
+    remote_corpus = REMOTE_TSUMEGOS_DIR
     _run_or_show(base_ssh + [f"mkdir -p {remote_corpus}"], dry, capture_output=True)
     res = _run_or_show(base_rsync + [retired, f"root@{host}:{remote_corpus}/"],
                        dry, timeout=600)
@@ -1717,7 +1722,7 @@ def _ablate_stub_corpus(host, base_ssh, base_rsync, dry):
             manifest = os.path.join(tmp, f"corpus_files_{size}.txt")
             with open(manifest, "w") as fh:
                 fh.write("\n".join(names) + "\n")
-            remote_manifest = f"{REMOTE_DIR}/tsumegos/corpus_files_{size}.txt"
+            remote_manifest = f"{REMOTE_TSUMEGOS_DIR}/corpus_files_{size}.txt"
             print(f"  tsumegos/{size}/: {len(names)} names")
             res = _run_or_show(base_rsync + [manifest,
                                              f"root@{host}:{remote_manifest}"],
@@ -1726,7 +1731,7 @@ def _ablate_stub_corpus(host, base_ssh, base_rsync, dry):
                 print(f"  corpus manifest upload failed for size {size}.")
                 return False
             cmd = (f"python3 -c {shlex.quote(_STUB_CORPUS_PY)} "
-                   f"{REMOTE_DIR}/tsumegos/{size} {remote_manifest}")
+                   f"{REMOTE_TSUMEGOS_DIR}/{size} {remote_manifest}")
             res = _run_or_show(base_ssh + [cmd], dry, capture_output=True,
                                text=True, timeout=900)
             if res is not None:
@@ -1813,7 +1818,7 @@ def _ablate_launch(base_ssh, panel, concurrency, smoke_epochs, dry):
     # `ablations.run_panel` unbracketed and all. Asking here would match the
     # shell doing the asking, and report LAUNCHED whatever happened.
     cmd = (f": > {log} && cd {REMOTE_DIR} && "
-           f"(setsid nohup env PYTHONUNBUFFERED=1 "
+           f"(setsid nohup env {REMOTE_CORPUS_ENV} PYTHONUNBUFFERED=1 "
            f"python3 -u -m ablations.run_panel {panel} "
            f"--concurrency {concurrency}{extra} "
            f">> {log} 2>&1 < /dev/null &)")
@@ -1998,7 +2003,7 @@ def cmd_queue(args):
     if not sync_only:
         log = f"{REMOTE_DIR}/{ABLATE_LOG_PREFIX}_queue.log"
         cmd = (f": > {log} && cd {REMOTE_DIR} && "
-               f"(setsid nohup env PYTHONUNBUFFERED=1 "
+               f"(setsid nohup env {REMOTE_CORPUS_ENV} PYTHONUNBUFFERED=1 "
                f"python3 -u -m ablations.run_queue "
                f"--concurrency {concurrency} "
                f">> {log} 2>&1 < /dev/null &)")

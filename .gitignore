@@ -77,10 +77,9 @@ models/
 # back by the pipeline (the surgery scripts only ever WRITE here, recreating
 # the directory on demand), so there is nothing to version.
 /broken/
-/tsumegos/broken/
-# auxiliary/add_losing_lines --out-dir: repaired copies waiting to be merged
-# back over tsumegos/<size>/. Transient, and regenerable by re-running.
-/tsumegos/fixed/
+# The tsumego corpus is its own repository (typohh/onlymove-data), checked out
+# beside this one. A copy left or recreated here is never this repo's to track.
+/tsumegos/
 
 # Pipeline-extracted activations: per-cell trunk vectors, regenerable via
 # pipeline/extract_activations.py. Not for version control.
@@ -224,6 +223,4 @@ todo.md
 .*.swp
 *.swp
 
-# Derived work-splitting list, regenerated from the corpus on each fleet run.
-tsumegos/exclude_*.txt
 /axes/per_cell.stale-*

@@ -31,12 +31,14 @@ DB_SQL = os.path.join(DB_DIR, "d1.sql")
 # The tsumego corpus: <size>/<id>.sgf, with retired_ids.txt beside the size
 # directories (it belongs to the corpus — it is the set of ids the corpus may
 # never reissue) and the untracked new/ (generator staging), broken/
-# (quarantine) and fixed/ subtrees. Every reader and writer resolves it HERE, so
-# the corpus can live outside this checkout: ONLYMOVE_TSUMEGOS_DIR overrides
-# the in-repo default. The one non-Python reader, auxiliary/purge_tsumegos.mjs,
-# resolves the same variable the same way.
+# (quarantine) and fixed/ subtrees. It is its own repository
+# (github.com/typohh/onlymove-data), checked out BESIDE this one by default;
+# ONLYMOVE_TSUMEGOS_DIR points anywhere else. Every reader and writer resolves it
+# HERE. The one non-Python reader, auxiliary/purge_tsumegos.mjs, resolves the
+# same variable the same way.
 TSUMEGOS_DIR = os.path.abspath(os.path.expanduser(
-    os.environ.get("ONLYMOVE_TSUMEGOS_DIR") or os.path.join(PROJECT_ROOT, "tsumegos")))
+    os.environ.get("ONLYMOVE_TSUMEGOS_DIR")
+    or os.path.join(os.path.dirname(PROJECT_ROOT), "onlymove-data")))
 
 
 def tsumego_dir(size):

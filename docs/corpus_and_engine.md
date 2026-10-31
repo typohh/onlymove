@@ -4,6 +4,14 @@
 
 What a problem file guarantees, how those guarantees are enforced and re-verified, how the derived per-cell arrays line up against the SGF, and how KataGo is driven from both the pipeline and the analysis service. The *method* behind the two problem-set invariants is `methodology.md` §1.1 and §3.1; this document is the engineering that surrounds them. CLAUDE.md carries the short form and points here.
 
+## Where the corpus lives
+
+**The corpus is its own repository, `typohh/onlymove-data`, and this one holds no SGFs.** It is 220k small files that change with every generation run and every surgery pass, and it carried most of this repository's history by weight; split out, a code clone does not pay for it and a corpus change does not crowd the code log. The checkout sits beside this one (`../onlymove-data`): `<size>/<id>.sgf`, `retired_ids.txt` beside the size directories, and the untracked `new/` (generator staging), `broken/` (quarantine) and `fixed/` subtrees. **`retired_ids.txt` lives in the corpus repository, not here**, because it is the corpus's own constraint — the set of ids it may never reissue — and splitting it from the files it constrains would let the two be checked out at different points.
+
+**Every reader and writer resolves the location through `TSUMEGOS_DIR` / `tsumego_dir(size)` in `utils/paths.py`**, and `ONLYMOVE_TSUMEGOS_DIR` overrides it; `auxiliary/purge_tsumegos.mjs` resolves the same variable the same way. A Vast box keeps the corpus INSIDE its tree at `REMOTE_TSUMEGOS_DIR` and every remote launch sets the variable to it, so a box needs no second checkout; `_local_path` in `auxiliary/vast_orchestration.py` maps the remote path onto the local corpus for every upload and sync.
+
+**Commit ids recorded before the split resolve through `auxiliary/history/corpus_split_2026-10-31.commit-map`.** The split rewrote this repository's history, so a provenance record (`ablations/figures.json`, a panel's arm records) pinning a short id from before it names a commit that no longer exists here; the map gives its counterpart, and an all-zeros counterpart is a commit that touched only the corpus.
+
 ## Identity
 
 **Tsumego identity is symmetry-aware.** Filenames come from `get_orientation_invariant_hash` (`pipeline/generate_tsumegos.py`) — SHA-256 taken over all eight D4 transforms of the board, with `min()` picking a canonical orientation. The dataset therefore cannot contain two problems that are rotations or reflections of each other, and `tsumego_id` is that canonical hash truncated to 8 hex characters.

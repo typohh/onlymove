@@ -66,7 +66,7 @@ import { homedir } from 'node:os';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, '..');
 // The corpus root, resolved as utils/paths.py TSUMEGOS_DIR resolves it.
-const TSUMEGOS_DIR = resolve((process.env.ONLYMOVE_TSUMEGOS_DIR || join(ROOT, 'tsumegos'))
+const TSUMEGOS_DIR = resolve((process.env.ONLYMOVE_TSUMEGOS_DIR || join(ROOT, '..', 'onlymove-data'))
   .replace(/^~(?=$|\/)/, homedir()));
 const { rowHash, ID_HASH_SQL } = await import(
   join(ROOT, 'pwa', 'shared', 'sync-digest.js'));

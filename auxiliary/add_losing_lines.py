@@ -49,7 +49,8 @@ USAGE
         --out-dir /tmp/losing_test          # one problem, writes nothing in place
     ./.venv/bin/python3 -m auxiliary.add_losing_lines 9
 
-`tsumegos/` is tracked in git, so `git checkout -- tsumegos/9` reverts a run.
+The corpus is tracked in its own repository (utils.paths.TSUMEGOS_DIR), so
+`git -C ../onlymove-data checkout -- 9` reverts a run.
 
 The run is RESUMABLE with no state file, by whichever record of the work exists:
 in place, a problem that already has a played-out losing line is skipped — the

@@ -11,6 +11,8 @@ YoseTsumego / onlymove.net — a Go (Baduk/Weiqi) tsumego pipeline. KataGo gener
 3. **`pwa/`** — vanilla-JS ESM PWA built with esbuild, deployed as a Cloudflare Worker (`pwa/src/index.js`), with a D1 binding `DB` → database `tsumego-reports`. Schema is `pwa/schema.sql` (idempotent `CREATE … IF NOT EXISTS`); apply new tables/indexes to the remote D1 with `npx wrangler d1 execute tsumego-reports --remote --file=schema.sql`. Routes, tables and the client architecture are in `docs/` — see below.
 4. **`analysis_server/`** — a tiny HTTP server wrapping KataGo for the PWA's analysis fallback when SGFs lack embedded win-rate data. `server.py` runs on the cloud box (stdlib + sgfmill only — deployed with no repo beside it); `worker.py` runs on a fast machine and takes that box's work over while it is up.
 
+**The tsumego corpus is its own repository**, `typohh/onlymove-data`, checked out BESIDE this one as `../onlymove-data`; throughout these documents `tsumegos/` names that checkout. **Resolve it only through `TSUMEGOS_DIR` / `tsumego_dir(size)` (`utils/paths.py`; `ONLYMOVE_TSUMEGOS_DIR` overrides) — never join a corpus path yourself**, and commit corpus changes in THAT repository. `docs/corpus_and_engine.md`.
+
 Plus `auxiliary/` (diagnostics, surgery scripts, the rating-model research surface, and `vast_orchestration.py`, which rents Vast.ai GPU instances for the heavy generation steps; not part of the main flow) and `ablations/` (repeatable seeded measurements against what SHIPS — the rating fit, the rank map, the client's estimators, the activation encoder; the figures the docs and `pwa/about.html` quote; see its README for the contract and for the split against `auxiliary/`).
 
 ### Where the detail lives
