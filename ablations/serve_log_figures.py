@@ -75,7 +75,7 @@ from ablations._figures import AblationError, Figure, require  # noqa: E402
 # either, and two copies of the number would let this measurement describe a
 # population the mapping never fitted.
 from pipeline.map_rating_to_rank import MIN_ATTEMPTS  # noqa: E402
-from utils.constants import RETIRED_IDS_PATH, read_retired_ids  # noqa: E402
+from utils.constants import RETIRED_IDS_PATH, not_ignored_sql, read_retired_ids  # noqa: E402
 from utils.paths import DB_SQLITE  # noqa: E402
 from utils.rating.fit_rank_curves import CALIBRATION_P, fit_user_rating  # noqa: E402
 from utils.rating.ratings_io import (  # noqa: E402
@@ -166,7 +166,7 @@ def _load_histories():
         require(not missing, f"tsumego_reports is missing column(s) {missing}")
         rows = con.execute(
             "SELECT created_at, id, user_id, problem, success FROM tsumego_reports "
-            "WHERE is_repeat = 0").fetchall()
+            f"WHERE is_repeat = 0 AND {not_ignored_sql()}").fetchall()
     finally:
         con.close()
     require(rows, "tsumego_reports holds no first-time attempts (is_repeat = 0)")

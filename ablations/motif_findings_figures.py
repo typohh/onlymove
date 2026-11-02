@@ -58,6 +58,7 @@ if PROJECT_ROOT not in sys.path:
 from ablations._figures import AblationError, Figure, require  # noqa: E402
 from pipeline import package_for_pwa as pkg  # noqa: E402
 from utils.katago.coords import gtp_to_xy  # noqa: E402
+from utils.constants import not_ignored_sql  # noqa: E402
 from utils.paths import DB_SQLITE  # noqa: E402
 
 TIER = "about"
@@ -183,7 +184,7 @@ def load_histories(pub):
         # times at the id frontier, and the client's record is in event order.
         cur = con.execute(
             "SELECT user_id, problem, size, success, move FROM tsumego_reports "
-            " WHERE is_repeat = 0 ORDER BY user_id, created_at, id")
+            f" WHERE is_repeat = 0 AND {not_ignored_sql()} ORDER BY user_id, created_at, id")
         by_user = {}
         for uid, tid, size, ok, move in cur:
             tid = str(tid)

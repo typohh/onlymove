@@ -64,6 +64,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
+from utils.constants import not_ignored_sql  # noqa: E402
 from utils.katago.coords import gtp_to_xy  # noqa: E402
 from utils.rating.model_constants import INPUT_DROPOUT, K_AXES, SIZES  # noqa: E402
 from utils.rating.fitted_projection import (  # noqa: E402
@@ -83,7 +84,7 @@ def load_picked_errors():
     try:
         rows = con.execute(
             "SELECT size, problem, move, COUNT(*) FROM tsumego_reports "
-            "WHERE success = 0 AND is_repeat = 0 AND move IS NOT NULL AND move != '' "
+            f"WHERE success = 0 AND is_repeat = 0 AND move IS NOT NULL AND move != '' AND {not_ignored_sql()} "
             "GROUP BY size, problem, move").fetchall()
     finally:
         con.close()

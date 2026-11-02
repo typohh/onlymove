@@ -68,6 +68,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
+from utils.constants import not_ignored_sql  # noqa: E402
 from utils.paths import TSUMEGOS_DIR  # noqa: E402
 from utils.katago.add_variations import parse_eval_comment, parse_eval_visits  # noqa: E402
 from utils.katago.coords import sgf_to_gtp, gtp_to_xy  # noqa: E402
@@ -592,10 +593,10 @@ def main(argv=None):
     con = sqlite3.connect(DB_PATH)
     rows = con.execute(
         "SELECT problem, size, move, user_id FROM tsumego_reports "
-        "WHERE success = 0 AND is_repeat = 0 AND move IS NOT NULL").fetchall()
+        f"WHERE success = 0 AND is_repeat = 0 AND move IS NOT NULL AND {not_ignored_sql()}").fetchall()
     n_wrong_total = con.execute(
         "SELECT COUNT(*) FROM tsumego_reports "
-        "WHERE success = 0 AND is_repeat = 0").fetchone()[0]
+        f"WHERE success = 0 AND is_repeat = 0 AND {not_ignored_sql()}").fetchone()[0]
     con.close()
     print(f"\nwrong, non-repeat attempts                 : {n_wrong_total:,}")
     print(f"  ... with a recorded move                 : {len(rows):,} "

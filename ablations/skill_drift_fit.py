@@ -40,6 +40,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 from ablations._figures import require  # noqa: E402
+from utils.constants import not_ignored_sql  # noqa: E402
 from utils.paths import DB_SQLITE  # noqa: E402
 
 PWA_ROOT = os.path.join(PROJECT_ROOT, "pwa")
@@ -73,7 +74,7 @@ def load_users(params):
     try:
         rows = con.execute(
             "SELECT user_id, problem, size, success, created_at FROM tsumego_reports "
-            "WHERE is_repeat = 0 ORDER BY user_id, id").fetchall()
+            f"WHERE is_repeat = 0 AND {not_ignored_sql()} ORDER BY user_id, id").fetchall()
     finally:
         con.close()
     users, cur, cur_id, dropped = [], None, None, 0

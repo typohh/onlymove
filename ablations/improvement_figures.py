@@ -57,6 +57,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 from ablations._figures import AblationError, Figure, require  # noqa: E402
+from utils.constants import not_ignored_sql  # noqa: E402
 from utils.paths import DB_SQLITE  # noqa: E402
 from utils.rating.rank_surveys import SERVERS, rank_band, rank_to_value  # noqa: E402
 from utils.rating.ratings_io import load_declaration_exclusions  # noqa: E402
@@ -107,7 +108,7 @@ def usable_attempts(params, users=None):
         rows = con.execute(
             "SELECT user_id, problem, success, created_at FROM ("
             "  SELECT MIN(id) AS id, user_id, problem, success, created_at"
-            "    FROM tsumego_reports WHERE is_repeat = 0"
+            f"    FROM tsumego_reports WHERE is_repeat = 0 AND {not_ignored_sql()}"
             "   GROUP BY user_id, problem, created_at)"
             " ORDER BY user_id, id").fetchall()
     finally:
@@ -194,7 +195,7 @@ def measure_survey(params):
     try:
         rows = con.execute(
             "SELECT user_id, server, rank, created_at FROM rank_surveys "
-            f"WHERE server IN ({','.join('?' * len(SERVERS))}) ORDER BY id",
+            f"WHERE server IN ({','.join('?' * len(SERVERS))}) AND {not_ignored_sql()} ORDER BY id",
             SERVERS).fetchall()
     finally:
         con.close()

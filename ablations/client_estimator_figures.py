@@ -56,6 +56,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 from ablations._figures import AblationError, Figure, require  # noqa: E402
+from utils.constants import not_ignored_sql  # noqa: E402
 from utils.paths import DB_SQLITE  # noqa: E402
 
 TIER = "about"
@@ -207,7 +208,7 @@ def community_buffers(corpus, buffer_cap):
             .isoformat().replace("+00:00", "Z")
         active = con.execute(
             "SELECT user_id, COUNT(*) FROM tsumego_reports "
-            " WHERE is_repeat = 0 AND created_at >= ? GROUP BY user_id",
+            f" WHERE is_repeat = 0 AND created_at >= ? AND {not_ignored_sql()} GROUP BY user_id",
             (cutoff,)).fetchall()
         require(active, f"no first-time attempts in the {WINDOW_DAYS}-day window")
         users = []

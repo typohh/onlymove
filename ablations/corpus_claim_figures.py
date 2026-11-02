@@ -63,7 +63,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 from ablations._figures import Figure, require  # noqa: E402
-from utils.constants import ALL_BOARD_SIZES  # noqa: E402
+from utils.constants import ALL_BOARD_SIZES, not_ignored_sql  # noqa: E402
 from utils.paths import DB_SQLITE  # noqa: E402
 
 TIER = "about"
@@ -121,7 +121,8 @@ def _never_attempted(ids):
     con = sqlite3.connect(f"file:{DB_SQLITE}?mode=ro", uri=True)
     try:
         attempted = {r[0] for r in con.execute(
-            "SELECT DISTINCT problem FROM tsumego_reports WHERE is_repeat = 0")}
+            "SELECT DISTINCT problem FROM tsumego_reports "
+            f"WHERE is_repeat = 0 AND {not_ignored_sql()}")}
     finally:
         con.close()
     require(attempted, "tsumego_reports holds no first-time attempts")
