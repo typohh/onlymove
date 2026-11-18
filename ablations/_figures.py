@@ -162,6 +162,22 @@ def panel_regime(records, ramp_may_vary=False, mutual_may_vary=False,
     require(len(floors) == 1,
             f"the panel's arms drew their floors from {sorted(floors)} — the "
             f"panel straddles a baseline change")
+    # SO IS WHAT IS HELD ASIDE AND WHETHER THE CURVE IS CALIBRATED ON IT, per
+    # stop unit — a panel may score some arms on held rows and others on held
+    # problems, but within a unit one share and one switch. A record that
+    # predates these keys held 3% aside and was not calibrated, which is what
+    # the defaults read; its stop unit is in its config.
+    held = {}
+    for r in records.values():
+        mt = r["metrics"]
+        unit = str(mt.get("stop_unit", r.get("config", {}).get("stop_unit", "row")))
+        held.setdefault(unit, set()).add(
+            (round(float(mt.get("stop_row_frac", 0.03)), 6),
+             bool(mt.get("calibrated", False))))
+    for unit, vals in sorted(held.items()):
+        require(len(vals) == 1,
+                f"the panel's {unit}-held arms ran (held share, calibrated) = "
+                f"{sorted(vals)} — the panel straddles a baseline change")
     # SO ARE THE ABILITY PRIOR AND THE BASE-RATE START. A record that predates
     # either knob ran without it. The panel that sweeps them by design
     # (`prior_start`) says so and reads them off its own records.

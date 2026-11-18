@@ -44,6 +44,7 @@ PRODUCERS = (
     "rank_map_arm_figures",
     "rank_calibration_figures",
     "published_params_figures",
+    "calibration_figures",
     "improvement_figures",
     "motif_null_figures",
     "axes_fit_figures",

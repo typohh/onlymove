@@ -81,17 +81,17 @@ Writes:
   ratings/<size>/tsumego_slopes.csv     tsumego_id, slope
   ratings/<size>/tsumego_floors.csv     tsumego_id, floor
   ratings/user_theta.csv                profile, theta, n_attempts
-  ratings/rating_constants.json         {"fat_finger_rate": lambda, "slope_scale"}
+  ratings/rating_constants.json         {"fat_finger_rate": lambda, "slope_scale",
+                                         "calibration": the held-row fit}
   axes/per_problem.csv                  tsumego_id, size, embed_0..embed_{K-1}
   axes/axes.npz                         the axis map + its content-hash version
 
-SLOPE_SCALE IS 1.0, within noise of this model's measured optimum. Swept on
-held-out users and split by whether training saw the problem — the split is
-necessary, since a never-trained problem is priced from the feature prior alone
-and honestly wants a shallower slope, so pooling those rows in drags the optimum
-down. Measured optimum 0.90 on both `all` and the seen partition; 1.0 costs 0.2
-mnat against it, inside the 0.85 mnat seed noise. No post-hoc multiplier is
-applied: slopes ship as fitted.
+THE SHIPPED CURVE IS CALIBRATED ON HELD-ASIDE ROWS. A third of the rows never
+train the fit; on them, with every position frozen, `calibrate_on_held` fits one
+floor, the lapse and the slope's scale and offset, and the scale and offset are
+folded into the slopes and ratings written here. `slope_scale` stays 1.0 in
+rating_constants.json: a reader applies the curve as written, with no multiplier
+beside it.
 
 Two things this does NOT produce. `axes/per_cell/` — a K-vector for every legal
 cell, needed because the client scores the move the user PICKED and not only the
@@ -139,9 +139,9 @@ from utils.rating.tail_agreement import (  # noqa: E402
     TAIL_HINGE, hinged_r, tail_weight as tail_weight_np)
 
 # The fit runs a FIXED budget under a cosine decay of both rates to zero, and the
-# final epoch is what ships. Nothing is selected on a stop split, which is why the
-# shipped fit holds none aside (STOP_ROW_FRAC): a comparison arm passes a fraction
-# and gets the split measured and printed as the record of where it got to. The decay is what makes the budget a real choice rather
+# final epoch is what ships. Nothing is selected on the held-aside rows: they are
+# printed as the record of where the fit got to and then calibrate the curve's
+# levels (STOP_ROW_FRAC). The decay is what makes the budget a real choice rather
 # than a stopping rule in disguise. Under a constant rate the fit wanders inside a
 # band at its end and the shipped value is whichever point of that band the last
 # epoch lands on, so a patience rule reading the split selects an epoch out of
@@ -272,10 +272,21 @@ MIN_BOTH_OUTCOMES = 1
 # user id has that form, and a reader summing attempts is not moved by them.
 RANDOM_USER_WEIGHT = 0.0
 STRONG_USER_WEIGHT = 0.0
-STOP_ROW_FRAC = 0.0              # the shipped fit trains on every row: the budget
-                                 # is fixed, so a held-aside split decides nothing
-                                 # and only withholds data. Comparison arms pass
-                                 # their own fraction (ablations.ablation_mirt)
+# A THIRD OF THE ROWS IS HELD ASIDE, AND THE CURVE'S LEVELS ARE FITTED ON IT.
+# The rows a fit trains on cannot tell it the floor or the lapse. A player sits
+# high on the curve largely BECAUSE their training attempts succeeded, and a
+# problem sits low under a player because those attempts failed, so the two
+# ends of the curve are samples selected on the very outcomes being fitted: at
+# the top the training rows fail less often than even a zero lapse predicts,
+# and the fit drives the lapse to zero and leaves the floor wherever the seed
+# puts it. Rows that placed nobody carry the real rates. So the fit runs as it
+# is on the other two thirds, and `calibrate_on_held` then fits the floor, the
+# lapse and the slope's scale and offset on the held third with every position
+# frozen. Nothing stops on the split and the budget is still fixed.
+# Calibrating on the TRAINING rows instead is worse than not calibrating.
+STOP_ROW_FRAC = 1.0 / 3.0
+CALIBRATE = True
+CALIB_NODES = 21                 # Gauss-Hermite nodes over a player's uncertainty
 # The `spread` holdout (an ablation path; the shipped fit holds out rows). A
 # per-problem departure from the fitted curve is visible only as outcomes that
 # AGREE across different users on one problem, so it is drawn among problems
@@ -290,14 +301,13 @@ LABELS = os.path.join(AXES_DIR, "labels.json")
 
 
 RAMP_SHARPNESS = 10.0
-# THE FLOOR IS A ROW OF THE TRUNK'S HEAD, like difficulty and slope. On its own
-# that floor lands somewhere different every seed — served attempts sit near
-# each problem's 80% point and say almost nothing about the curve below it —
-# but under the ability prior and the base-rate start below it reproduces. A
-# linear map of the inputs also reproduces, by having no room to drift, but it
-# lets a heavy user be parked far below every problem and explained by floors.
-# "linear", "bot" and the other sources remain for comparison.
-FLOOR_MODE = "trunk"
+# THE FLOOR IS ONE VALUE FOR EVERY PROBLEM, and the value that ships is the one
+# `calibrate_on_held` fits on the held-aside rows, not the one the fit trains.
+# The data cannot support a floor per problem: almost no problem has an attempt
+# from far enough below it to say where its own curve bottoms out, so a floor
+# read off the trunk lands somewhere different every seed. "trunk", "linear",
+# "bot" and the other sources remain for comparison and are not calibrated.
+FLOOR_MODE = "global"
 # ABILITY HAS A POPULATION PRIOR WHOSE VARIANCE IS THE DATA'S OWN (Laplace-EM:
 # each epoch sigma^2 = mean over users of (theta - mean)^2 + 1/I_u), and the fit
 # STARTS AT THE POPULATION'S CLEARANCE (one ability shift at initialisation,
@@ -1026,6 +1036,93 @@ def report_bank_identity(g_np, tgt, ok, prob_idx, k_axes=K_AXES):
     return rows
 
 
+def calibrate_on_held(a_h, d_h, y_h, u_h, a_t, d_t, u_t, theta):
+    """The curve's levels and the slope's scale, fitted on rows the fit never
+    trained on, with every position frozen.
+
+    `a`, `d` are each row's slope and ability-minus-difficulty AS TRAINED, `u`
+    its user index, `_h` the held rows and `_t` the training rows; `theta` the
+    fitted abilities. The calibrated curve is
+
+        P = c + (1 - c - lam) * E[ sigmoid(m * a * (d + kappa * s_u * eps) + k) ]
+
+    with eps standard normal: the expectation is over where the player's ability
+    really is, s_u being the spread their own training rows leave it with
+    (1 / (I_u + 1 / sigma^2), the population variance sigma^2 from the same
+    fixed point the ability prior uses) and kappa one fitted multiplier on it.
+    A player placed from a handful of attempts is not AT their fitted ability,
+    and scoring them as if they were charges the difference to the lapse and the
+    floor; averaging over it leaves `c` and `lam` as the levels of the curve at a
+    KNOWN ability, which is what a reader that carries its own posterior over
+    ability (the client's rank estimate) needs. Five numbers, no cutoff and no
+    constant: which rows count as the curve's ends is never decided.
+
+    Returns the five numbers and the held loss as trained positions score under
+    the plain four-number curve and under this one."""
+    def T(x):
+        return torch.tensor(np.asarray(x, np.float64))
+    gx, gw = np.polynomial.hermite_e.hermegauss(CALIB_NODES)
+    gx, gw = T(gx), T(gw / gw.sum())
+    a, d, y = T(a_h), T(d_h), T(y_h)
+
+    def curve(par, a, d, su):
+        lam = 0.5 * torch.sigmoid(par[3])
+        c = (1.0 - 2.0 * lam) * torch.sigmoid(par[2])
+        if su is None:
+            s = torch.sigmoid(par[0] * a * d + par[1])
+        else:
+            w = torch.exp(par[4]) * su
+            s = (torch.sigmoid(par[0] * a[:, None]
+                               * (d[:, None] + w[:, None] * gx[None])
+                               + par[1]) * gw[None]).sum(1)
+        return (c + (1.0 - c - lam) * s).clamp(1e-9, 1.0 - 1e-9), c, lam
+
+    def fit(start, su):
+        par = [T(v).requires_grad_() for v in start]
+        free = par if su is not None else par[:4]
+        opt = torch.optim.LBFGS(free, max_iter=500, line_search_fn="strong_wolfe")
+
+        def closure():
+            opt.zero_grad()
+            p = curve(par, a, d, su)[0]
+            loss = -(y * p.log() + (1.0 - y) * (1.0 - p).log()).mean()
+            loss.backward()
+            return loss
+        opt.step(closure)
+        with torch.no_grad():
+            p, c, lam = curve(par, a, d, su)
+            loss = float(-(y * p.log() + (1.0 - y) * (1.0 - p).log()).mean())
+        return [float(v) for v in par], float(c), float(lam), loss, p.numpy()
+
+    # The plain curve first, from the fit as it stands (scale 1, offset 0, the
+    # levels mid-range). It is the curve each player's information is read under.
+    par0, c0, l0, loss_plain, _ = fit([1.0, 0.0, 0.0, 0.0, 0.0], None)
+    s_t = 1.0 / (1.0 + np.exp(-np.clip(par0[0] * a_t * d_t + par0[1], -35, 35)))
+    p_t = np.clip(c0 + (1.0 - c0 - l0) * s_t, 1e-9, 1.0 - 1e-9)
+    dp = (1.0 - c0 - l0) * par0[0] * a_t * s_t * (1.0 - s_t)
+    info = np.bincount(u_t, weights=dp ** 2 / (p_t * (1.0 - p_t)),
+                       minlength=len(theta))
+    sig2 = float(theta.var())
+    for _ in range(200):
+        sig2 = float(np.mean((theta - theta.mean()) ** 2
+                             + 1.0 / (info + 1.0 / sig2)))
+    s_u = np.sqrt(1.0 / (info + 1.0 / sig2))
+    par, c, lam, loss, p = fit(par0, T(s_u[u_h]))
+    if not np.isfinite(loss) or loss > loss_plain + 1e-6:
+        raise RuntimeError(
+            f"calibration did not converge: held loss {loss} under the "
+            f"uncertainty-aware curve against {loss_plain} under the plain one, "
+            f"which it contains")
+    top, bot = p >= np.quantile(p, 0.9), p <= np.quantile(p, 0.05)
+    return {"slope_mult": par[0], "offset": par[1], "floor": c, "lapse": lam,
+            "kappa": float(np.exp(par[4])), "held_rows": int(len(y_h)),
+            "held_loss_plain": loss_plain, "held_loss": loss,
+            "plain_floor": c0, "plain_lapse": l0,
+            "ability_sigma": sig2 ** 0.5,
+            "top10_fail": [float(1.0 - y_h[top].mean()), float(1.0 - p[top].mean())],
+            "bottom5_success": [float(y_h[bot].mean()), float(p[bot].mean())]}
+
+
 def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         lr_net=LR_NET, lr_field=LR_FIELD,
         v_ridge=V_RIDGE, ortho_rating=ORTHO_RATING, ortho_mode="per_tail",
@@ -1034,6 +1131,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         random_user_weight=RANDOM_USER_WEIGHT,
         strong_user_weight=STRONG_USER_WEIGHT,
         teach_weight=TEACH_WEIGHT, stop_row_frac=STOP_ROW_FRAC,
+        calibrate=CALIBRATE,
         pca_dim=PCA_DIM, blocks=PRODUCTION_BLOCKS, act_source="store",
         stop_unit="row",
         split_seed=None, pca_seed=None, init_seed=None, stream_seed=None,
@@ -1208,6 +1306,14 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
     i_stop = torch.tensor(np.where(is_stop)[0], device=device)
     has_stop = bool(is_stop.any())
     print(f"  stop signal: {int(is_stop.sum())} rows held aside", flush=True)
+    if calibrate and (not has_stop or stop_unit != "row" or floor_mode != "global"
+                      or link != "sigmoid"):
+        # Calibration reads ROWS held out of a fit with one floor; an arm that
+        # holds out something else, or nothing, has to say it is not calibrated.
+        raise ValueError(
+            "calibrate needs rows held aside (stop_row_frac > 0, stop_unit "
+            "'row'), the global floor and the sigmoid link; pass "
+            "calibrate=False for an arm without them")
 
     bank_tgt, bank_ok, bank_spec = load_bank(key_idx, k_axes, bank_proxies, bank_labels)
     t_tgt = torch.tensor(bank_tgt, dtype=torch.float32, device=device)
@@ -1740,7 +1846,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
     m.train(False)
     bce_stop_no_axes, slope_sweep = None, []
     with torch.no_grad():
-        # Scored only where rows were held aside; the shipped fit holds none.
+        # Scored only where rows were held aside.
         if has_stop:
             b_s, a_s, c_s, _ = m.problem_params(tfeat[tp[i_stop]])
             th_s = m.theta(tu[i_stop]).squeeze(-1)
@@ -1827,9 +1933,53 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
     # KataGo-hard tail nobody clears, and the rank coordinate is unbounded. What
     # distinguishes a real difficulty from a collapsed slope is the SLOPE
     # distribution and the share at the clamp, printed below.
-    rating = b_np + clear_logit_vec(c_np, lam) / np.maximum(a_np, 1e-6)
     theta_all = m.theta.weight.detach().cpu().numpy().ravel()
     theta = theta_all[:n_users]
+    calibration = None
+    if calibrate:
+        # THE CURVE THAT SHIPS IS THE ONE THE HELD ROWS FIT. Its scale and offset
+        # are folded into each problem's slope and difficulty — m*a*(theta - b) + k
+        # is a*'(theta - b') with a' = m*a and b' = b - k/(m*a), exactly — so a
+        # reader applies the ordinary curve and no multiplier ships beside it.
+        # Abilities are untouched: they are in the units difficulty already had.
+        tr_np = ~is_stop
+        a64, b64 = a_np.astype(np.float64), b_np.astype(np.float64)
+        th64 = theta.astype(np.float64)
+        calibration = calibrate_on_held(
+            a64[prob_idx[is_stop]], (th64[user_idx] - b64[prob_idx])[is_stop],
+            y[is_stop].astype(np.float64), user_idx[is_stop],
+            a64[prob_idx[tr_np]], (th64[user_idx] - b64[prob_idx])[tr_np],
+            user_idx[tr_np], th64)
+        cal = calibration
+        calibration["held_loss_as_trained"] = bce_stop_no_axes
+        calibration["as_trained"] = {"floor": float(c_np.mean()), "lapse": lam}
+        print(f"  calibrated on {cal['held_rows']} held rows: floor "
+              f"{cal['floor']:.3f} (as trained {c_np.mean():.3f}), lapse "
+              f"{cal['lapse']:.3f} (as trained {lam:.3f}), slope x"
+              f"{cal['slope_mult']:.3f}, offset {cal['offset']:+.3f}, "
+              f"uncertainty x{cal['kappa']:.2f}", flush=True)
+        print(f"    held loss, no axes: as trained {bce_stop_no_axes:.5f} | "
+              f"plain curve {cal['held_loss_plain']:.5f} (floor "
+              f"{cal['plain_floor']:.3f}, lapse {cal['plain_lapse']:.3f}) | "
+              f"shipped {cal['held_loss']:.5f}", flush=True)
+        print(f"    held rows at the curve's ends, actual / predicted: top 10% "
+              f"fail {cal['top10_fail'][0]:.3f} / {cal['top10_fail'][1]:.3f} | "
+              f"bottom 5% succeed {cal['bottom5_success'][0]:.3f} / "
+              f"{cal['bottom5_success'][1]:.3f}", flush=True)
+        sd_th = float(theta.std())
+        print(f"    median slope x player sd: as trained "
+              f"{np.median(a_np) * sd_th:.2f} -> shipped "
+              f"{np.median(a_np) * cal['slope_mult'] * sd_th:.2f}", flush=True)
+        if not cal["slope_mult"] > 0:
+            raise RuntimeError(f"calibrated slope scale {cal['slope_mult']} is not positive")
+        a_fit = np.maximum(a64, 1e-6)
+        b_np = (b64 - cal["offset"] / (cal["slope_mult"] * a_fit)).astype(b_np.dtype)
+        a_np = (cal["slope_mult"] * a64).astype(a_np.dtype)
+        c_np = np.full_like(c_np, cal["floor"])
+        # Rounded as rating_constants.json states it, so the ratings below are
+        # the 80% points under exactly the lapse a reader is handed.
+        lam = round(float(cal["lapse"]), 4)
+    rating = b_np + clear_logit_vec(c_np, lam) / np.maximum(a_np, 1e-6)
     theta_synthetic = {("strong" if first == strong_from else "random"):
                        float(theta_all[uid]) for _w, first, uid in synthetic}
 
@@ -1867,7 +2017,9 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
                  ).to_csv(os.path.join(out_dir, "user_theta.csv"), index=False)
     with open(os.path.join(out_dir, "rating_constants.json"), "w") as f:
         json.dump({"fat_finger_rate": round(lam, 4), "slope_scale": 1.0,
-                   "scale_fit": "none_shipped_as_fitted"}, f, indent=2)
+                   "scale_fit": ("held_row_calibration_folded_in" if calibrate
+                                 else "none_shipped_as_fitted"),
+                   "calibration": calibration}, f, indent=2)
 
     os.makedirs(axes_dir, exist_ok=True)
     rows = {"tsumego_id": [k[1] for k in keys], "size": [k[0] for k in keys]}
@@ -1915,6 +2067,9 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
     torch.save({"trunk": m.trunk.state_dict(), "head": m.head.state_dict(),
                 "g_lin": m.g_lin.state_dict(),
                 "floor_mode": floor_mode,
+                # The head's rows are the fit AS TRAINED; the shipped slopes,
+                # ratings, floor and lapse are those under this calibration.
+                "calibration": calibration,
                 "floor_lin": (m.floor_lin.state_dict()
                               if hasattr(m, "floor_lin") else None),
                 "b_mu": m.b_mu, "b_sd": m.b_sd,
@@ -1972,6 +2127,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         "init_seed": int(seed if init_seed is None else init_seed),
         "stream_seed": None if stream_seed is None else int(stream_seed),
         "stop_bce_no_axes": bce_stop_no_axes,
+        "calibration": calibration,
         "slope_scale_sweep": slope_sweep,
         "slope_pct": {str(p): float(np.percentile(a_np, p))
                       for p in (0.1, 1, 5, 50, 95, 99, 99.9)},

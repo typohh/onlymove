@@ -81,7 +81,7 @@ def load_size_value_maps(ratings_dir, size, *, keep=None, missing_ok=False):
 def load_lapse(ratings_dir):
     """The global 4PL ceiling λ (fat-finger / lapse rate) the shipped ratings were
     derived under and the client uses. train_mirt writes it to rating_constants.json
-    (the authoritative source — it learns λ jointly); fit_population_constants only
+    (the authoritative source — it calibrates λ on its held-aside rows); fit_population_constants only
     reads it THROUGH into population_constants.json. So prefer rating_constants.json,
     read population_constants.json only where rating_constants.json is absent (the
     published pwa/tsumegos/ carries only population_constants.json) — otherwise a re-run of

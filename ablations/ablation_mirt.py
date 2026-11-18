@@ -64,11 +64,33 @@ from utils.rating.model_constants import (  # noqa: E402
     K_AXES, PCA_DIM, PRODUCTION_BLOCKS)
 
 DEV_RUNS = os.path.join(PROJECT_ROOT, "ablations", "dev_runs")
-# What every arm holds aside to be scored on — rows or whole problems, as its
-# stop unit says. The shipped fit holds nothing aside, so this is the arm
-# runner's own and is not part of an arm's config: a shipped arm's config stays
-# empty while it is still measured.
+# What an arm holds aside, by its stop unit.
+#
+# A ROW arm holds the SHIPPED share of rows (`train_mirt.STOP_ROW_FRAC`) and is
+# calibrated on them exactly as the production fit is, so a `{}` arm is still
+# the shipped recipe end to end: its record carries the calibrated levels beside
+# the as-trained ones (`metrics.calibration`).
+#
+# A PROBLEM arm holds this fraction of whole problems and no rows, so every row
+# of the remaining problems trains it and there is nothing to calibrate on: the
+# held problems' rows were never drawn at random from the fit's own players and
+# problems, and calibrating on them would fit the curve's levels to the feature
+# side's extrapolation error. Such an arm runs UNCALIBRATED and is scored as
+# trained; its record says so (`metrics.calibrated` false). The `spread` unit
+# draws its own sets and is uncalibrated for the same reason.
+#
+# The effective share, unit and calibration switch are written into every
+# record's metrics, and `panel_regime` requires one such triple per stop unit
+# across the arms a producer reads.
 HELD_ASIDE_FRAC = 0.03
+
+
+def held_out_kwargs(cfg):
+    """The (stop_row_frac, calibrate) an arm runs with, from its stop unit."""
+    if cfg.get("stop_unit", "row") == "row":
+        return {"stop_row_frac": train_mirt.STOP_ROW_FRAC,
+                "calibrate": train_mirt.CALIBRATE}
+    return {"stop_row_frac": HELD_ASIDE_FRAC, "calibrate": False}
 
 
 def _sha16(path):
@@ -144,9 +166,14 @@ def run_arm(panel, arm, cfg, force=False):
     os.makedirs(arm_dir, exist_ok=True)
 
     pins = snapshot_pins(cfg)
+    held = held_out_kwargs(cfg)
     metrics = train_mirt.run(out_dir=os.path.join(arm_dir, "ratings"),
                              axes_dir=os.path.join(arm_dir, "axes"),
-                             stop_row_frac=HELD_ASIDE_FRAC, **cfg)
+                             **held, **cfg)
+    # The held-out regime, beside the knobs run() records itself.
+    metrics["stop_unit"] = str(cfg.get("stop_unit", "row"))
+    metrics["stop_row_frac"] = float(held["stop_row_frac"])
+    metrics["calibrated"] = bool(held["calibrate"])
     record = {"panel": panel, "arm": arm, "config": cfg,
               "pins": pins, "metrics": metrics}
     tmp = meta_path + ".tmp"

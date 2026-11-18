@@ -1,0 +1,49 @@
+{
+  "panel": "levels",
+  "description": "methodology 1.5 — whether the curve's two levels, calibrated on the held rows, are the same from one fit to the next where the levels the fit trains are not. EVERY ARM IS THE SHIPPED FIT, row-held and calibrated as production is, so each record carries the as-trained floor and lapse, the plain four-number calibration and the shipped uncertainty-averaged one side by side (metrics.calibration), with the held loss each scores. TWO SETS. draw_s0..s5 move everything with the seed — initialization, feature basis and the held draw — which is what a MAGNITUDE wants: the spread of the calibrated floor and lapse across them is the reproducibility of what ships, read beside the spread of the as-trained pair. init_s1..s5 pin the held draw and the feature basis to seed 0's (split_seed 0, pca_seed 0) and move the initialization alone; with draw_s0 as their sixth member they are scored on the SAME held rows, so the held-loss gains (calibrated over as trained, uncertainty-averaged over plain) are paired within the set and the levels' scatter there is the fit's alone, the draw's removed. Read: cross-seed sd and range of floor and lapse under each of the three curves; the sign agreement of both gains across seeds; whether the plain curve reads both levels higher at every seed; the calibrated slope multiplier's spread. The contrast against calibrating on the TRAINING rows is not an arm here: it needs the calibration pointed at the other side of the split, a knob the trainer does not expose.",
+  "arms": {
+    "draw_s0": {
+      "seed": 0
+    },
+    "draw_s1": {
+      "seed": 1
+    },
+    "draw_s2": {
+      "seed": 2
+    },
+    "draw_s3": {
+      "seed": 3
+    },
+    "draw_s4": {
+      "seed": 4
+    },
+    "draw_s5": {
+      "seed": 5
+    },
+    "init_s1": {
+      "seed": 1,
+      "split_seed": 0,
+      "pca_seed": 0
+    },
+    "init_s2": {
+      "seed": 2,
+      "split_seed": 0,
+      "pca_seed": 0
+    },
+    "init_s3": {
+      "seed": 3,
+      "split_seed": 0,
+      "pca_seed": 0
+    },
+    "init_s4": {
+      "seed": 4,
+      "split_seed": 0,
+      "pca_seed": 0
+    },
+    "init_s5": {
+      "seed": 5,
+      "split_seed": 0,
+      "pca_seed": 0
+    }
+  }
+}

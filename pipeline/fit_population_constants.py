@@ -244,9 +244,9 @@ def cold_solve_logit(theta, rating, slope, floor):
     return float(np.log(P / (1 - P)))
 
 
-# Fat-finger (lapse) rate λ — the 4PL upper-asymptote slip floor — is no longer fit here.
-# pipeline.train_mirt LEARNS it jointly with the rating model (a single global ceiling on
-# the success curve) and writes it to ratings/rating_constants.json; main() reads it through
+# Fat-finger (lapse) rate λ — the 4PL upper-asymptote slip floor — is not fit here.
+# pipeline.train_mirt calibrates it on the rows its fit held aside (a single global ceiling
+# on the success curve) and writes it to ratings/rating_constants.json; main() reads it through
 # into population_constants.json so the JS-bundle contract is unchanged (see read_rating_lapse).
 
 
