@@ -28,6 +28,9 @@ not in doubt and is no longer rediscovered one settle-interval at a time, which
 used to leave the card underused for the first ten minutes of every start. GPU
 utilization gates nothing here — a card reads busy long before small-kernel
 fits stop scaling — and VRAM headroom gates every launch, fill included.
+
+With `--gpu-lock` (or `ONLYMOVE_GPU_LOCK`) every arm takes a shared card's lock
+for itself and the pool holds ONE arm; see `ablations.run_panel`.
 """
 
 import argparse
@@ -44,7 +47,8 @@ if PROJECT_ROOT not in sys.path:
 
 from ablations.run_panel import (  # noqa: E402
     POLL_SECS, RAMP_GAIN_MIN, RAMP_INTERVAL_SECS, RATE_WINDOW_SECS,
-    VRAM_HEADROOM_FACTOR, _epochs_in_log, _gpu_mem)
+    VRAM_HEADROOM_FACTOR, _epochs_in_log, _gpu_mem, add_gpu_lock_arg,
+    resolve_gpu_lock, with_gpu_lock)
 
 # WHERE THE RAMP STARTS. The ceiling genuinely varies with arm shape — short
 # arms have saturated at three or four, long ones at six — so the top is still
@@ -122,9 +126,11 @@ def main(argv=None):
     ap.add_argument("--concurrency", default="auto",
                     help="'auto' (default) ramps in place on measured "
                          "throughput; an integer pins the level")
+    add_gpu_lock_arg(ap)
     args = ap.parse_args(argv)
-    auto = str(args.concurrency).lower() == "auto"
-    fixed_level = None if auto else max(1, int(args.concurrency))
+    lock = resolve_gpu_lock(args.gpu_lock)
+    auto = lock is None and str(args.concurrency).lower() == "auto"
+    fixed_level = None if auto else (1 if lock else max(1, int(args.concurrency)))
 
     running = {}          # (panel, arm) -> (Popen, log handle, log path)
     started = set()       # everything launched this run, so a re-read cannot
@@ -151,7 +157,7 @@ def main(argv=None):
         log = open(log_path, "w")
         print(f"  {panel}/{arm}: launched", flush=True)
         running[(panel, arm)] = (subprocess.Popen(
-            cmd, cwd=PROJECT_ROOT, stdout=log, stderr=subprocess.STDOUT),
+            with_gpu_lock(lock, panel, arm, cmd), cwd=PROJECT_ROOT, stdout=log, stderr=subprocess.STDOUT),
             log, log_path)
         started.add((panel, arm))
         last_launch = time.time()
@@ -221,8 +227,8 @@ def main(argv=None):
         return vram_allows_more()
 
     print(f"queue {args.queue}, concurrency "
-          f"{f'auto (fill to {START_LEVEL}, then ramp)' if auto else fixed_level}",
-          flush=True)
+          f"{f'auto (fill to {START_LEVEL}, then ramp)' if auto else fixed_level}"
+          + (f", each arm behind {lock}" if lock else ""), flush=True)
     idle_reported = False
     while True:
         reap()

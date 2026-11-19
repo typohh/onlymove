@@ -20,6 +20,13 @@ stops ADDING and never kills: the extra arm keeps its GPU time and the level it
 reached becomes the top-up ceiling as arms finish. Throughput is measured, not
 inferred from utilization — a GPU reads 100% busy long before small-kernel fits
 stop scaling, so utilization gates nothing here; VRAM is the one hard cap.
+
+ON A SHARED CARD, `--gpu-lock <script>` (or the `ONLYMOVE_GPU_LOCK` environment
+variable) names a lock wrapper invoked as `<script> run <tag> -- <cmd>`. Every
+arm is then launched through it, so each fit takes the lock for itself and
+releases it when it ends — another holder gets the card between arms — and the
+pool runs ONE arm at a time: the lock is exclusive, so a second arm would only
+queue on it, and the ramp's throughput reading would be judging a waiter.
 """
 
 import argparse
@@ -51,6 +58,34 @@ POLL_SECS = 15
 RATE_WINDOW_SECS = 240
 
 _EPOCH_RE = re.compile(r"epoch\s+(\d+)/")
+
+GPU_LOCK_ENV = "ONLYMOVE_GPU_LOCK"
+
+
+def add_gpu_lock_arg(ap):
+    ap.add_argument("--gpu-lock", default=os.environ.get(GPU_LOCK_ENV) or None,
+                    metavar="SCRIPT",
+                    help="launch every arm as `SCRIPT run <tag> -- <cmd>`, one "
+                         f"at a time (default: ${GPU_LOCK_ENV})")
+
+
+def resolve_gpu_lock(path):
+    """The wrapper's absolute path, or None for no lock. A named wrapper that
+    is missing stops the run: falling back to an unlocked launch would put a
+    fit on a card someone else holds."""
+    if not path:
+        return None
+    path = os.path.abspath(os.path.expanduser(path))
+    if not os.access(path, os.X_OK):
+        raise SystemExit(f"gpu lock wrapper {path} is not an executable file")
+    return path
+
+
+def with_gpu_lock(lock, panel, arm, cmd):
+    """`cmd` behind the lock wrapper, tagged with the arm it runs."""
+    if lock is None:
+        return cmd
+    return [lock, "run", f"ablation-{panel}-{arm}", "--"] + cmd
 
 
 def _gpu_mem():
@@ -90,9 +125,11 @@ def main(argv=None):
                     help="override every arm's budget (plumbing test only)")
     ap.add_argument("--force", action="store_true",
                     help="re-run arms whose records exist")
+    add_gpu_lock_arg(ap)
     args = ap.parse_args(argv)
-    auto = str(args.concurrency).lower() == "auto"
-    fixed_level = None if auto else max(1, int(args.concurrency))
+    lock = resolve_gpu_lock(args.gpu_lock)
+    auto = lock is None and str(args.concurrency).lower() == "auto"
+    fixed_level = None if auto else (1 if lock else max(1, int(args.concurrency)))
 
     path = os.path.join(PANELS, f"{args.panel}.json")
     if not os.path.exists(path):
@@ -113,7 +150,8 @@ def main(argv=None):
         print("panel complete — nothing to run", flush=True)
         return 0
     print(f"panel {panel}: {len(todo)} arm(s) to run, concurrency "
-          f"{'auto (ramp in place)' if auto else fixed_level}", flush=True)
+          f"{'auto (ramp in place)' if auto else fixed_level}"
+          + (f", each arm behind {lock}" if lock else ""), flush=True)
 
     running = {}          # arm -> (Popen, log_handle, log_path)
     done_epochs = 0       # epochs banked by arms that already exited
@@ -137,7 +175,7 @@ def main(argv=None):
         log = open(log_path, "w")
         print(f"  {arm}: launched ({' '.join(cmd[3:])})", flush=True)
         running[arm] = (subprocess.Popen(
-            cmd, cwd=PROJECT_ROOT, stdout=log, stderr=subprocess.STDOUT),
+            with_gpu_lock(lock, panel, arm, cmd), cwd=PROJECT_ROOT, stdout=log, stderr=subprocess.STDOUT),
             log, log_path)
         last_launch = time.time()
 
