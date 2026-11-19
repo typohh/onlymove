@@ -26,6 +26,11 @@
 // off the bottom of the usable band opens AND lifts over the board, and
 // closing it parks it again.
 //
+// That is the WEAKNESSES list. The review list ("what this tests") is about
+// the problem on the board and is always open: its tab is a plain title, with
+// no badge, and is live only in portrait when the list runs off the screen,
+// where it lifts the bubble over the board and back.
+//
 // The badge counts every finding the list has, not only the MAX_MOTIFS it
 // prints, so a closed bubble still says how much is behind it.
 
@@ -73,6 +78,7 @@ let _renderedKey = null;
 let _open = readOpen();
 let _lifted = false;   // portrait, list does not fit: opened over the board
 let _fits = true;      // whether the OPEN bubble ends on screen where it sits
+let _static = false;   // the review list: always open, never collapsible
 
 function readOpen() {
     try { return localStorage.getItem(OPEN_KEY) !== '0'; } catch { return true; }
@@ -124,7 +130,9 @@ export function refreshMotifBubbleMetrics() {
     }
     _fits = fits;
     if (fits) _lifted = false;
-    const open = fits ? _open : _lifted;
+    const open = _static || (fits ? _open : _lifted);
+    bubble.classList.toggle('motif-bubble-static', _static);
+    bubble.classList.toggle('motif-bubble-fits', fits);
     bubble.classList.toggle('motif-bubble-collapsed', !open);
     bubble.classList.toggle('over-board', !fits && _lifted);
     const tab = el('motif-bubble-tab');
@@ -297,6 +305,7 @@ export function syncMotifBubble() {
     }
     const motifs = found.items;
     const show = motifs.length > 0;
+    _static = titleKey === 'motifTitle';
 
     // Rebuild the DOM only when the content actually changed — this runs on
     // every repaint.
@@ -347,6 +356,10 @@ export function initMotifBubble() {
         e.preventDefault();
         // `_fits` is from the last layout pass, which every repaint and resize
         // runs, so it describes the bubble being tapped.
+        // The review list has no closed state: its tab only lifts a list that
+        // does not fit. Guarded here as well as by the stylesheet's
+        // pointer-events, because a <button> stays keyboard-focusable.
+        if (_static && _fits) return;
         if (_fits) { _open = !_open; writeOpen(_open); }
         else _lifted = !_lifted;
         refreshMotifBubbleMetrics();

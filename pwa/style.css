@@ -798,6 +798,11 @@ input, textarea, [contenteditable],
 .motif-bubble-collapsed .motif-bubble-content {
     display: none;
 }
+/* The review list ("what this tests") is always open and has nothing to
+   count: no badge, and its tab is live only where it lifts the bubble. */
+.motif-bubble-static .btn-badge {
+    display: none;
+}
 
 /* Portrait / squarish: park directly below the buttons, tab on top.
 
@@ -832,6 +837,25 @@ input, textarea, [contenteditable],
         width: 100%;
         min-height: calc(6 * var(--u));
     }
+    /* The review list: arrows point where the tab would send the bubble — up
+       at the board while parked, back down once over it — and a list that
+       ends on screen where it parks has no arrows and an inert tab, so the
+       strip below the buttons catches no tap that would do nothing. */
+    .motif-bubble-static .motif-bubble-tab::before,
+    .motif-bubble-static .motif-bubble-tab::after {
+        transform: rotate(-90deg);
+    }
+    .motif-bubble-static.over-board .motif-bubble-tab::before,
+    .motif-bubble-static.over-board .motif-bubble-tab::after {
+        transform: rotate(90deg);
+    }
+    .motif-bubble-static.motif-bubble-fits .motif-bubble-tab {
+        pointer-events: none;
+    }
+    .motif-bubble-static.motif-bubble-fits .motif-bubble-tab::before,
+    .motif-bubble-static.motif-bubble-fits .motif-bubble-tab::after {
+        display: none;
+    }
 }
 
 /* Landscape: an in-flow block in the controls column, below the buttons (the
@@ -856,29 +880,65 @@ input, textarea, [contenteditable],
         background-color: transparent;
     }
     .motif-bubble-tab {
-        padding: 0.4286em 0.7143em;      /* .btn's */
+        /* .btn's padding, with the right side widened to the badge's own
+           reserve: the badge hangs where the Recall button's does (same
+           .btn-badge rule, same offset from the same edge), and the column is
+           too narrow for a title centred across the full width to clear it. */
+        padding: 0.4286em 2.1em 0.4286em 0.4em;
+        margin-bottom: 0.2857em;         /* the gap between stacked buttons */
         font-weight: 600;
         letter-spacing: 0.01em;
         border-radius: 0 var(--radius) var(--radius) 0;
-        gap: 0.5em;
-    }
-    /* The column is too narrow for a centred title with arrows either side
-       and a badge hung in the corner — the badge lands on the title. So no
-       arrows (the list under the button says which state it is in), and the
-       badge sits in flow beside the title, the pair centred together. */
-    .motif-bubble-tab::before,
-    .motif-bubble-tab::after {
-        display: none;
-    }
-    .motif-bubble-tab .btn-badge {
-        position: static;
-        transform: none;
     }
     .motif-bubble-content {
-        margin-top: 0.2857em;            /* the gap between stacked buttons */
         background-color: var(--surface);
         box-shadow: inset 0 0 0 1px var(--hairline);
         border-radius: 0 var(--radius) var(--radius) 0;
+    }
+    /* No room for arrows either side of the title. While the list is open the
+       two pseudo-elements are instead short CONNECTORS across the gap, tying
+       the button to the panel it opened; closed, there is nothing to tie. */
+    .motif-bubble-tab::before,
+    .motif-bubble-tab::after {
+        content: '';
+        position: absolute;
+        top: 100%;
+        width: 1.2em;
+        height: 0.2857em;                /* the margin-bottom above */
+        font-size: 1em;
+        transform: none;
+        transition: none;
+        background-color: var(--surface);
+        box-shadow: inset 1px 0 0 var(--hairline), inset -1px 0 0 var(--hairline);
+    }
+    .motif-bubble:not(.motif-bubble-collapsed) .motif-bubble-tab::before,
+    .motif-bubble:not(.motif-bubble-collapsed) .motif-bubble-tab::after {
+        transform: none;
+    }
+    .motif-bubble-tab::before { left: 22%; }
+    .motif-bubble-tab::after { right: 22%; }
+    .motif-bubble-collapsed .motif-bubble-tab::before,
+    .motif-bubble-collapsed .motif-bubble-tab::after {
+        display: none;
+    }
+    /* The review list: not a button at all here (always open, nothing to
+       lift), so a section label over the list rather than a fifth button. */
+    .motif-bubble-static .motif-bubble-tab {
+        pointer-events: none;
+        background-color: transparent;
+        box-shadow: none;
+        padding: 0.3333em 0.6667em 0.15em;
+        margin-bottom: 0;
+    }
+    .motif-bubble-static .motif-bubble-tab-label {
+        font-size: 0.7em;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--ink-muted);
+    }
+    .motif-bubble-static .motif-bubble-tab::before,
+    .motif-bubble-static .motif-bubble-tab::after {
+        display: none;
     }
 }
 
