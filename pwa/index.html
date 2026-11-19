@@ -317,15 +317,17 @@
           <span id="button-recall-count" class="btn-badge" hidden></span>
         </a>
         <a href="#" id="button-share" class="btn" role="button" tabindex="0"></a>
-        <!-- Review-mode "why this move" bubble. In landscape it's a plain
-             in-flow block below the buttons (always fully visible, exactly
-             the buttons' width); in portrait it's a position:fixed overlay
-             parked below the controls whose tab lifts it over the board
-             (see style.css + motif-bubble.js). -->
+        <!-- The motif bubble: "what this tests" in review, the weaknesses
+             list while solving. Its tab is a button that shows and hides the
+             list and carries a count badge. In landscape it's an in-flow
+             block below the buttons; in portrait a position:fixed overlay
+             parked below the controls, lifted over the board when the open
+             list would not fit (see style.css + motif-bubble.js). -->
         <div id="motif-bubble" class="motif-bubble motif-bubble-hidden" aria-hidden="true">
           <div id="motif-bubble-content" class="motif-bubble-content"></div>
           <button id="motif-bubble-tab" class="motif-bubble-tab" type="button">
             <span id="motif-bubble-tab-label" class="motif-bubble-tab-label"></span>
+            <span id="motif-bubble-count" class="btn-badge"></span>
           </button>
         </div>
       </div>

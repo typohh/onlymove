@@ -690,19 +690,16 @@ input, textarea, [contenteditable],
 
 }
 
-/* --- Review-mode motif bubble ---------------------------------------------
-   Lives inside #info-container, after the buttons. Two layouts:
-   - Landscape: a plain in-flow block below the buttons — always fully
-     visible, exactly the buttons' width. The column is top-aligned, so a
-     varying number of text lines never moves the buttons.
+/* --- Motif bubble ----------------------------------------------------------
+   Lives inside #info-container, after the buttons. Its tab is a button in
+   both layouts: it carries the title and a count badge, and shows or hides the
+   list (`.motif-bubble-collapsed`, set by motif-bubble.js). Two layouts:
+   - Landscape: an in-flow block below the buttons, exactly the buttons'
+     width. The column is top-aligned, so opening it never moves the buttons.
    - Portrait/squarish: a position:fixed overlay (out of the row flow, so it
-     can never resize or shift the board), parked below the controls; its
-     title bar "tab" lifts the bubble over the board and back. Show/hide and
-     slide are driven by JS toggling `.motif-bubble-hidden` and `.over-board`.
-     A bubble that ends on-screen where it parks gets `.motif-bubble-fits` and
-     with it the landscape treatment, there being nothing to lift into view.
-   The tab carries the "why this move" title itself (no header line inside
-   the content), flanked by arrows in portrait. */
+     can never resize or shift the board), parked below the controls. An open
+     list that ends on screen just opens there; one that would not is opened
+     lifted over the board (`.over-board`) and parks again when closed. */
 .motif-bubble {
     position: fixed;
     z-index: 6;                 /* above the board (z 2); relies on
@@ -760,6 +757,7 @@ input, textarea, [contenteditable],
 
 .motif-bubble-tab {
     flex: 0 0 auto;
+    position: relative;         /* anchors the count badge (.btn-badge) */
     background-color: var(--surface);
     box-shadow: inset 0 0 0 1px var(--hairline);
     border: none;
@@ -787,22 +785,30 @@ input, textarea, [contenteditable],
 
 .motif-bubble-tab::before,
 .motif-bubble-tab::after {
-    content: '\25B8';           /* ▸ base, rotated per state below */
+    content: '\25B8';           /* ▸ closed; turned down while the list is open */
     font-size: 1.5em;
     line-height: 1;
     transition: transform 0.28s ease;
 }
+.motif-bubble:not(.motif-bubble-collapsed) .motif-bubble-tab::before,
+.motif-bubble:not(.motif-bubble-collapsed) .motif-bubble-tab::after {
+    transform: rotate(90deg);
+}
 
-/* Portrait / squarish: park directly below the buttons, tab on top, slide up.
+.motif-bubble-collapsed .motif-bubble-content {
+    display: none;
+}
+
+/* Portrait / squarish: park directly below the buttons, tab on top.
 
    The column is vertically centred and the title/button heights are
    font-dependent, so the buttons' bottom edge isn't a CSS constant the way the
    board's edges are in landscape. JS measures it (refreshMotifBubbleMetrics in
    motif-bubble.js) and feeds the parked top + the lift-to-screen-centre via the
-   --mb-park-top / --mb-lift custom properties. The bubble grows downward and
-   spills off the bottom of the screen by whatever doesn't fit — only the tab
-   need stay reachable; clicking it lifts the bubble to screen centre (on top of
-   the board). The fallbacks keep it sane for the frame before JS runs. */
+   --mb-park-top / --mb-lift custom properties. JS also decides whether the open
+   list fits below the buttons; when it does not, opening sets `.over-board`
+   and the bubble slides up over the board. The fallbacks keep it sane for the
+   frame before JS runs. */
 @media (max-aspect-ratio: 125/100) {
     .motif-bubble {
         /* Match the buttons' width, not the display width. The bubble is
@@ -826,33 +832,12 @@ input, textarea, [contenteditable],
         width: 100%;
         min-height: calc(6 * var(--u));
     }
-    .motif-bubble-tab::before,
-    .motif-bubble-tab::after {
-        transform: rotate(-90deg);        /* parked: point up at the board */
-    }
-    .motif-bubble.over-board .motif-bubble-tab::before,
-    .motif-bubble.over-board .motif-bubble-tab::after {
-        transform: rotate(90deg);         /* over board: point back down */
-    }
-    /* Short enough to end inside the usable band where it parks, so nothing is
-       hidden and the lift would move it for no reason. JS measures that and
-       sets the class (refreshMotifBubbleMetrics in motif-bubble.js); the tab
-       then becomes the plain title bar it already is in landscape — arrows
-       gone, and inert, so the strip below the buttons stops catching taps that
-       would do nothing. */
-    .motif-bubble.motif-bubble-fits .motif-bubble-tab {
-        pointer-events: none;
-    }
-    .motif-bubble.motif-bubble-fits .motif-bubble-tab::before,
-    .motif-bubble.motif-bubble-fits .motif-bubble-tab::after {
-        display: none;
-    }
 }
 
-/* Landscape: a plain in-flow block in the controls column, below the buttons
-   (the column is top-aligned so the buttons never move). Always fully
-   visible and exactly as wide as the buttons, so there is nothing to slide:
-   the tab is just a title bar — not clickable, no arrows. */
+/* Landscape: an in-flow block in the controls column, below the buttons (the
+   column is top-aligned so the buttons never move). The tab is one more
+   button in the stack — same padding, same tucked-under-the-board corners —
+   and the list opens as a panel under it. */
 @media (min-aspect-ratio: 125/100) {
     .motif-bubble {
         position: static;
@@ -870,34 +855,30 @@ input, textarea, [contenteditable],
         box-shadow: none;
         background-color: transparent;
     }
-    .motif-bubble-content {
-        background-color: var(--surface);
-        box-shadow: inset 0 0 0 1px var(--hairline);
-        border-radius: 0 0 var(--radius) 0;
-    }
-    /* Inert here (no lift to perform), so it is a section label over the
-       list rather than a fifth button under the four real ones. */
     .motif-bubble-tab {
-        border-radius: 0 var(--radius) 0 0;
-        background-color: transparent;
-        box-shadow: none;
-        padding-bottom: 0.15em;
-    }
-    .motif-bubble-tab-label {
-        font-size: 0.7em;
-        letter-spacing: 0.14em;
-        text-transform: uppercase;
-        color: var(--ink-muted);
-    }
-    .motif-bubble-content {
+        padding: 0.4286em 0.7143em;      /* .btn's */
+        font-weight: 600;
+        letter-spacing: 0.01em;
         border-radius: 0 var(--radius) var(--radius) 0;
+        gap: 0.5em;
     }
-    .motif-bubble-tab {
-        pointer-events: none;
-    }
+    /* The column is too narrow for a centred title with arrows either side
+       and a badge hung in the corner — the badge lands on the title. So no
+       arrows (the list under the button says which state it is in), and the
+       badge sits in flow beside the title, the pair centred together. */
     .motif-bubble-tab::before,
     .motif-bubble-tab::after {
         display: none;
+    }
+    .motif-bubble-tab .btn-badge {
+        position: static;
+        transform: none;
+    }
+    .motif-bubble-content {
+        margin-top: 0.2857em;            /* the gap between stacked buttons */
+        background-color: var(--surface);
+        box-shadow: inset 0 0 0 1px var(--hairline);
+        border-radius: 0 var(--radius) var(--radius) 0;
     }
 }
 

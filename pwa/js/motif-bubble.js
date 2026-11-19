@@ -17,15 +17,17 @@
 // most MAX_MOTIFS, highest first. Labels are localized via the shared i18n
 // resolver, falling back to English.
 //
-// Layout (see style.css): in landscape the bubble is a plain in-flow block in
-// the controls column, below the buttons, always fully visible. In portrait it
-// is a position:fixed overlay (out of the row flow, so it can never resize or
-// shift the board) parked below the controls; its tab lifts it over the board,
-// but only while the parked bubble actually runs off the bottom of the usable
-// band — a list short enough to be entirely visible where it parks gets the
-// landscape treatment instead (inert tab, no arrows), so the strip below the
-// buttons carries no target for an accidental tap that would do nothing.
-// The "why this move" title lives in the tab bar itself, not in the content.
+// Layout (see style.css): the tab is a button in both layouts — it carries the
+// title and a count badge, and tapping it shows or hides the list under it. In
+// landscape the bubble is an in-flow block in the controls column, below the
+// buttons. In portrait it is a position:fixed overlay (out of the row flow, so
+// it can never resize or shift the board) parked below the controls. A list
+// that ends on screen where it parks simply opens there; one that would run
+// off the bottom of the usable band opens AND lifts over the board, and
+// closing it parks it again.
+//
+// The badge counts every finding the list has, not only the MAX_MOTIFS it
+// prints, so a closed bubble still says how much is behind it.
 
 import { state } from './state.js';
 import { getTerm, localizedMotif } from './i18n.js';
@@ -55,13 +57,29 @@ const SHOW_POSSIBLE_WEAKNESSES = false;
 // CSS pixels, and a bubble whose last text row ends a rounding error past the
 // band is visible.
 const FIT_SLACK = 0.5;
+// The user's open/closed choice, kept per device. It governs wherever the open
+// list fits where it sits — landscape always, portrait when the list ends on
+// screen. A portrait list that does NOT fit is never opened by this: open there
+// means covering the board, which is a per-look decision (`_lifted`), not a
+// standing one.
+const OPEN_KEY = 'motifBubbleOpen';
 
 // Review-mode content, recomputed per problem in populateMotifBubble(). The
 // solving-mode training-focus content is derived fresh in syncMotifBubble()
 // (it depends on the weakness posterior, not on the shown problem). A cache
 // key of the last-rendered content keeps the per-repaint rebuild cheap.
-let _problemMotifs = [];
+let _problemMotifs = { items: [], total: 0 };
 let _renderedKey = null;
+let _open = readOpen();
+let _lifted = false;   // portrait, list does not fit: opened over the board
+let _fits = true;      // whether the OPEN bubble ends on screen where it sits
+
+function readOpen() {
+    try { return localStorage.getItem(OPEN_KEY) !== '0'; } catch { return true; }
+}
+function writeOpen(open) {
+    try { localStorage.setItem(OPEN_KEY, open ? '1' : '0'); } catch { /* choice lasts the session */ }
+}
 
 const el = (id) => document.getElementById(id);
 
@@ -70,49 +88,53 @@ const el = (id) => document.getElementById(id);
 const isPortrait = () => layoutMode() === 'portrait';
 
 /**
+ * Decide the bubble's state — closed, open in place, or open over the board —
+ * and apply it. Safe to call on every repaint and resize; no-op while hidden.
+ *
  * Portrait parking is board/buttons-relative but the buttons' bottom edge isn't
- * CSS-knowable (vertically-centred column, font-dependent heights), so we
- * measure it here and feed the CSS via custom properties:
+ * CSS-knowable (vertically-centred column, font-dependent heights), so it is
+ * measured here and fed to the CSS via custom properties:
  *   --mb-park-top : viewport-y just below the buttons (parked top edge)
- *   --mb-lift     : translateY that lands the bubble's centre at screen centre
- * It also decides `.motif-bubble-fits` (see below). Landscape ignores all of
- * it (the bubble is in-flow there). No-op unless the bubble is currently
- * visible in portrait.
+ *   --mb-lift     : translateY that lands the OPEN bubble's centre at screen centre
+ * Landscape needs neither (the bubble is in-flow there) and always fits.
  */
 export function refreshMotifBubbleMetrics() {
     const bubble = el('motif-bubble');
     if (!bubble || bubble.classList.contains('motif-bubble-hidden')) return;
-    if (!isPortrait()) return;
+    let fits = true;
     const controls = el('controls-wrapper');
-    if (!controls) return;
-    const vp = appMetrics();
-    // getBoundingClientRect and `top` on a position:fixed element share an
-    // origin, so the park offset needs no inset correction of its own.
-    const parkTop = controls.getBoundingClientRect().bottom + vp.u;  // the 1·--u park gap
-    bubble.style.setProperty('--mb-park-top', `${parkTop}px`);
-    // Height is transform-invariant, so measuring while parked or lifted is fine.
-    const bubbleHeight = bubble.getBoundingClientRect().height;
-    // Centre of the USABLE band, not of the screen: under a notch or a browser
-    // toolbar those differ, and the board this lifts over is centred in the
-    // usable band too.
-    const usableCentre = vp.safeTop + vp.h / 2;
-    const lift = usableCentre - (parkTop + bubbleHeight / 2);
-    bubble.style.setProperty('--mb-lift', `${lift}px`);
-    // A short list can end above the bottom of the usable band, in which case
-    // the lift reveals nothing and the tab is just a target for accidental
-    // taps in the strip below the buttons. `.motif-bubble-fits` then makes it
-    // inert and drops the arrows, which is the state landscape is in by
-    // construction. The test cannot flap: the arrows are the tallest thing in
-    // the tab, so dropping them can only SHRINK the bubble, and one that fits
-    // with them still fits without.
-    const fits = parkTop + bubbleHeight <= vp.safeTop + vp.h + FIT_SLACK;
-    bubble.classList.toggle('motif-bubble-fits', fits);
-    if (fits) bubble.classList.remove('over-board');
+    if (isPortrait() && controls) {
+        const vp = appMetrics();
+        // getBoundingClientRect and `top` on a position:fixed element share an
+        // origin, so the park offset needs no inset correction of its own.
+        const parkTop = controls.getBoundingClientRect().bottom + vp.u;  // the 1·--u park gap
+        bubble.style.setProperty('--mb-park-top', `${parkTop}px`);
+        // The fit question is about the OPEN bubble, so measure it open; the
+        // class is put back below before anything paints. Height is
+        // transform-invariant, so measuring while parked or lifted is fine.
+        bubble.classList.remove('motif-bubble-collapsed');
+        const bubbleHeight = bubble.getBoundingClientRect().height;
+        // Centre of the USABLE band, not of the screen: under a notch or a
+        // browser toolbar those differ, and the board this lifts over is
+        // centred in the usable band too.
+        const usableCentre = vp.safeTop + vp.h / 2;
+        const lift = usableCentre - (parkTop + bubbleHeight / 2);
+        bubble.style.setProperty('--mb-lift', `${lift}px`);
+        fits = parkTop + bubbleHeight <= vp.safeTop + vp.h + FIT_SLACK;
+    }
+    _fits = fits;
+    if (fits) _lifted = false;
+    const open = fits ? _open : _lifted;
+    bubble.classList.toggle('motif-bubble-collapsed', !open);
+    bubble.classList.toggle('over-board', !fits && _lifted);
+    const tab = el('motif-bubble-tab');
+    if (tab) tab.setAttribute('aria-expanded', open ? 'true' : 'false');
 }
 
 /**
  * Top motifs of a correct-move embedding: labeled components whose |score|
- * clears MIN_Z, strongest first, capped at MAX_MOTIFS. The axes are BIPOLAR
+ * clears MIN_Z, strongest first — `items` capped at MAX_MOTIFS, `total` the
+ * count before the cap. The axes are BIPOLAR
  * (residual skill axes, 2026-07-18): a large NEGATIVE loading is the
  * negative-tail motif, not "no motif" — each side uses its own label, and a
  * side left unnamed in labels.json is skipped. Returns localized strings.
@@ -120,7 +142,7 @@ export function refreshMotifBubbleMetrics() {
 function topMotifs(problem) {
     const labels = state.embeddingLabels;
     const embedding = problem && problem.embedding;
-    if (!Array.isArray(embedding) || !labels) return [];
+    if (!Array.isArray(embedding) || !labels) return { items: [], total: 0 };
     const scored = [];
     for (let k = 0; k < embedding.length; k++) {
         const v = embedding[k];
@@ -133,7 +155,7 @@ function topMotifs(problem) {
                       explain: () => explainMotif({ component, side, name: text, kind: 'problem' }) });
     }
     scored.sort((a, b) => b.v - a.v);
-    return scored.slice(0, MAX_MOTIFS);
+    return { items: scored.slice(0, MAX_MOTIFS), total: scored.length };
 }
 
 /**
@@ -141,12 +163,13 @@ function topMotifs(problem) {
  * (flaggedMotifCategories — named tails whose own-attempt reading clears the
  * shared confidence gate), minus the
  * `strong` direction, strongest first, same MAX_MOTIFS cap as the
- * problem list. Empty whenever nothing is flagged or the model is absent,
+ * problem list (`total` counts the findings before that cap). Empty whenever
+ * nothing is flagged or the model is absent,
  * which is what keeps the bubble silent rather than showing a "none found".
  */
 function trainingFocusMotifs() {
     const labels = state.embeddingLabels;
-    if (!labels) return [];
+    if (!labels) return { items: [], total: 0 };
     // ONE LINE PER MOTIF, the most confident finding on it. An axis can flag on
     // both readings at once — weak at the motif AND over-reaching for it — and
     // they are two genuine findings, which is why selection keeps them as two
@@ -234,7 +257,7 @@ function trainingFocusMotifs() {
     }
     scored.sort((a, b) => b.z - a.z);
     const shown = SHOW_POSSIBLE_WEAKNESSES ? scored : scored.filter((m) => m.z > CONFIDENT_Z);
-    return shown.slice(0, MAX_MOTIFS);
+    return { items: shown.slice(0, MAX_MOTIFS), total: shown.length };
 }
 
 /**
@@ -246,7 +269,7 @@ export function populateMotifBubble(problem) {
     const bubble = el('motif-bubble');
     if (!bubble) return;
     _problemMotifs = topMotifs(problem);
-    bubble.classList.remove('over-board');   // always (re)appear parked
+    _lifted = false;   // always (re)appear parked
     syncMotifBubble();
 }
 
@@ -263,23 +286,26 @@ export function syncMotifBubble() {
     if (!bubble || !content) return;
     const atRoot = !!state.kifuReader && state.kifuReader.node === state.initialAnalysisNode;
 
-    let motifs = [];
+    let found = { items: [], total: 0 };
     let titleKey = null;
     if (state.appMode === APP_MODES.ANALYZING && atRoot) {
-        motifs = _problemMotifs;
+        found = _problemMotifs;
         titleKey = 'motifTitle';
     } else if (state.appMode === APP_MODES.SOLVING) {
-        motifs = trainingFocusMotifs();
+        found = trainingFocusMotifs();
         titleKey = 'trainingFocusTitle';
     }
+    const motifs = found.items;
     const show = motifs.length > 0;
 
     // Rebuild the DOM only when the content actually changed — this runs on
     // every repaint.
-    const key = show ? `${titleKey}|${motifs.map((m) => m.text).join('|')}` : null;
+    const key = show ? `${titleKey}|${found.total}|${motifs.map((m) => m.text).join('|')}` : null;
     if (show && key !== _renderedKey) {
         const tabLabel = el('motif-bubble-tab-label');
         if (tabLabel) tabLabel.textContent = getTerm(titleKey);
+        const count = el('motif-bubble-count');
+        if (count) count.textContent = String(found.total);
         content.textContent = '';
         const ul = document.createElement('ul');
         ul.className = 'motif-bubble-list';
@@ -301,27 +327,29 @@ export function syncMotifBubble() {
     bubble.classList.toggle('motif-bubble-hidden', !show);
     bubble.setAttribute('aria-hidden', show ? 'false' : 'true');
     if (!show) {
+        _lifted = false;
         bubble.classList.remove('over-board');
     } else {
-        refreshMotifBubbleMetrics();   // (re)anchor below the buttons in portrait
+        refreshMotifBubbleMetrics();   // open/closed state + the portrait anchor
         // First-appearance announcement for the training-focus list; the hook
         // is once-ever and self-gating, so calling it per repaint is fine.
         if (titleKey === 'trainingFocusTitle') onTrainingFocusShown();
     }
 }
 
-/** Wire the edge tab: toggles the bubble over the board and back. */
+/** Wire the tab: shows and hides the list, lifting it over the board in
+ *  portrait when it would not fit where it parks. */
 export function initMotifBubble() {
     const tab = el('motif-bubble-tab');
     const bubble = el('motif-bubble');
     if (!tab || !bubble) return;
     tab.addEventListener('click', (e) => {
         e.preventDefault();
-        // Guarded in JS as well as by the stylesheet's pointer-events, because
-        // the tab is a <button>: it stays keyboard-focusable when
-        // pointer-events are off, and Enter would still fire this click.
-        if (bubble.classList.contains('motif-bubble-fits')) return;
-        bubble.classList.toggle('over-board');
+        // `_fits` is from the last layout pass, which every repaint and resize
+        // runs, so it describes the bubble being tapped.
+        if (_fits) { _open = !_open; writeOpen(_open); }
+        else _lifted = !_lifted;
+        refreshMotifBubbleMetrics();
     });
 
     // Keep the portrait anchor in sync with viewport / orientation changes.
