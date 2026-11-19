@@ -75,6 +75,7 @@ from ablations._figures import Figure, require, panel_regime  # noqa: E402
 from ablations.refit_ramp_figures import paired_stats  # noqa: E402
 from ablations.refit_schedule_figures import level  # noqa: E402
 from utils.paths import DB_SQLITE  # noqa: E402
+from utils.rating.model_constants import CALIBRATION_P, SIZES  # noqa: E402
 
 TIER = "refit"
 
@@ -82,8 +83,6 @@ PANEL = "prior_start"
 PANEL_DIR = os.path.join(PROJECT_ROOT, "ablations", "dev_runs", PANEL)
 MANIFEST = os.path.join(PROJECT_ROOT, "ablations", "panels", f"{PANEL}.json")
 SEEDS = tuple(range(4))
-SIZES = (9, 13)
-CALIBRATION_P = 0.8
 # Configuration -> arm pattern and the (theta_laplace, init_base_rate) its
 # records must carry.
 CONFIGS = {

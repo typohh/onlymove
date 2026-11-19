@@ -156,12 +156,15 @@ EPOCHS = 7000
 LR_SCHEDULE = "cosine"
 CHECK_EVERY = 10
 BATCH = 65536
-# SPLIT RATES, and the split is mandatory. What the grid measures is the RATIO
-# lr_field/lr_net, monotone and saturating near 30x: below 10x the fit loses
-# 2.5-5 mnat. Given a ratio past 30x a slower net buys the last 0.8; 1e-4 and
-# 3e-4 tie, and 3e-4 converges in half the epochs.
+# ONE RATE for the network and the free per-user fields. Under the decayed
+# schedule and the ability prior a shared rate scores about a millinat BETTER on
+# held-out problems than a 33x faster field rate, at every seed, with the same
+# rating and slope distributions and the same axis identity; the split was
+# adopted under a constant rate, where a shared rate diverged late, and does not
+# survive the schedule change. The two names stay because the parameter groups
+# and the ablation knobs are still per-kind (`ablations/panels/lr.json`).
 LR_NET = 3e-4
-LR_FIELD = 1e-2
+LR_FIELD = LR_NET
 # The free per-user fields, BY PARAMETER NAME. Named rather than assembled by
 # hand so the split cannot fall out of step with the module's own parameters:
 # anything not listed here is "the net" and gets the slow rate, so a parameter
@@ -171,14 +174,26 @@ FIELD_PARAMS = ("theta.weight", "v", "lapse_raw", "link_power_raw",
 LOCAL_STEEP_SCALE = 0.25         # curve_param="local" only: initial steepness scale
 V_RIDGE = 0.5                    # not binding: 0.05/0.15/0.5 score alike
 ORTHO_RATING = 0.5               # keeps each TAIL off rating, slope and floor
-# ONE barrier, on the slope, one-sided, acting on the PRE-SOFTPLUS output. The
-# rating is b + kappa(c)/a, so a slope collapsing toward its floor sends it to
-# infinity. Without this, slopes fall to a 0.94 median and ratings blow out to a
-# range of [-225, +146] — a 22 mnat loss. There is no floor barrier: the floor is
-# bounded structurally by cap = (1 - 2*lambda).
+# NO SLOPE BARRIER (`SHALLOW_W` is 0). The rating is the curve's 80% point,
+# b + kappa(c)/a, so a problem whose slope sinks toward `SLOPE_FLOOR` reads a
+# rating far above everyone — and that is left to stand. A one-sided barrier on
+# the pre-softplus slope used to hold every slope up; it is off because the
+# held-out score is about a millinat better without it at every seed, slopes
+# agree BETTER between seeds without it (rank correlation 0.89 against 0.77),
+# and what it was preventing is not a fault: the problems that go flat are the
+# ones the barrier fit rated hardest, two thirds of them never attempted by a
+# person, and the attempted ones are those where strong players succeed half the
+# time whatever their ability. Their difficulty LOCATION stays ordinary; only
+# the 80% point of a flat curve is far away. They ship where they land.
+#
+# The term and its knobs stay for `ablations/panels/barrier.json`; at weight 0
+# the loop skips its corpus pass entirely.
 SHALLOW_TAU = 0.1
-SHALLOW_W = 0.3
-# The barrier reads the CORPUS rather than the batch, and has to: a problem
+SHALLOW_W = 0.0
+# A slope under this is reported as FLAT at the end of a fit (a count in the
+# log and the record, nothing more — no problem is dropped or moved for it).
+FLAT_SLOPE = 0.25
+# When it is on, the barrier reads the CORPUS rather than the batch, and has to: a problem
 # nobody attempted has no likelihood term, so its slope is held off the floor by
 # this and nothing else. It does not have to read ALL of it every step. A uniform
 # sample with replacement is an UNBIASED estimate of the same corpus mean, and a
@@ -1757,23 +1772,24 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
                 gz = (gh_t - gh_t.mean(0)) / (gh_t.std(0) + 1e-6)
                 loss = loss + teach_weight * (
                     (gz[mk] - t_tgt[tp_all[bi]][mk]) ** 2).mean()
-            m.train(False)          # the barrier reads corpus rows, dropout off
-            si = torch.randint(len(tfeat), (shallow_samples,), device=device)
-            if m.floor_prior:
-                o_s = m.head(m.trunk(tfeat[si]))
-                short = torch.nn.functional.softplus(
-                    o_tau - o_s[:, 1]).pow(2).mean()
-                # Negative log prior per problem, weighted problems-to-rows so
-                # that over an epoch the prior counts each problem once against
-                # each row's likelihood counting once.
-                zf = (o_s[:, 2] - m.floor_prior_mu) * torch.exp(
-                    -m.floor_prior_logsd)
-                loss = loss + prior_ratio * (
-                    0.5 * zf.pow(2) + m.floor_prior_logsd).mean()
-            else:
-                short = torch.nn.functional.softplus(
-                    o_tau - m.slope_logit(tfeat[si])).pow(2).mean()
-            loss = loss + shallow_w * short
+            if shallow_w > 0 or m.floor_prior:
+                m.train(False)          # the barrier reads corpus rows, dropout off
+                si = torch.randint(len(tfeat), (shallow_samples,), device=device)
+                if m.floor_prior:
+                    o_s = m.head(m.trunk(tfeat[si]))
+                    short = torch.nn.functional.softplus(
+                        o_tau - o_s[:, 1]).pow(2).mean()
+                    # Negative log prior per problem, weighted problems-to-rows so
+                    # that over an epoch the prior counts each problem once against
+                    # each row's likelihood counting once.
+                    zf = (o_s[:, 2] - m.floor_prior_mu) * torch.exp(
+                        -m.floor_prior_logsd)
+                    loss = loss + prior_ratio * (
+                        0.5 * zf.pow(2) + m.floor_prior_logsd).mean()
+                else:
+                    short = torch.nn.functional.softplus(
+                        o_tau - m.slope_logit(tfeat[si])).pow(2).mean()
+                loss = loss + shallow_w * short
             m.train(True)
             opt.zero_grad(); loss.backward()
             opt.step()
@@ -2094,9 +2110,27 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
               f"fits. Packaging needs a per-cell pass against THIS model before "
               f"it can run; delete the stale directory once that exists.",
               flush=True)
+    # WHERE THE TOP WENT. With no barrier a flat slope puts a problem's 80%
+    # point far above everyone, so the top of the rating distribution is a
+    # statement about slopes; say how many problems are flat and how far the
+    # tails lie from the bulk (99.9th percentile's distance from the median in
+    # units of the 95th's, and the same below — a normal distribution reads 1.9).
+    # A report, not a check.
+    rq = {p: float(np.percentile(rating, p)) for p in (0.1, 5, 50, 95, 99.9)}
+    tail_hi = (rq[99.9] - rq[50]) / max(rq[95] - rq[50], 1e-9)
+    tail_lo = (rq[50] - rq[0.1]) / max(rq[50] - rq[5], 1e-9)
+    flat_share = float(np.mean(a_np < FLAT_SLOPE))
+    print(f"rating tails: p0.1 {rq[0.1]:+.2f}  p5 {rq[5]:+.2f}  p50 {rq[50]:+.2f}  "
+          f"p95 {rq[95]:+.2f}  p99.9 {rq[99.9]:+.2f}  min {rating.min():+.2f}  "
+          f"max {rating.max():+.2f}  |  tail/bulk {tail_lo:.1f} below, "
+          f"{tail_hi:.1f} above (normal: 1.9)  |  flat slopes (< {FLAT_SLOPE:g}): "
+          f"{flat_share:.2%} of problems", flush=True)
     elapsed = time.time() - t0
     print(f"done in {elapsed:.0f}s", flush=True)
     return {
+        "rating_tail_hi": tail_hi, "rating_tail_lo": tail_lo,
+        "flat_slope_share": flat_share,
+        "shallow_w": float(shallow_w), "shallow_tau": float(shallow_tau),
         "rows": int(len(df)), "users": int(n_users),
         "base_rate": float(y.mean()), "stop_rows": int(is_stop.sum()),
         "bank_taught": int(bank_ok.sum()), "bank_spec": list(bank_spec),
@@ -2113,6 +2147,7 @@ def run(*, epochs=EPOCHS, check_every=CHECK_EVERY, batch=BATCH, seed=SEED,
         "theta_synthetic": theta_synthetic,
         "lr_schedule": str(lr_schedule),
         "lr_warmup_epochs": int(lr_warmup_epochs),
+        "lr_net": float(lr_net), "lr_field": float(lr_field),
         "floor_mode": str(floor_mode),
         "theta_laplace": bool(theta_laplace),
         "init_base_rate": bool(init_base_rate),

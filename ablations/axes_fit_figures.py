@@ -66,7 +66,7 @@ from ablations._figures import Figure, require  # noqa: E402
 from utils.rating.features import (  # noqa: E402
     load_backend_problem_params, load_first_time_attempts)
 from utils.rating.model_constants import (  # noqa: E402
-    K_AXES, LAPSE_CAP, SIZES, clear_logit_vec)
+    K_AXES, SIZES, clear_logit_vec)
 from utils.rating.tail_agreement import TAIL_HINGE, hinged_r, tail_weight  # noqa: E402
 
 TIER = "methodology"
@@ -132,7 +132,10 @@ def load_shipped():
     require(os.path.exists(RATING_CONSTANTS), f"no {RATING_CONSTANTS}")
     with open(RATING_CONSTANTS) as f:
         lapse = float(json.load(f)["fat_finger_rate"])
-    require(0.0 <= lapse <= LAPSE_CAP, f"lapse {lapse} outside [0, {LAPSE_CAP}]")
+    # The shipped lapse is the held-row calibration's, which is bounded below
+    # one half by construction; the trainer's own cap binds the trained lapse
+    # only, and that one does not ship.
+    require(0.0 <= lapse < 0.5, f"lapse {lapse} outside [0, 0.5)")
 
     require(os.path.exists(USER_THETA), f"no {USER_THETA}")
     ut = pd.read_csv(USER_THETA)
@@ -191,18 +194,35 @@ def _unit_columns(M):
     return M / n
 
 
+def _triple_columns(tri):
+    """The shipped triple, centred and unit-normed, with a CONSTANT column as
+    zeros. Under one global floor the floor column is the same number for every
+    problem: it has no direction, nothing can correlate with it, and the
+    trainer's own target gives it none (its norm is the stabiliser's). Centring
+    it here would instead leave rounding residue to be normalised into a unit
+    vector, so it is recognised by its spread and zeroed — every cosine against
+    it reads 0, and the grid keeps its (K, 3) shape."""
+    C = tri - tri.mean(axis=0)
+    n = np.linalg.norm(C, axis=0)
+    const = n <= 1e-9 * np.sqrt(len(tri)) * np.maximum(np.abs(tri).max(axis=0), 1.0)
+    require(not const[:2].any(), "the rating or slope column is constant")
+    out = np.zeros_like(C)
+    out[:, ~const] = C[:, ~const] / n[~const]
+    return out
+
+
 def leakage(G, tri):
     """(K, 3) per-tail correlation for each end, as {'+': …, '-': …}. Entry
     [k, j] is the cosine between axis k's hinged end and centred triple column j
     — exactly the matrix ORTHO_RATING squares and sums."""
-    tz = _unit_columns(tri)
+    tz = _triple_columns(tri)
     return {nm: _unit_columns(tail_columns(G, sg)).T @ tz
             for sg, nm in ((1.0, "+"), (-1.0, "-"))}
 
 
 def whole_axis(G, tri):
     """The linear statistic the per-tail form replaces, for context only."""
-    return _unit_columns(G).T @ _unit_columns(tri)
+    return _unit_columns(G).T @ _triple_columns(tri)
 
 
 # --- identity: the taught ends against their rule columns ---------------------

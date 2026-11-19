@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""The joint-PCA ACTIVATION WIDTH's figures (methodology §1.3), read from the
-`features` refit panel: what a width costs held out, and the slope signature a
-too-wide one carries.
+"""The ACTIVATION WIDTH's figures (methodology §1.3), read from the `features`
+refit panel: what each narrower width costs held out against the full width
+that ships.
 
 A refit-tier producer never trains: it reads the arm records a panel run wrote
 under `dev_runs/<panel>/` (`ablations.run_panel`, locally or via
@@ -11,20 +11,34 @@ or STALE against the current attempt log — the pins rule `docs/mirt_benchmark.
 states, mechanized. Guards and spans keep evaluating against the last-measured
 ledger values, so the panel's cost is paid only when it is deliberately re-run.
 
+THE QUESTION IS ONE-SIDED. The shipped width is the activation store's own
+(`PCA_DIM == ACT_STORE_DIM`: every channel, standardized, unrotated), so there
+is no wider arm and nothing here can say the shipped width "wins from both
+sides". What the panel measures is what each NARROWER joint-PCA width costs
+against it, and whether that cost is monotone in the width.
+
+THE SHIPPED ARM DIFFERS FROM THE NARROWER ONES IN TWO WAYS AT ONCE: it keeps
+every channel, and it is not rotated, where a narrower arm is the leading
+components of a joint PCA of the same channels. No rotated full-width arm
+exists (a width at or above the store's means no rotation), so a cost here is
+the cost of the narrower REPRESENTATION as a whole — truncation and rotation
+together — and must not be quoted as the cost of dropping channels alone.
+
 THE SCORE IS ON HELD-OUT PROBLEMS, not on the shipped row split. Every arm runs
 `stop_unit="problem"`, so a held-aside problem contributes no row to training at
 all and its parameters come from the feature trunk alone — the only split that
-can score a claim about the FEATURE side. The row split that ships is a
-convergence detector: it leaves every problem partly trained, so a width wide
-enough to fingerprint individual problems is rewarded by it rather than caught.
+can score a claim about the FEATURE side. The row split leaves every problem
+partly trained, so a representation able to fingerprint individual problems is
+rewarded by it rather than caught. A problem-held arm is UNCALIBRATED: its
+floor, lapse and slope scale are as trained — one treatment across every arm,
+so the paired costs stand, while the levels and the slopes are not the shipped
+(row-held, calibrated) fit's and must not be quoted beside it.
 
-THE HEADLINE READING IS THE MEAN OVER THE LAST THIRD OF THE BUDGET. The shipped
-configuration's own held-out trace wanders by more than ten millinats across the
-last third of its run, which is wider than the contrasts this panel is asked
-about, so a single epoch's value is not a stable estimate of where an arm sits.
-The final-epoch reading is computed and printed beside it, as the spread one
-checkpoint carries, but it carries no key of its own: a second key for the same
-contrast is an invitation to quote the less stable one.
+THE HEADLINE READING IS THE MEAN OVER THE LAST THIRD OF THE BUDGET, the window
+the other refit producers read their settled level over. The final-epoch
+reading is computed and printed beside it, as the spread one checkpoint
+carries, but it carries no key of its own: a second key for the same contrast
+is an invitation to quote the less stable one.
 
 PAIRING AND SEEDS. Within one seed every arm holds aside the same problems, so a
 cross-arm delta is paired, and that is the quantity below. The two seeds hold
@@ -32,49 +46,52 @@ aside DIFFERENT problems, so no cross-seed delta exists here and none is taken:
 a contrast is formed inside a seed and the seeds are averaged afterwards. What
 the second seed buys is a second independent estimate of the same paired delta,
 and each contrast carries a 0/1 indicator saying whether the seeds agreed in
-SIGN. That agreement stands in for §1.3's problem-clustered paired bootstrap,
-which this panel does not compute.
+SIGN. The seed also re-rolls the randomized PCA basis of the narrower arms.
 
-A REFUTED DIRECTION IS REPORTED, NOT RAISED. Should a swept width beat the
-shipped one, the indicators come back 0 and the costs come back signed; the
-fig-guards beside §1.3's sentences are what fire, because it is then the
-sentence and not the number that has to change.
+A REFUTED DIRECTION IS REPORTED, NOT RAISED. Should a narrower width beat the
+shipped one, the indicators come back 0 and the costs come back signed; a
+fig-guard beside the sentence is what fires, because it is then the sentence
+and not the number that has to change.
 
-  features.pca<W>_holdout_bce      held-out-PROBLEM cross-entropy at width W,
-                                   nats per attempt, last-third mean, averaged
-                                   over the two seeds. Descriptive only: the
-                                   seeds hold out different problems, so this
-                                   column is a level and never a comparison.
-  features.pca<W>_cost_mnat        width W against the shipped 128, millinats,
-                                   PAIRED inside a seed and then averaged over
-                                   the seeds. Signed, positive = worse than 128.
+  features.pca<W>_holdout_bce      held-out-PROBLEM cross-entropy at width W
+                                   (64, 128, 256, 512), nats per attempt,
+                                   last-third mean, averaged over the two seeds.
+                                   Descriptive only: the seeds hold out
+                                   different problems, so this column is a level
+                                   and never a comparison.
+  features.pca<W>_cost_mnat        narrower width W (64, 128, 256) against the
+                                   shipped 512, millinats, PAIRED inside a seed
+                                   and then averaged over the seeds. Signed,
+                                   positive = worse than the shipped width.
   features.pca<W>_cost_sign_consistent
                                    1 only when both seeds put that contrast on
                                    the same side of zero, on the headline
                                    reading. For a `<!-- fig-guard: KEY == 1 -->`,
-                                   not a span. Held to the headline reading
-                                   alone — unlike the barrier panel's, where the
-                                   final epoch carries a key of its own — because
-                                   an indicator this module's own figures depend
-                                   on cannot rest on a reading it declines to
-                                   quote. The final-epoch readings' agreement is
-                                   printed beside it as context.
-  features.pca128_wins_both_sides  1 only when 128 beats BOTH its neighbours in
-                                   the swept set (64 below, 256 above) at every
-                                   seed — §1.3's "wins from both sides".
-  features.pca<W>_slope_median     median fitted per-problem slope at width W,
-                                   averaged over the seeds.
-  features.pca256_highest_slope    1 only when 256 carries the highest median
-                                   slope of any arm at every seed — the
-                                   memorization signature §1.3 names.
+                                   not a span. The final-epoch readings'
+                                   agreement is printed beside it as context.
+  features.narrower_all_cost       1 only when EVERY narrower width scores worse
+                                   held out than the shipped one at EVERY seed.
+  features.cost_monotone_in_width  1 only when, at every seed, the held-out
+                                   score strictly improves at each step up the
+                                   swept widths (64 > 128 > 256 > 512) — the
+                                   cost of narrowing grows the further one
+                                   narrows. A 0 with `narrower_all_cost` 1 means
+                                   every narrower width costs but not in order.
+  features.pca<W>_slope_median     median as-trained per-problem slope at width
+                                   W, averaged over the seeds.
+  features.slope_rises_with_width  1 only when the median slope strictly rises
+                                   at each step up the swept widths at every
+                                   seed. DESCRIPTIVE: under the previous
+                                   baseline a wider-than-shipped arm carrying
+                                   the highest slope was read as a memorization
+                                   signature against widening; with no wider arm
+                                   that argument has nothing to reject, and this
+                                   indicator licenses no such sentence by itself.
 
-WHAT THIS PANEL CANNOT SETTLE. §1.3's sweep was end to end — each width
-re-rated, re-mapped, re-fit and re-axed — and this panel stops at the fit: no
-rank mapping is re-derived and no motif count is re-counted, so the claim that 64
-collapses the motif count to its floor has no figure here and must not be read
-off one. The panel also runs two seeds against the document's three, and does not
-run the widths 8 and 32 at all; the claim's two ends are represented by 16 and
-256.
+WHAT THIS PANEL CANNOT SETTLE. These arms stop at the fit: no rank mapping is
+re-derived and no motif reading re-counted, so what a width does downstream of
+the likelihood has no figure here. Truncation is not separated from rotation,
+above. And the panel runs two seeds.
 
     ./.venv/bin/python3 -m ablations.refit_features_figures
 """
@@ -92,7 +109,8 @@ if PROJECT_ROOT not in sys.path:
 
 from ablations._figures import Figure, require, panel_regime  # noqa: E402
 from utils.paths import DB_SQLITE  # noqa: E402
-from utils.rating.model_constants import PCA_DIM, PRODUCTION_BLOCKS  # noqa: E402
+from utils.rating.model_constants import (  # noqa: E402
+    ACT_STORE_DIM, PCA_DIM, PRODUCTION_BLOCKS)
 
 TIER = "refit"
 
@@ -100,16 +118,16 @@ PANEL = "features"
 PANEL_DIR = os.path.join(PROJECT_ROOT, "ablations", "dev_runs", PANEL)
 MANIFEST = os.path.join(PROJECT_ROOT, "ablations", "panels", f"{PANEL}.json")
 
-# The swept widths, ascending — the order "wins from both sides" is read along.
-# 8 and 32 are deliberately absent: the claim's two ends are represented by the
-# widths at either end of this list.
-WIDTHS = (16, 64, 128, 256)
-SHIPPED_WIDTH = 128
-CONTRASTS = tuple(w for w in WIDTHS if w != SHIPPED_WIDTH)
-# 128's neighbours IN THE SWEPT SET — the pair "from both sides" is about here.
-NEIGHBOURS = tuple(w for w in (64, 256) if w in WIDTHS)
-# The width whose median slope §1.3 calls the memorization signature.
-MEMORIZING_WIDTH = 256
+# The swept widths, ascending — the order monotonicity is read along. The last
+# is the shipped one and the widest there is: the activation store's own width,
+# unrotated (checked against PCA_DIM and ACT_STORE_DIM in `load_panel`; the
+# figure keys embed the widths, so they are stated rather than derived).
+WIDTHS = (64, 128, 256, 512)
+SHIPPED_WIDTH = WIDTHS[-1]
+# Every narrower width, each contrasted against the shipped one.
+CONTRASTS = WIDTHS[:-1]
+# Adjacent pairs, narrower first: the steps monotonicity is read over.
+STEPS = tuple(zip(WIDTHS, WIDTHS[1:]))
 SEEDS = (0, 1)
 # Every arm scores on held-out PROBLEMS: the claim is about the feature side,
 # and the shipped row split leaves every problem partly trained.
@@ -141,6 +159,11 @@ def load_panel():
             f"{MANIFEST} names arms {sorted(manifest['arms'])}, this producer "
             f"reads {sorted(ARMS.values())} — the manifest and the claims have "
             f"separated")
+    require(SHIPPED_WIDTH == int(PCA_DIM) == int(ACT_STORE_DIM),
+            f"this panel's baseline is a width of {SHIPPED_WIDTH}, but the tree "
+            f"ships PCA_DIM={PCA_DIM} over a store of {ACT_STORE_DIM} channels "
+            f"— the panel is one-sided BECAUSE the shipped width is the full, "
+            f"unrotated store, and that is no longer what ships")
 
     arms = {}
     for key, arm in ARMS.items():
@@ -216,7 +239,7 @@ def load_panel():
     base = arms[(SHIPPED_WIDTH, SEEDS[0])]["pins"]
     for key, r in arms.items():
         for pin in ("db_max_id", "gpu", "labels_sha", "proxies_sha",
-                    "blocks", "k_axes"):
+                    "blocks", "act_source", "k_axes"):
             require(r["pins"][pin] == base[pin],
                     f"{ARMS[key]}'s pin {pin} ({r['pins'][pin]!r}) differs from "
                     f"the shipped arm's ({base[pin]!r}) — the arms are not one "
@@ -342,11 +365,14 @@ def measure():
             "final_sign_consistent": same_sign(finals),
         }
 
-    # "WINS FROM BOTH SIDES": the shipped width beats the width below it AND the
-    # width above it, at every seed — one criterion over the whole panel, never
-    # an average that one seed could carry.
-    wins_both = int(all(level[(SHIPPED_WIDTH, s)] < level[(w, s)]
-                        for s in SEEDS for w in NEIGHBOURS))
+    # THE ONE-SIDED QUESTION, as two criteria over the whole panel, never an
+    # average that one seed could carry: every narrower width is worse than the
+    # shipped one at every seed, and the held-out score strictly improves at
+    # each step up the widths at every seed.
+    all_cost = int(all(level[(w, s)] > level[(SHIPPED_WIDTH, s)]
+                       for s in SEEDS for w in CONTRASTS))
+    monotone = int(all(level[(lo, s)] > level[(hi, s)]
+                       for s in SEEDS for lo, hi in STEPS))
 
     slope = {}
     for key, r in arms.items():
@@ -358,10 +384,12 @@ def measure():
         require(math.isfinite(v) and v > 0.0,
                 f"{ARMS[key]}'s median slope is {v!r}, which is not a slope")
         slope[key] = v
-    # The memorization signature is a per-seed maximum held to every seed: a
-    # mean over seeds could be carried by one arm alone.
+    # Descriptive: whether the median slope climbs with the width, held to every
+    # step at every seed. These are AS-TRAINED slopes — a problem-held arm is
+    # uncalibrated, so no slope multiplier has been folded in.
     top_slope = {s: max(WIDTHS, key=lambda w: slope[(w, s)]) for s in SEEDS}
-    highest_slope = int(all(top_slope[s] == MEMORIZING_WIDTH for s in SEEDS))
+    slope_rises = int(all(slope[(lo, s)] < slope[(hi, s)]
+                          for s in SEEDS for lo, hi in STEPS))
 
     # The shipped arm's own spread over the window every contrast is read on —
     # printed as the reason the tail reading is the headline one.
@@ -379,11 +407,11 @@ def measure():
         "level": level, "final": final, "contrasts": contrasts,
         "holdout_bce": {w: statistics.fmean(level[(w, s)] for s in SEEDS)
                         for w in WIDTHS},
-        "wins_both": wins_both,
+        "all_cost": all_cost, "monotone": monotone,
         "slope": slope,
         "slope_mean": {w: statistics.fmean(slope[(w, s)] for s in SEEDS)
                        for w in WIDTHS},
-        "top_slope": top_slope, "highest_slope": highest_slope,
+        "top_slope": top_slope, "slope_rises": slope_rises,
         "wander": wander,
         "stop_rows": {s: arms[(SHIPPED_WIDTH, s)]["metrics"]["stop_rows"]
                       for s in SEEDS},
@@ -399,8 +427,8 @@ def figures():
     for w in WIDTHS:
         out.append(Figure(
             f"features.pca{w}_holdout_bce", m["holdout_bce"][w], ".4f",
-            f"held-out-PROBLEM cross-entropy at a joint-PCA activation width of "
-            f"{w}, nats per attempt, meaned over the last third of the budget "
+            f"held-out-PROBLEM cross-entropy at an activation width of "
+            f"{w}{' (the shipped full width, unrotated)' if w == SHIPPED_WIDTH else ' (joint PCA)'}, nats per attempt, meaned over the last third of the budget "
             f"and then {over}. A level, not a comparison: the seeds hold aside "
             f"different problems"))
     for w in CONTRASTS:
@@ -410,7 +438,10 @@ def figures():
             f"held-out-problem cost of a width of {w} against the shipped "
             f"{SHIPPED_WIDTH}, millinats over the last third of the budget, "
             f"signed (positive = worse than the shipped width). PAIRED inside a "
-            f"seed — both arms hold aside the same problems — and then {over}"))
+            f"seed — both arms hold aside the same problems — and then {over}. "
+            f"The narrower arm is a joint-PCA truncation and the shipped one is "
+            f"unrotated, so this is the cost of the narrower representation, "
+            f"not of dropping channels alone"))
         out.append(Figure(
             f"features.pca{w}_cost_sign_consistent", c["sign_consistent"], "d",
             f"1 when both seeds put the {w}-against-{SHIPPED_WIDTH} contrast on "
@@ -418,22 +449,32 @@ def figures():
             f"disagree — the two seeds being independent estimates of one paired "
             f"delta. An indicator for a fig-guard beside a sentence naming that "
             f"contrast's direction, not for a span"))
+    chain = " > ".join(str(w) for w in WIDTHS)
     out.append(Figure(
-        "features.pca128_wins_both_sides", m["wins_both"], "d",
-        f"1 when the shipped width scores better held out than BOTH its "
-        f"neighbours in the swept set ({NEIGHBOURS[0]} below, {NEIGHBOURS[1]} "
-        f"above) at every seed, on the last-third reading — §1.3's 'wins from "
-        f"both sides' as one indicator"))
+        "features.narrower_all_cost", m["all_cost"], "d",
+        f"1 when every narrower width ({', '.join(map(str, CONTRASTS))}) scores "
+        f"worse held out than the shipped {SHIPPED_WIDTH} at every seed, on the "
+        f"last-third reading; 0 when any narrower arm matches or beats it at "
+        f"any seed. An indicator for a fig-guard, not a span"))
+    out.append(Figure(
+        "features.cost_monotone_in_width", m["monotone"], "d",
+        f"1 when, at every seed, the held-out-problem cross-entropy strictly "
+        f"falls at each step up the swept widths ({chain} in cross-entropy), on "
+        f"the last-third reading — narrowing further always costs more; 0 when "
+        f"any step at any seed breaks that order. An indicator for a "
+        f"fig-guard, not a span"))
     for w in WIDTHS:
         out.append(Figure(
             f"features.pca{w}_slope_median", m["slope_mean"][w], ".2f",
             f"median fitted per-problem slope at a width of {w}, over every "
-            f"fitted problem, {over}"))
+            f"fitted problem, {over}. AS TRAINED: the arms hold out whole "
+            f"problems and are uncalibrated, so this is not on the shipped "
+            f"slopes' scale"))
     out.append(Figure(
-        f"features.pca{MEMORIZING_WIDTH}_highest_slope", m["highest_slope"], "d",
-        f"1 when the {MEMORIZING_WIDTH}-wide arm carries the highest median "
-        f"slope of any arm at every seed — the memorization signature §1.3 "
-        f"names, as an indicator"))
+        "features.slope_rises_with_width", m["slope_rises"], "d",
+        f"1 when the median as-trained slope strictly rises at each step up "
+        f"the swept widths at every seed, 0 otherwise. Descriptive only: with "
+        f"no arm wider than the shipped one it is not evidence about widening"))
     return out
 
 
@@ -442,7 +483,8 @@ def figures():
 def main():
     m = measure()
     lo, hi, n = m["tail_epochs"]
-    print(f"\nfeatures panel — methodology §1.3, the joint-PCA activation width")
+    print(f"\nfeatures panel — methodology §1.3, the activation width "
+          f"(narrower joint-PCA widths against the shipped full width)")
     print(f"{len(WIDTHS)} widths x {len(SEEDS)} seeds {list(SEEDS)}, full budget "
           f"({m['budget']} epochs, {m['schedule']} rate), one machine "
           f"({m['gpu']}),")
@@ -464,7 +506,11 @@ def main():
               + "".join(f"{m['slope'][(w, s)]:>11.2f}" for s in SEEDS)
               + ("   <- shipped width" if w == SHIPPED_WIDTH else ""))
     print(f"  held-out cross-entropy in nats per attempt; slope is the median "
-          f"over every fitted problem.")
+          f"over every fitted problem, AS TRAINED")
+    print(f"  (problem-held arms are uncalibrated). The shipped width is the "
+          f"store's own, unrotated; the others")
+    print(f"  are joint-PCA truncations, so a row differs from the shipped one "
+          f"by rotation as well as by width.")
 
     print(f"\nheld-out cost against the shipped width AT THE SAME SEED, "
           f"millinats (positive = worse)")
@@ -490,13 +536,15 @@ def main():
           f"disagreement there is the wander below,")
     print(f"  which is why the tail reading is the one quoted.")
 
-    print(f"\n  {SHIPPED_WIDTH} beats both its swept neighbours "
-          f"({NEIGHBOURS[0]} and {NEIGHBOURS[1]}) at every seed: "
-          f"{'YES' if m['wins_both'] else 'NO'}")
+    print(f"\n  every narrower width worse than {SHIPPED_WIDTH} at every "
+          f"seed: {'YES' if m['all_cost'] else 'NO'}")
+    print(f"  held-out score strictly better at each step up "
+          f"({' -> '.join(map(str, WIDTHS))}) at every seed: "
+          f"{'YES' if m['monotone'] else 'NO'}")
     print(f"  highest median slope: "
           + ", ".join(f"seed {s} -> {m['top_slope'][s]}" for s in SEEDS)
-          + f"   ({MEMORIZING_WIDTH} highest at every seed: "
-          + f"{'YES' if m['highest_slope'] else 'NO'})")
+          + f"   (rising at every step at every seed: "
+          + f"{'YES' if m['slope_rises'] else 'NO'})")
 
     print(f"\nthe shipped width's own held-out wander over epochs {lo}..{hi} — "
           f"why the tail reading is the headline")
@@ -506,12 +554,10 @@ def main():
     print(f"  A contrast read at one checkpoint carries this spread on top of "
           f"itself.")
 
-    print(f"\nOut of this panel's reach: §1.3's sweep was end to end and these "
-          f"arms stop at the fit — no rank")
-    print(f"mapping is re-derived and no motif count re-counted, so 64's motif "
-          f"collapse is not measured here.")
-    print(f"Widths 8 and 32 are not run; the claim's ends are represented by "
-          f"{WIDTHS[0]} and {WIDTHS[-1]}.\n")
+    print(f"\nOut of this panel's reach: the arms stop at the fit — no rank "
+          f"mapping is re-derived and no motif")
+    print(f"reading re-counted — and truncation is not separated from "
+          f"rotation: no rotated {SHIPPED_WIDTH}-wide arm exists.\n")
 
 
 if __name__ == "__main__":

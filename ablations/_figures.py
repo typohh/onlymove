@@ -99,8 +99,25 @@ def require(condition, message):
         raise AblationError(message)
 
 
+# The rates every record ran at before the fit recorded its own: the network at
+# 3e-4 and the free per-user fields 33x faster. A record with no `lr_net` /
+# `lr_field` in its metrics and none in its config ran at these.
+LEGACY_LR_NET = 3e-4
+LEGACY_LR_FIELD = 1e-2
+LEGACY_SHALLOW_W = 0.3
+
+
+def arm_rates(record):
+    """(network rate, field rate) an arm ran at: what the fit recorded, else
+    what its config declared, else the rates every earlier record ran at."""
+    mt, cfg = record["metrics"], record.get("config", {})
+    return (float(mt.get("lr_net", cfg.get("lr_net", LEGACY_LR_NET))),
+            float(mt.get("lr_field", cfg.get("lr_field", LEGACY_LR_FIELD))))
+
+
 def panel_regime(records, ramp_may_vary=False, mutual_may_vary=False,
-                 prior_may_vary=False):
+                 prior_may_vary=False, rates_may_vary=False,
+                 barrier_may_vary=False):
     """The (epoch budget, learning-rate schedule) a panel's arms share, or a
     hard failure if they differ — and the opening ramp and the mutual-
     orthogonality term (weight, detachment), which the arms must also share
@@ -186,6 +203,20 @@ def panel_regime(records, ramp_may_vary=False, mutual_may_vary=False,
         require(prior_may_vary or len(vals) == 1,
                 f"the panel's arms ran {knob} = {sorted(vals)} — the panel "
                 f"straddles a baseline change")
+    # SO ARE THE TWO LEARNING RATES. The panel that sweeps them by design
+    # (`lr`) says so and reads them off its own records.
+    rates = {arm_rates(r) for r in records.values()}
+    require(rates_may_vary or len(rates) == 1,
+            f"the panel's arms ran (network, field) rates of {sorted(rates)} — "
+            f"the panel straddles a baseline change")
+    # AND THE SLOPE BARRIER. A record that predates the key ran the weight its
+    # config declared, else the 0.3 every earlier fit carried. The panel that
+    # sweeps it by design (`barrier`) says so.
+    barriers = {float(r["metrics"].get("shallow_w", r.get("config", {}).get(
+        "shallow_w", LEGACY_SHALLOW_W))) for r in records.values()}
+    require(barrier_may_vary or len(barriers) == 1,
+            f"the panel's arms ran slope-barrier weights of {sorted(barriers)} "
+            f"— the panel straddles a baseline change")
     return budgets.pop(), schedules.pop()
 
 

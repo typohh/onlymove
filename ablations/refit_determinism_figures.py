@@ -98,7 +98,14 @@ def regime_of(record):
 
 
 def load_arms():
-    """Every arm record under dev_runs, as (panel, arm, record, arm_dir)."""
+    """Every arm record under dev_runs, as (panel, arm, record, arm_dir).
+
+    AN ARM RECORD IS WHAT `ablations.ablation_mirt` WRITES: config, pins and
+    metrics. `dev_runs/` also holds JSON that is not one — the exploration
+    records under `prod_candidates/` are `{name, config, metrics}` with no
+    pins — and a record that cannot say which machine, revision and attempt
+    log it ran against cannot be half of a repeat, whose whole scope is one
+    machine at one revision. Such files are passed over, never guessed at."""
     out = []
     for panel in sorted(os.listdir(DEV_RUNS)) if os.path.isdir(DEV_RUNS) else []:
         panel_dir = os.path.join(DEV_RUNS, panel)
@@ -109,6 +116,9 @@ def load_arms():
                 continue
             arm = entry[:-len(".json")]
             record = json.load(open(os.path.join(panel_dir, entry)))
+            if not (isinstance(record, dict)
+                    and {"config", "pins", "metrics"} <= set(record)):
+                continue
             out.append((panel, arm, record,
                         os.path.join(panel_dir, arm)))
     return out

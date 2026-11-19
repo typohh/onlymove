@@ -1,49 +1,49 @@
 {
   "panel": "axis_count",
-  "description": "methodology 1.14 \u2014 selecting the axis COUNT on held-out likelihood, the standing alternative to the shipping decision of one axis per taught rule. The claim is that the criterion cannot order its candidates: the counts separate the combined held-out likelihood by less than the spread between holdout draws, so a number that cannot tell the arms apart cannot choose among them; and the axis increment, which rises with the count whether or not the model predicts better, is the trap that would recommend the largest count tried. THE BANKS ARE NESTED BY CONSTRUCTION, so only the count varies: a fit at k keeps the first k `components` of axes/labels.json and teaches nothing else, which is the trainer's own truncation rather than a second bank written for this panel. EIGHT AXES CANNOT BE RUN. axes/labels.json ships seven components and a count above what it lists halts, there being no rule to teach the extra axis with, so this panel tests four against six against seven and the document's eight-axis point is out of its reach. Counts 4 and 6 are the sweep; 7 is the shipped count and the panel's baseline. EVERY COUNT RUNS AT THREE SEEDS, and the seed is what moves the holdout draw, so the seeds ARE the claim's draws \u2014 three of them against the document's four. Within one seed every arm holds aside the SAME rows and a gap between counts is paired; across seeds nothing is paired, and a cross-seed likelihood delta is never quotable from this panel.",
+  "description": "methodology 1.14 \u2014 selecting the axis COUNT on held-out likelihood, the standing alternative to the shipping decision of one axis per taught rule. The claim is that the criterion cannot order its candidates: the counts separate the combined held-out likelihood by less than the spread between holdout draws, so a number that cannot tell the arms apart cannot choose among them; and the axis increment, which rises with the count whether or not the model predicts better, is the trap that would recommend the largest count tried. THE BANKS ARE NESTED BY CONSTRUCTION, so only the count varies: a fit at k keeps the first k `components` of axes/labels.json and teaches nothing else (`load_bank`'s `spec[:k_axes]`), which is the trainer's own truncation rather than a second bank written for this panel. At the nine components that ship \u2014 life and death, yose, ko, opening, tenuki, sente, semeai, territory, influence \u2014 five axes stop after tenuki, seven add sente and semeai, and nine add territory and influence. A COUNT ABOVE NINE CANNOT BE RUN: axes/labels.json lists nine components and a count above what it lists halts, there being no rule to teach the extra axis with. Counts 5 and 7 are the sweep; 9 is the shipped count and the panel's baseline. EVERY ARM HOLDS OUT WHOLE PROBLEMS (stop_unit=problem), so it is uncalibrated and scored as trained. EVERY COUNT RUNS AT THREE SEEDS, and the seed is what moves the holdout draw, so the seeds ARE the claim's draws. Within one seed every arm holds aside the SAME problems and a gap between counts is paired; across seeds nothing is paired, and a cross-seed likelihood delta is never quotable from this panel.",
   "arms": {
-    "k4_s0": {
-      "k_axes": 4,
+    "k5_s0": {
+      "k_axes": 5,
       "seed": 0,
       "stop_unit": "problem"
     },
-    "k4_s1": {
-      "k_axes": 4,
+    "k5_s1": {
+      "k_axes": 5,
       "seed": 1,
       "stop_unit": "problem"
     },
-    "k4_s2": {
-      "k_axes": 4,
+    "k5_s2": {
+      "k_axes": 5,
       "seed": 2,
       "stop_unit": "problem"
     },
-    "k6_s0": {
-      "k_axes": 6,
+    "k7_s0": {
+      "k_axes": 7,
       "seed": 0,
       "stop_unit": "problem"
     },
-    "k6_s1": {
-      "k_axes": 6,
+    "k7_s1": {
+      "k_axes": 7,
       "seed": 1,
       "stop_unit": "problem"
     },
-    "k6_s2": {
-      "k_axes": 6,
+    "k7_s2": {
+      "k_axes": 7,
       "seed": 2,
       "stop_unit": "problem"
     },
-    "shipped_k7_s0": {
-      "k_axes": 7,
+    "shipped_k9_s0": {
+      "k_axes": 9,
       "seed": 0,
       "stop_unit": "problem"
     },
-    "shipped_k7_s1": {
-      "k_axes": 7,
+    "shipped_k9_s1": {
+      "k_axes": 9,
       "seed": 1,
       "stop_unit": "problem"
     },
-    "shipped_k7_s2": {
-      "k_axes": 7,
+    "shipped_k9_s2": {
+      "k_axes": 9,
       "seed": 2,
       "stop_unit": "problem"
     }

@@ -17,10 +17,17 @@ construction: a fit at k teaches the first k `components` of `axes/labels.json`
 and nothing else, which is the trainer's own truncation rather than a second
 bank written for this measurement, so between two arms only the count differs.
 
-EIGHT AXES ARE OUT OF REACH. `axes/labels.json` ships seven components and a
-count above what it lists halts, there being no rule to teach the extra axis
-with. So the panel tests four against six against seven, and §1.14's eight-axis
-arm is not a larger version of anything here.
+A COUNT ABOVE THE SHIPPED ONE IS OUT OF REACH. `axes/labels.json` lists exactly
+as many components as ship (nine) and a count above what it lists halts, there
+being no rule to teach the extra axis with. So the panel tests five against
+seven against nine: five stops after the fifth listed rule, seven after the
+seventh, and nothing here says what a tenth axis would do.
+
+EVERY ARM HOLDS OUT WHOLE PROBLEMS and so runs UNCALIBRATED: its floor, lapse
+and slope scale are as trained, and its held-out score is the as-trained
+curve's. That is one treatment across every arm, so the paired gaps stand; the
+LEVELS are not the shipped (row-held, calibrated) fit's and must not be quoted
+beside it.
 
 THE DRAWS ARE THE SEEDS. The seed drives the initialization AND the held-aside
 split, so WITHIN one seed every count holds aside the same rows and a gap
@@ -40,13 +47,13 @@ arm has settled, and is what the headline keys carry. The final-epoch reading is
 emitted beside it because it is what a reader of the trace computes first, and
 the two disagreeing by more than the draw spread would itself be a finding.
 
-  axis_count.k4_vs_k6_gap_mnat   THE COMBINED-LIKELIHOOD GAPS between adjacent
-  axis_count.k6_vs_k7_gap_mnat   counts, millinats, each PAIRED within a seed
+  axis_count.k5_vs_k7_gap_mnat   THE COMBINED-LIKELIHOOD GAPS between adjacent
+  axis_count.k7_vs_k9_gap_mnat   counts, millinats, each PAIRED within a seed
                                  and then averaged over the seeds, read over the
                                  last third of the budget. Signed so that
                                  positive means the SMALLER count fits worse.
-  axis_count.k4_vs_k6_gap_final_mnat  the same two gaps at the final epoch
-  axis_count.k6_vs_k7_gap_final_mnat  alone.
+  axis_count.k5_vs_k7_gap_final_mnat  the same two gaps at the final epoch
+  axis_count.k7_vs_k9_gap_final_mnat  alone.
   axis_count.largest_gap_mnat    the larger of the two headline gaps in absolute
                                  value — the best case for the criterion.
   axis_count.draw_spread_mnat    the SPREAD BETWEEN DRAWS it is read against:
@@ -55,9 +62,9 @@ the two disagreeing by more than the draw spread would itself be a finding.
   axis_count.gaps_within_draw_spread  1 when the counts are separated by less
                                  than that spread, i.e. when "the likelihood
                                  cannot order the counts" stands as stated.
-  axis_count.increment_k4_mnat   THE TRAP: the axis increment per count —
-  axis_count.increment_k6_mnat   `stop_bce_no_axes - stop_bce`, what zeroing the
-  axis_count.increment_k7_mnat   axis term costs on the panel's held-aside
+  axis_count.increment_k5_mnat   THE TRAP: the axis increment per count —
+  axis_count.increment_k7_mnat   `stop_bce_no_axes - stop_bce`, what zeroing the
+  axis_count.increment_k9_mnat   axis term costs on the panel's held-aside
                                  sample at the final state — millinats,
                                  averaged over seeds.
   axis_count.increment_rises_with_count  1 when that increment is strictly
@@ -72,14 +79,12 @@ they license, never for a span, and a 0 on either is a real outcome that fires
 its guard rather than something this producer suppresses: the panel is capable
 of refuting the claim it measures.
 
-WHAT THIS PANEL DOES NOT REACH. §1.14 states its sweep over four holdout draws
-and this panel affords three, so the draw spread here rests on three points;
-§1.14's per-draw clause — that the largest gap clears its own uncertainty on
-every draw while the next does not — is visible in the printed per-seed table
-but carries no key, since with three seeds the per-configuration wander is
-estimated once and a per-draw uncertainty test would be reading that one
-estimate three times. The eight-axis arm is unreachable outright, above. And
-nothing here is a statement about which RULES earn axes: the half-reliability
+WHAT THIS PANEL DOES NOT REACH. The draw spread rests on three points. Whether
+a gap clears its own uncertainty on each draw is visible in the printed
+per-seed table but carries no key, since with three seeds the
+per-configuration wander is estimated once and a per-draw uncertainty test
+would be reading that one estimate three times. A count above the shipped one
+is unreachable outright, above. And nothing here is a statement about which RULES earn axes: the half-reliability
 measurement §1.14 rests that on is a per-user identifiability question, not a
 likelihood one, and no arm of this panel measures it.
 
@@ -107,12 +112,13 @@ PANEL = "axis_count"
 PANEL_DIR = os.path.join(PROJECT_ROOT, "ablations", "dev_runs", PANEL)
 MANIFEST = os.path.join(PROJECT_ROOT, "ablations", "panels", f"{PANEL}.json")
 
-# The counts the panel sweeps, ascending, and the shipped one among them. Seven
-# is the baseline because it is what ships; four and six are reachable because
-# the bank truncates, and nothing above seven is reachable at all — labels.json
-# lists seven components and the trainer halts rather than teaching an axis it
-# has no rule for.
-COUNTS = (4, 6, 7)
+# The counts the panel sweeps, ascending, and the shipped one among them. Nine
+# is the baseline because it is what ships (checked against K_AXES below; the
+# figure keys embed the counts, so they are stated rather than derived); five
+# and seven are reachable because the bank truncates, and nothing above nine is
+# reachable at all — labels.json lists nine components and the trainer halts
+# rather than teaching an axis it has no rule for.
+COUNTS = (5, 7, 9)
 BASELINE_COUNT = COUNTS[-1]
 # Adjacent pairs, smaller first: the gaps a count criterion would read.
 ADJACENT = tuple(zip(COUNTS, COUNTS[1:]))
@@ -122,7 +128,7 @@ ADJACENT = tuple(zip(COUNTS, COUNTS[1:]))
 SEEDS = (0, 1, 2)
 # The arm-name stem per count. The baseline says what it is in its own name, so
 # a record cannot be mistaken for one of the swept arms.
-STEM = {4: "k4", 6: "k6", 7: "shipped_k7"}
+STEM = {5: "k5", 7: "k7", 9: "shipped_k9"}
 
 
 # What a held-aside score is scored ON, as the noun the printout and the figure
@@ -477,9 +483,11 @@ def main():
     print(f"  the shipped count is {BASELINE_COUNT}; the banks are nested, so a "
           f"shorter arm teaches the first k rules of axes/labels.json and "
           f"nothing else")
-    print(f"  eight axes are unreachable: a count above the number of "
-          f"components axes/labels.json lists halts, there being no rule to "
-          f"teach the extra axis with")
+    print(f"  no count above {BASELINE_COUNT} is reachable: a count above the "
+          f"number of components axes/labels.json lists halts, there being no "
+          f"rule to teach the extra axis with")
+    print(f"  every arm holds out whole {m['unit_noun']} and is scored as "
+          f"trained (uncalibrated), so these levels are not the shipped fit's")
     print(f"  held-out = the stop split; 'last third' = the "
           f"{m['window_points']} checkpoints from epoch {m['window_from']} to "
           f"{m['budget']}")
@@ -530,10 +538,9 @@ def main():
     print(f"\n  the shipped count's own wander INSIDE the window, per seed "
           f"(millinats, what the window mean averages down): "
           + ", ".join(f"s{s} {m['wander'][s]:.1f}" for s in SEEDS))
-    print("\n  NOT measured here: the eight-axis arm (no rule to teach it "
-          "with), §1.14's fourth holdout draw, and the per-rule "
-          "half-reliability question, which is per-user identifiability rather "
-          "than a likelihood.")
+    print(f"\n  NOT measured here: any count above {BASELINE_COUNT} (no rule "
+          f"to teach it with), and the per-rule half-reliability question, "
+          f"which is per-user identifiability rather than a likelihood.")
 
 
 if __name__ == "__main__":

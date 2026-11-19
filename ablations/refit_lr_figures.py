@@ -106,8 +106,8 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
-from ablations._figures import Figure, require, panel_regime  # noqa: E402
-from pipeline.train_mirt import LR_FIELD, LR_NET  # noqa: E402
+from ablations._figures import (Figure, require, panel_regime, arm_rates,  # noqa: E402
+                                LEGACY_LR_NET, LEGACY_LR_FIELD)
 from utils.paths import DB_SQLITE  # noqa: E402
 from utils.rating.model_constants import SEED  # noqa: E402
 
@@ -202,7 +202,7 @@ def load_panel():
     # current constants: the arms are only ever compared to each other, so a
     # later change to the shipped budget or schedule must not make a finished
     # panel unquotable.
-    budget, schedule = panel_regime(arms)
+    budget, schedule = panel_regime(arms, rates_may_vary=True)
     unit = panel_unit(arms)
     for arm, r in arms.items():
         require(r["metrics"]["trace"]
@@ -246,9 +246,7 @@ def load_panel():
     # Stated here rather than only in the manifest, because a producer that
     # cannot say which ratio it measured cannot be checked. Every replicate is
     # checked too: a seed is the only thing a replicate may change.
-    rates = {arm: (float(r["config"].get("lr_net", LR_NET)),
-                   float(r["config"].get("lr_field", LR_FIELD)))
-             for arm, r in arms.items()}
+    rates = {arm: arm_rates(r) for arm, r in arms.items()}
     for g in groups:
         for cfg, want in (("ratio1x", 1.0), ("ratio10x", 10.0)):
             arm = g["arms"][cfg]
@@ -258,8 +256,8 @@ def load_panel():
                     f"{want:g} — the arm does not measure the point it is named "
                     f"for")
         arm = g["arms"]["net_slow"]
-        require(math.isclose(rates[arm][0], LR_NET / 3.0, rel_tol=1e-9)
-                and rates[arm][1] == LR_FIELD,
+        require(math.isclose(rates[arm][0], LEGACY_LR_NET / 3.0, rel_tol=1e-9)
+                and rates[arm][1] == LEGACY_LR_FIELD,
                 f"{arm} runs at {rates[arm]}, not the shipped field rate with a "
                 f"third of the shipped net rate")
     return arms, rates, budget, schedule, unit, groups

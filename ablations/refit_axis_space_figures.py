@@ -564,7 +564,7 @@ def figures():
         Figure("axis_space.ortho_basis_gain", o["basis_mean"] - u["basis_mean"],
                "+.2f",
                "free fit: mean matched-axis agreement under the mutual penalty "
-               "minus without it — whether seven DISTINCT free directions "
+               f"minus without it — whether {K_AXES} DISTINCT free directions "
                "reproduce across seeds any better than duplicated ones"),
         Figure("axis_space.ortho_subspace_gain",
                o["subspace_third"] - u["subspace_third"], "+.2f",

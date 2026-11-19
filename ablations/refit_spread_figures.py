@@ -281,7 +281,13 @@ def shipped_rank_scale():
     abilities and the slopes come from one fit, and the panel's arms ship no curve
     of their own, so the conversion is the shipped fit's while the departure it
     converts is the panel's. The rank is read at the time-adjusted rating, as every
-    rank the mapping produces is."""
+    rank the mapping produces is.
+
+    The slope returned is the shipped fit's AS-TRAINED one. The shipped slope has
+    the held-row calibration's multiplier folded in, and the panel's arms are not
+    calibrated: their departure is on the as-trained logit, where one unit moves a
+    difficulty by 1/(as-trained slope). Dividing an as-trained departure by the
+    calibrated slope would understate every rank distance by the multiplier."""
     from utils.rating.features import RATINGS_DIR
     from utils.rating.ratings_io import (load_M, load_size_value_maps,
                                          load_time_adjust, load_value_map,
@@ -306,6 +312,15 @@ def shipped_rank_scale():
     slope = {}
     for size in ("9", "13"):
         slope.update(load_size_value_maps(RATINGS_DIR, size)[1])
+    cal = json.load(open(os.path.join(RATINGS_DIR, "rating_constants.json")))
+    require(cal.get("scale_fit") == "held_row_calibration_folded_in"
+            and cal.get("slope_scale") == 1.0,
+            f"{RATINGS_DIR}/rating_constants.json does not say the calibrated "
+            f"scale is folded into the shipped slopes — the as-trained slope "
+            f"cannot be recovered by dividing the multiplier out")
+    mult = float(cal["calibration"]["slope_mult"])
+    require(mult > 0.0, f"slope multiplier {mult} is not positive")
+    slope = {t: a / mult for t, a in slope.items()}
     return dict(zip(users, rank)), dict(zip(users, per_rating)), slope
 
 
@@ -516,7 +531,8 @@ def figures():
         Figure(f"spread.ranks_per_logit_{b['key']}", b["rpl"], ".0f",
                f"median ranks one logit is worth on {b['label']} players' "
                f"attempts: the ability-to-rank curve's local slope over the "
-               f"problem's own slope"),
+               f"problem's own slope, on the as-trained logit the panel's "
+               f"uncalibrated arms measure the departure on"),
         Figure(f"spread.rank_err_median_{b['key']}", b["median"], ".1f",
                f"median rank distance for {b['label']} players' attempts"),
         Figure(f"spread.rank_err_p90_{b['key']}", b["p90"], ".1f",

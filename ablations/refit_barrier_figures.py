@@ -10,7 +10,7 @@ or STALE against the current attempt log — the pins rule `docs/mirt_benchmark.
 states, mechanized. Guards and spans keep evaluating against the last-measured
 ledger values, so the panel's cost is paid only when it is deliberately re-run.
 
-EVERY CONFIGURATION RUNS AT TWO SEEDS, and this producer is built around that.
+EVERY CONFIGURATION RUNS AT SEVERAL SEEDS, and this producer is built around that.
 The shipped configuration's own held-out trace wanders across the last third of
 its budget by more than the contrasts this panel is asked about, so a single arm
 per configuration resolves none of them — `barrier.shipped_wander_sd_mnat` is
@@ -41,6 +41,14 @@ unpaired inside its seed, or stale against the attempt log.
   barrier.off_rating_low / _high   the 0.1th / 99.9th percentile of the derived
                                    80%-clear rating with the barrier removed —
                                    the blow-out §1.7 describes.
+                                   Every rating this panel reads is the arm's
+                                   own, as trained: the arms hold out problems
+                                   and so carry no held-row calibration, and the
+                                   one floor they share never reaches the
+                                   calibration probability, so every problem has
+                                   a defined rating in every arm. The spans are
+                                   comparable to each other and not to the
+                                   shipped fit's calibrated ratings.
   barrier.off_slope_at_floor_pct   share of slopes on the clamp without it.
   barrier.off_stop_tail_cost_mnat  the barrier-off arm's held-out (stop-split)
                                    cost against the shipped arm of its own seed,
@@ -64,6 +72,9 @@ unpaired inside its seed, or stale against the attempt log.
   barrier.tenx_stop_cost_mnat      the shipped arm, the same two readings — the
                                    losing end of the sweep, scored.
   barrier.tenx_cost_sign_consistent  the same 0/1 seed agreement for that pair.
+  barrier.seeds                    seeds per configuration.
+  barrier.tenx_span_narrower_seeds  seeds at which ten times the weight narrows
+                                   the rating span against the shipped arm.
   barrier.shipped_wander_sd_mnat   the shipped arm's own held-out spread across
   barrier.shipped_wander_range_mnat  the last third of ITS OWN run — the floor
                                    every contrast above is read against.
@@ -73,7 +84,6 @@ unpaired inside its seed, or stale against the attempt log.
 
 import json
 import math
-import csv
 import os
 import sqlite3
 import statistics
@@ -85,8 +95,7 @@ if PROJECT_ROOT not in sys.path:
 
 from ablations._figures import Figure, require, panel_regime  # noqa: E402
 from utils.paths import DB_SQLITE  # noqa: E402
-from utils.rating.fit_rank_curves import CALIBRATION_P  # noqa: E402
-from utils.rating.model_constants import SEED, SIZES  # noqa: E402
+from utils.rating.model_constants import SEED  # noqa: E402
 
 TIER = "refit"
 
@@ -165,7 +174,7 @@ def load_panel():
     # current constants: the arms are only ever compared to each other, so a
     # later change to the shipped budget or schedule must not make a finished
     # panel unquotable.
-    budget, schedule = panel_regime(arms)
+    budget, schedule = panel_regime(arms, barrier_may_vary=True)
     unit = panel_unit(arms)
     for arm, r in arms.items():
         require(r["metrics"]["trace"]
@@ -278,25 +287,6 @@ def same_sign(*series):
                    for s in series))
 
 
-def floors_above_calibration(arm):
-    """Problems whose fitted floor reaches the calibration probability, counted
-    from the arm's own written floors. Read from the artifact and not from the
-    metrics block: this is a tail count, and a distribution's percentiles do not
-    carry it."""
-    n = 0
-    for size in SIZES:
-        path = os.path.join(PANEL_DIR, arm, "ratings", str(size),
-                            "tsumego_floors.csv")
-        require(os.path.exists(path),
-                f"{path} is missing — the arm's written floors are what the "
-                f"undefined-rating count is read from, and an arm whose "
-                f"artifacts were cleaned up cannot supply it")
-        with open(path) as f:
-            n += sum(1 for row in csv.DictReader(f)
-                     if float(row["floor"]) >= CALIBRATION_P)
-    return n
-
-
 # --- the measurement -------------------------------------------------------
 
 def measure():
@@ -328,15 +318,6 @@ def measure():
              "high": per_fit(cfg, lambda m: m["rating_pct"]["99.9"]),
              "floor_share": per_fit(cfg, lambda m: m["slope_at_floor_share"])}
         d["span"] = [hi - lo for lo, hi in zip(d["low"], d["high"])]
-        # HOW MANY PROBLEMS END WITH NO DEFINED RATING. A floor at or above the
-        # calibration probability leaves the 80%-clear point with no referent,
-        # and the count is read from the arm's own written floors rather than
-        # interpolated out of percentiles, because at this rarity a percentile
-        # says nothing about the count. It is the one consequence of a heavier
-        # barrier that the held-out likelihood cannot show, since the affected
-        # problems ship a sentinel rather than a wrong number.
-        d["no_rating"] = [floors_above_calibration(g["arms"][cfg])
-                          for g in groups]
         dist[cfg] = d
 
     # Contrasts: taken inside a seed, one reading per seed, in seed order.
@@ -368,12 +349,10 @@ def measure():
                        "range": max(tv) - min(tv)})
 
     off = contrasts["barrier_off"]
-    require(off["final_mean"] > 0 and off["tail_mean"] > 0,
-            f"the barrier-off arm is not worse held-out "
-            f"({off['final_mean']:+.2f} mnat at the final epoch, "
-            f"{off['tail_mean']:+.2f} over the last third, meaned over "
-            f"{len(groups)} seeds) — the barrier's stated purpose is refuted, "
-            f"not just its magnitude")
+    # Whether removing the barrier costs anything held-out is a FINDING, read
+    # from `barrier.off_stop_tail_cost_mnat` and its sign-agreement indicator,
+    # and never an input check: an arm that fits as well without the barrier is
+    # what the panel exists to be able to show.
     return {
         "seeds": [g["seed"] for g in groups],
         "tail_epochs": (grid[tail[0]], grid[tail[-1]], len(tail)),
@@ -456,32 +435,16 @@ def figures():
                f"per-fit property the two arms above are compared against, "
                f"{over} — without it neither blow-out nor compression has a "
                f"reference"),
-        Figure("barrier.shipped_no_rating_min",
-               float(min(m["dist"]["shipped"]["no_rating"])), "d",
-               "fewest problems left with no defined rating — a floor at or "
-               "above the calibration probability — across the panel's runs of "
-               "the SHIPPED configuration"),
-        Figure("barrier.shipped_no_rating_max",
-               float(max(m["dist"]["shipped"]["no_rating"])), "d",
-               "and the most, in a run differing only in the seed. The pair is "
-               "the figure: this count is a property of a particular fit and "
-               "not of the model, so it is re-read after a refit rather than "
-               "carried"),
-        Figure("barrier.tenx_no_rating_sign_consistent",
-               1 if len({a > b for a, b in zip(
-                   m["dist"]["barrier_10x"]["no_rating"],
-                   m["dist"]["shipped"]["no_rating"])}) == 1 else 0, "d",
-               "1 when the heavier barrier moves the undefined-rating count the "
-               "same way at every seed, 0 when it does not. A 0 says this count "
-               "does not establish a cost for the heavier weight — the count is "
-               "unstable under BOTH weights, so a difference between two single "
-               "runs of them is not a difference between the weights"),
-        Figure("barrier.tenx_no_rating_mean",
-               statistics.fmean(m["dist"]["barrier_10x"]["no_rating"]), "~10",
-               "the same count at ten times the barrier weight, seed-averaged "
-               "— the one cost of a heavier barrier the held-out likelihood "
-               "cannot show, since the problems it touches ship a sentinel "
-               "rather than a wrong number"),
+        Figure("barrier.seeds", float(len(m["seeds"])), "d",
+               "seeds every configuration of the panel runs at"),
+        Figure("barrier.tenx_span_narrower_seeds",
+               float(sum(t < b for t, b in zip(
+                   m["dist"]["barrier_10x"]["span"],
+                   m["dist"]["shipped"]["span"]))), "d",
+               "seeds at which the ten-times arm's p0.1..p99.9 rating span is "
+               "narrower than the shipped arm's of the same seed — the "
+               "compression a heavier barrier is expected to cause, counted "
+               "rather than read off a seed-averaged pair of spans"),
         Figure("barrier.off_rating_high_seed_ratio", m["off_high_seed_ratio"],
                ".0f",
                "how many times the barrier-off arm's 99.9th rating percentile "

@@ -20,14 +20,14 @@ arms read them:
 
   levels.<set>_seeds
   levels.<set>_<curve>_<floor|lapse>_<mean|sd|min|max>   curve ∈ trained, plain, shipped
-  levels.<set>_slope_mult_<mean|sd>         the calibrated slope multiplier
+  levels.<set>_slope_mult_<mean|sd|min|max> the calibrated slope multiplier
+  levels.<set>_floor_slope_corr             shipped floor against slope multiplier, across the set's fits
   levels.<set>_kappa_<mean|sd>              the uncertainty multiplier
   levels.<set>_calibration_gain_mnat        held loss as trained minus shipped, mean
   levels.<set>_calibration_gain_min_mnat    its smallest seed
   levels.<set>_uncertainty_gain_mnat        plain minus shipped, mean
   levels.<set>_uncertainty_gain_min_mnat    its smallest seed
   levels.<set>_plain_higher_seeds           seeds where the plain curve reads BOTH levels higher
-  levels.<set>_trained_lapse_max            the largest lapse any fit trained
   levels.<set>_top_gap_max_pp               |actual − predicted| failure rate, top tenth, worst seed
   levels.<set>_bottom_gap_max_pp            |actual − predicted| success rate, bottom twentieth, worst seed
   levels.floor_sd_ratio_init                trained floor's sd over the shipped floor's, init set
@@ -173,6 +173,9 @@ def measure():
                 s[f"{curve}_{lvl}"] = spread(r["levels"][curve][i] for r in rows.values())
         for k in ("slope_mult", "kappa", "cal_gain", "unc_gain"):
             s[k] = spread(r[k] for r in rows.values())
+        s["floor_slope_corr"] = statistics.correlation(
+            [r["levels"]["shipped"][0] for r in rows.values()],
+            [r["slope_mult"] for r in rows.values()])
         s["plain_higher"] = sum(
             r["levels"]["plain"][0] > r["levels"]["shipped"][0]
             and r["levels"]["plain"][1] > r["levels"]["shipped"][1] for r in rows.values())
@@ -204,6 +207,13 @@ def figures():
                    f"mean calibrated slope multiplier, over {note}"),
             Figure(f"levels.{name}_slope_mult_sd", s["slope_mult"]["sd"], ".2f",
                    f"sd of the calibrated slope multiplier, over {note}"),
+            Figure(f"levels.{name}_slope_mult_min", s["slope_mult"]["min"], ".2f",
+                   f"smallest calibrated slope multiplier, over {note}"),
+            Figure(f"levels.{name}_slope_mult_max", s["slope_mult"]["max"], ".2f",
+                   f"largest calibrated slope multiplier, over {note}"),
+            Figure(f"levels.{name}_floor_slope_corr", s["floor_slope_corr"], ".2f",
+                   f"correlation of the shipped floor with the calibrated slope "
+                   f"multiplier across fits, over {note}"),
             Figure(f"levels.{name}_kappa_mean", s["kappa"]["mean"], ".2f",
                    f"mean multiplier on ability uncertainty, over {note}"),
             Figure(f"levels.{name}_kappa_sd", s["kappa"]["sd"], ".2f",
@@ -221,8 +231,6 @@ def figures():
             Figure(f"levels.{name}_plain_higher_seeds", s["plain_higher"], "d",
                    f"of {s['n']} seeds, how many the plain calibration reads both "
                    f"levels higher than the shipped one on"),
-            Figure(f"levels.{name}_trained_lapse_max", s["trained_lapse"]["max"], ".3f",
-                   f"the largest lapse any fit trained, over {note}"),
             Figure(f"levels.{name}_top_gap_max_pp", s["top_gap"], ".1f",
                    "largest gap between actual and predicted failure rate among the "
                    "held attempts highest on the curve, percentage points, worst seed"),
@@ -257,6 +265,9 @@ def main():
             f, l = s[f"{curve}_floor"], s[f"{curve}_lapse"]
             print(f"  {curve:<8} floor {f['mean']:.3f} ± {f['sd']:.3f} [{f['min']:.3f}, {f['max']:.3f}]"
                   f"   lapse {l['mean']:.3f} ± {l['sd']:.3f} [{l['min']:.3f}, {l['max']:.3f}]")
+        sm = s["slope_mult"]
+        print(f"  slope×   {sm['mean']:.2f} ± {sm['sd']:.2f} [{sm['min']:.2f}, {sm['max']:.2f}]"
+              f"   correlation with the shipped floor {s['floor_slope_corr']:+.2f}")
     print(f"\ntrained floor sd / shipped floor sd, initialization alone: "
           f"{m['floor_sd_ratio_init']:.1f}")
 
