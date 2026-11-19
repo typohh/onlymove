@@ -156,15 +156,15 @@ EPOCHS = 7000
 LR_SCHEDULE = "cosine"
 CHECK_EVERY = 10
 BATCH = 65536
-# ONE RATE for the network and the free per-user fields. Under the decayed
-# schedule and the ability prior a shared rate scores about a millinat BETTER on
-# held-out problems than a 33x faster field rate, at every seed, with the same
-# rating and slope distributions and the same axis identity; the split was
-# adopted under a constant rate, where a shared rate diverged late, and does not
-# survive the schedule change. The two names stay because the parameter groups
-# and the ablation knobs are still per-kind (`ablations/panels/lr.json`).
+# SPLIT RATES: the free per-user fields train 33x faster than the network. What
+# decides it is the HELD ROWS of the production configuration, not the held-out
+# problems: with one shared rate the calibrated held-row loss is worse (1 mnat
+# with the slope barrier, 7 mnat without it, same seed and rows), while on
+# held-out problems the shared rate reads about a millinat BETTER at every seed
+# — so the `lr` panel alone points the wrong way. Abilities are the fields, and
+# at the network's rate they are still moving when the decay freezes the fit.
 LR_NET = 3e-4
-LR_FIELD = LR_NET
+LR_FIELD = 1e-2
 # The free per-user fields, BY PARAMETER NAME. Named rather than assembled by
 # hand so the split cannot fall out of step with the module's own parameters:
 # anything not listed here is "the net" and gets the slow rate, so a parameter
