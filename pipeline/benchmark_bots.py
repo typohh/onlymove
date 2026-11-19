@@ -51,7 +51,7 @@ class SgfMoveBot:
     def get_probability(self, game):
         setup_moves, variation_nodes = parse_tsumego_sgf(game)
         
-        # In YoseTsumego, variation_nodes[0] is the correct move
+        # In this corpus, variation_nodes[0] is the correct move
         correct_node = variation_nodes[0]
         
         if correct_node.has_property("C"):

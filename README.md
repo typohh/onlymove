@@ -1,4 +1,4 @@
-# YoseTsumego / onlymove.net
+# onlymove.net
 
 This project generates Go (Baduk / Weiqi) problems with KataGo (whole-board positions from play in which exactly one move wins), rates each by difficulty using a model trained on human attempts (with bot benchmarks and KataGo neural-network features as inputs), and serves the result through a PWA at [onlymove.net](https://onlymove.net). Both 9×9 and 13×13 are supported.
 
@@ -27,7 +27,7 @@ The repository is complete as source and deliberately incomplete as a deployment
 The generated problems are their own repository, [onlymove-data](https://github.com/typohh/onlymove-data), and every step reads it from a checkout beside this one:
 
 ```bash
-git clone git@github.com:typohh/YoseTsumego.git onlymove
+git clone git@github.com:typohh/onlymove.git onlymove
 git clone git@github.com:typohh/onlymove-data.git onlymove-data
 ```
 

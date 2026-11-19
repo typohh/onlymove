@@ -1,4 +1,4 @@
-# Project rules — YoseTsumego / onlymove.net
+# Project rules — onlymove.net
 
 **Read [`CLAUDE.md`](../CLAUDE.md) in the repository root. It is the single source of truth** for the subsystem layout, the pipeline commands, the coding conventions, and the cross-file invariants — and it applies to any agent working here, not only to Claude Code.
 
