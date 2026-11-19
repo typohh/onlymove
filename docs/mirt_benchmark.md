@@ -117,7 +117,7 @@ arm                  rating   combined   axis    verdict
 
 ## THE SCHEDULE AND THE BUDGET — COSINE AT 7000 SHIPS — MEASURED 2026-09-01
 
-`EPOCHS = 7000`, `LR_SCHEDULE = "cosine"` (`pipeline/train_mirt.py`), replacing a constant rate at 3000. The schedule decays to zero over the budget (the panel's arms ran a network rate and a 33x faster field rate, decayed together with their ratio held; one rate trains both since). The panel is `ablations/panels/schedule.json`, 40 arms on one RTX 3080 Ti at attempt-log frontier 457,114, every arm at ONE pinned holdout draw (`split_seed 0`) so a between-run difference is the fit moving and not the scored rows; the producer is `ablations/refit_schedule_figures.py`, and this is the one panel that is NOT re-measured under the baseline it produced.
+`EPOCHS = 7000`, `LR_SCHEDULE = "cosine"` (`pipeline/train_mirt.py`), replacing a constant rate at 3000. Both rates decay to zero over the budget with their ratio held. The panel is `ablations/panels/schedule.json`, 40 arms on one RTX 3080 Ti at attempt-log frontier 457,114, every arm at ONE pinned holdout draw (`split_seed 0`) so a between-run difference is the fit moving and not the scored rows; the producer is `ablations/refit_schedule_figures.py`, and this is the one panel that is NOT re-measured under the baseline it produced.
 
 **The level is the FINAL level** — the mean held-out score over the last 2% of checkpoints — because the final epoch is what ships. Reading the constant fit at its closing-third mean instead overstates the cosine advantage by several millinats: the constant fit's problem-holdout score is still descending through that window, so its window mean sits above where the run ends. That misreading was made and withdrawn during this measurement.
 
