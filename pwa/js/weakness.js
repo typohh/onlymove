@@ -13,14 +13,22 @@
 //
 //   weak       worse than the 3PL predicts on motif-heavy problems
 //              -> serve MORE of them: drill the deficit.
-//   underplay  your errors miss the motif beyond what the boards offered
-//              -> serve MORE of them: drill recognising when it applies.
 //   overplay   your errors reach for the motif beyond what the boards offered
 //              -> serve problems whose answer is NOT the motif. That is where
 //                 the habit actually costs you, so this is a REDIRECT toward
 //                 low-loading problems, not a de-prioritisation of the axis.
 //   strong     better than the 3PL predicts on motif-heavy problems
 //              -> serve fewer of them: nothing to drill here.
+//
+// The tendency reading's OTHER sign — errors that carry LESS of the motif than
+// the answer did, beyond what the boards offered — is NOT a category. It says
+// only that the answer had the motif and the pick did not, which is the deficit
+// the `weak` reading already measures (and measures against the rating, where
+// this one sees failures alone); the pick itself names nothing the user was
+// drawn to, so there is no habit to redirect. Scored out of sample on the
+// attempt log, the problems it would serve are ones the user does no worse on
+// than usual (auxiliary/serve_criteria_backtest.py). The stats panel still
+// draws it; nothing is listed or served on it.
 //
 // The gate is CONFIDENCE ONLY (|z| > MOTIF_Z), with no minimum effect size: a
 // bias the user is reliably making is worth acting on however small it is.
@@ -81,9 +89,8 @@ export function flaggedMotifCategories() {
         if (tendency && isFlagged(tendency)) {
             const z = dir * tendency.z;
             // Errors reach FOR the motif -> serve where it is not the answer.
+            // The opposite lean is deliberately no category (see the header).
             if (z > 0) categories.push({ k, sign: -dir, tail, kind: 'overplay', z });
-            // Errors MISS the motif -> serve where it is the answer.
-            else categories.push({ k, sign: dir, tail, kind: 'underplay', z: -z });
         }
     }
     return categories;

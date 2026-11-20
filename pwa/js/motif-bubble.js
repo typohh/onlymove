@@ -231,9 +231,6 @@ function trainingFocusMotifs() {
         const text = kind === 'overplay'
                    ? getTerm(confident ? 'trainingFocusOvervalued'
                                        : 'trainingFocusOvervaluedTentative', { motif: name })
-                   : kind === 'underplay'
-                   ? getTerm(confident ? 'trainingFocusUndervalued'
-                                       : 'trainingFocusUndervaluedTentative', { motif: name })
                    : getTerm(confident ? 'trainingFocusWeak'
                                        : 'trainingFocusWeakTentative', { motif: name });
         // The explanation quotes the reading behind the sentence — the rank

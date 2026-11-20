@@ -50,7 +50,8 @@ function toAttempt(r) {
 const flat = (a) => flattenAttempt(a.problemRating, a.problemSlope, a.problemFloor,
                                    a.correct, curveFor(a.size));
 
-// flaggedMotifCategories (weakness.js), mirrored over a readings array.
+// flaggedMotifCategories (weakness.js), mirrored over a readings array — plus
+// the `underplay` kind the client does not act on, kept here so it stays scored.
 function categories(readings) {
     const out = [];
     if (!readings) return out;
