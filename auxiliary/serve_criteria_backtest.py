@@ -10,7 +10,8 @@ scored with what the client could know before t.
 
   motif       the categories `flaggedMotifCategories` would hold before t — the
               shipped readings run unmodified under node over rows[0, t)
-              (`serve_criteria_backtest.mjs`). Each (attempt, category) is
+              (`ablations/motif_serve_flags.mjs`; the per-kind
+              verdict the documents quote is `ablations.motif_serve_figures`). Each (attempt, category) is
               scored by the attempt's correct-move loading in the category's
               serve direction, sign * emb[k], which is what the motif slot
               argmaxes.
@@ -36,8 +37,6 @@ user-clustered bootstrap.
 import argparse
 import json
 import os
-import sqlite3
-import subprocess
 import sys
 
 import numpy as np
@@ -48,48 +47,15 @@ if PROJECT_ROOT not in sys.path:
     sys.path.append(PROJECT_ROOT)
 
 from ablations import motif_findings_figures as mf  # noqa: E402
+from ablations.motif_serve_figures import history_ids, motif_flags  # noqa: E402
 from auxiliary.similarity_residuals import load_vecs  # noqa: E402
 from utils.constants import read_ignored_users  # noqa: E402
 from utils.paths import DB_SQLITE  # noqa: E402
 from utils.rating.model_constants import clear_logit_vec  # noqa: E402
 
-HELPER = os.path.join(PROJECT_ROOT, "auxiliary", "serve_criteria_backtest.mjs")
 RATINGS = os.path.join(PROJECT_ROOT, "ratings")
 QB = [0, .5, .9, .98, .995, .999, .9999, 1.0000001]
 KIND_ORDER = ("weak", "underplay", "overplay", "strong")
-
-
-def history_ids(pub):
-    """The problem id of every row `mf.load_histories` builds, in its order —
-    the same query and the same filters, so the two line up row for row."""
-    con = sqlite3.connect(f"file:{DB_SQLITE}?mode=ro", uri=True)
-    try:
-        cur = con.execute(
-            "SELECT user_id, problem, created_at FROM tsumego_reports "
-            " WHERE is_repeat = 0 ORDER BY user_id, created_at, id")
-        by_user = {}
-        for uid, tid, ts in cur:
-            if str(tid) in pub["pos"]:
-                by_user.setdefault(uid, []).append((str(tid), ts))
-    finally:
-        con.close()
-    return {u: r for u, r in by_user.items() if len(r) >= mf.MIN_HISTORY}
-
-
-def motif_flags(pub, histories, cache):
-    path = os.path.join(cache, "motif_flags.json")
-    if os.path.exists(path):
-        print(f"  motif flags from {path}", flush=True)
-        return json.load(open(path))
-    meta = json.load(open(os.path.join(mf.TSUMEGOS, "embedding_meta.json")))
-    pl = os.path.join(cache, "motif_payload.json")
-    with open(pl, "w") as f:
-        json.dump({"pwa_root": mf.PWA_ROOT + os.sep, "K": pub["K"],
-                   "labels": meta["labels"]["components"],
-                   "users": [{"id": u, "rows": r} for u, r in histories.items()]}, f)
-    print("  running the shipped motif readings at every position (node) ...", flush=True)
-    subprocess.run(["node", HELPER, pl, path], cwd=PROJECT_ROOT, check=True)
-    return json.load(open(path))
 
 
 def boot_ci(values, users, rng, n=1000):

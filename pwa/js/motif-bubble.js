@@ -178,20 +178,9 @@ function topMotifs(problem) {
 function trainingFocusMotifs() {
     const labels = state.embeddingLabels;
     if (!labels) return { items: [], total: 0 };
-    // ONE LINE PER MOTIF, the most confident finding on it. An axis can flag on
-    // both readings at once — weak at the motif AND over-reaching for it — and
-    // they are two genuine findings, which is why selection keeps them as two
-    // separate serve slots. As a READING LIST they are one motif twice, and the
-    // second line spends a slot of a short list restating the first's subject
-    // while the user is trying to see what to work on.
-    //
-    // Deliberately NOT done in flaggedMotifCategories(): weaknessServeCategories
-    // reads the same list, and collapsing it there would silently drop a serve
-    // criterion. This is a presentation rule and it belongs here.
-    //
-    // `z` arrives as a positive magnitude for every kind (weakness.js negates
-    // the ones whose raw z is negative), so the larger one is the more confident
-    // finding whichever readings are being compared.
+    // One line per motif. Only a `weak` category reaches the list (weakness.js
+    // makes no category of the error lean), so a motif appears at most once;
+    // the map keeps that true if a second listable kind is ever added.
     const best = new Map();
     for (const cat of flaggedMotifCategories()) {
         // `strong` is a serve direction, not a training direction: it tells
@@ -204,47 +193,30 @@ function trainingFocusMotifs() {
     }
 
     const scored = [];
-    for (const { k, tail, kind, z } of best.values()) {
-        // `tail` is the NAMED tail describing the category, which for an
-        // overplay is the opposite of its serve direction — an overplay of a
-        // one-sided motif serves anti-motif problems but is described through
-        // the motif's own name, as something the user overvalues.
+    for (const { k, tail, z } of best.values()) {
+        // `tail` is the NAMED tail the category is described through.
         const name = localizedMotif(labels[String(k)], tail);
         if (!name) continue;
-        // Each kind is a different statement and gets its own SENTENCE. A bare
-        // name is not one of them: it reads as "weak at this" by implication
-        // only, which leaves the one finding that IS about skill looking like a
-        // label somebody forgot to finish, and makes a tendency line shown bare
-        // beside a positive strength reading in the stats table look like a
-        // contradiction rather than two statements about one motif. The
-        // sentence is localized WHOLE rather than assembled from a name and a
-        // qualifier — the motif sits in a different place in each language, and
-        // Korean needs a phrasing that avoids an object particle the motif
-        // names do not all take the same form of.
-        //
-        // Every sentence also carries the CONFIDENCE of the reading behind it:
-        // stated flatly past CONFIDENT_Z, hedged between the admission gate and
-        // it. Six sentences rather than three plus a qualifier, for the reason
-        // above — the hedge sits in a different place in each language, and in
-        // Japanese and Korean it rewrites the verb ending.
+        // The finding is a whole SENTENCE, never a bare motif name, and it is
+        // localized whole rather than assembled from a name and a qualifier —
+        // the motif sits in a different place in each language. It carries the
+        // CONFIDENCE of the reading behind it: stated flatly past CONFIDENT_Z,
+        // hedged between the admission gate and it, as two sentences because
+        // in Japanese and Korean the hedge rewrites the verb ending.
         const confident = z > CONFIDENT_Z;
-        const text = kind === 'overplay'
-                   ? getTerm(confident ? 'trainingFocusOvervalued'
-                                       : 'trainingFocusOvervaluedTentative', { motif: name })
-                   : getTerm(confident ? 'trainingFocusWeak'
+        const text = getTerm(confident ? 'trainingFocusWeak'
                                        : 'trainingFocusWeakTentative', { motif: name });
         // The explanation quotes the reading behind the sentence — the rank
         // effect, or the share of errors — which the front page never shows.
         // Computed when the bubble opens, not here: this list is rebuilt on
         // repaint, and the readings walk the whole window.
         const component = labels[String(k)];
-        const readingKind = kind === 'weak' ? 'strength' : 'tendency';
         const explain = () => {
             const stats = computeMotifStats();
             const st = stats && stats.find((s) => s.k === k);
             const oriented = st ? orientReadings(st, tail) : null;
-            return explainMotif({ component, side: tail, name, kind: readingKind,
-                                  reading: oriented ? oriented[readingKind] : null });
+            return explainMotif({ component, side: tail, name, kind: 'strength',
+                                  reading: oriented ? oriented.strength : null });
         };
         scored.push({ z, text, explain });
     }

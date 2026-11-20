@@ -38,7 +38,7 @@ The harnesses that VALIDATE the shipped mapping — `check_mapped_vs_declared_ra
 
 - **`map_rating_to_rank_dev.py`** — the experimental copy of `pipeline.map_rating_to_rank`; writes nothing by default so it can never clobber the shipped curve. Where mapping experiments (time forms, gauge, coupling structure) are run.
 - **`similarity_residuals.py`** — whether two problems' similarity in the activation network's trunk state (the cosine at the answer cell) predicts one user's outcomes on both beyond what the rating model already predicts. Reads the residual correlation per similarity bucket against the same users' all-pairs value.
-- **`serve_criteria_backtest.py`** (with its node half, `serve_criteria_backtest.mjs`) — which serve criterion finds the problems a user underperforms on, scored on the attempt log out of sample in time: the shipped motif categories, or similarity to the user's own earlier failures. The `.mjs` runs the shipped client readings unmodified over each user's history prefix.
+- **`serve_criteria_backtest.py`** — which serve criterion finds the problems a user underperforms on, scored on the attempt log out of sample in time: the motif flags, or similarity to the user's own earlier failures. The similarity half is the open question and lives here; the motif half (the flags at every history prefix, and the per-kind verdict the documents quote) is `ablations.motif_serve_figures`, which this script imports — the one deliberate exception to the import direction above, to be removed by moving the similarity criterion once it is decided.
 
 ## Per-user replicas
 

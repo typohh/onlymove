@@ -138,6 +138,15 @@ export function buildMotifPane(kind, history = state.answerHistory) {
     for (const row of rows) table.appendChild(buildMotifRow(kind, row, recallSet, history, scale));
     root.appendChild(table);
     root.appendChild(buildIntervalNote());
+    // The lean is shown as an observation only: it makes no weakness and steers
+    // no selection (weakness.js), and the pane says so rather than leaving the
+    // reader to wonder why a shaded row never reaches the front page.
+    if (kind === 'tendency') {
+        const caveat = document.createElement('div');
+        caveat.className = 'wk-note';
+        caveat.textContent = getTerm('statsTendencyCaveat');
+        root.appendChild(caveat);
+    }
 
     return root;
 }

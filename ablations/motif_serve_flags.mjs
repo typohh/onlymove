@@ -1,23 +1,26 @@
-// auxiliary/serve_criteria_backtest.mjs
+// ablations/motif_serve_flags.mjs
 //
-// The motif half of `auxiliary/serve_criteria_backtest.py`: for every user and
-// every position t in their history, the serve categories the client would have
-// held BEFORE attempt t — the shipped readings over rows[0, t) at the shipped
-// window, conditioned on the live rank estimator over the same record, turned
-// into categories exactly as `flaggedMotifCategories` (pwa/js/weakness.js) does.
+// The node half of `ablations.motif_serve_figures`: for every user and every
+// position t in their history, the serve directions the client's readings would
+// have supported BEFORE attempt t — the shipped readings over rows[0, t) at the
+// shipped window, conditioned on the live rank estimator over the same record.
+// ALL FOUR kinds are emitted. The client makes categories of `weak` and `strong`
+// only (`flaggedMotifCategories`, pwa/js/weakness.js); `overplay` and
+// `underplay` are the two it declines, emitted here because this measurement is
+// the reason it declines them.
 //
 // Imported unmodified: motifReadings/isFlagged, estimateWindowRankFromFlat,
 // flattenAttempt, quantizeEmbedding, MODEL_INPUT_HISTORY_LENGTH. Mirrored (their
-// modules reach app state): curveForSize, flattenAttempts' main path,
-// flaggedMotifCategories.
+// modules reach app state): curveForSize, flattenAttempts' main path, and the
+// strength half of flaggedMotifCategories.
 //
-// Usage:  node auxiliary/serve_criteria_backtest.mjs <payload.json> <out.json>
+// Usage:  node ablations/motif_serve_flags.mjs <payload.json> <out.json>
 
 import { register } from 'node:module';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
-register('../ablations/json_module_loader.mjs', import.meta.url);
+register('./json_module_loader.mjs', import.meta.url);
 
 const payload = JSON.parse(readFileSync(process.argv[2], 'utf8'));
 const PWA = payload.pwa_root;
@@ -50,8 +53,8 @@ function toAttempt(r) {
 const flat = (a) => flattenAttempt(a.problemRating, a.problemSlope, a.problemFloor,
                                    a.correct, curveFor(a.size));
 
-// flaggedMotifCategories (weakness.js), mirrored over a readings array — plus
-// the `underplay` kind the client does not act on, kept here so it stays scored.
+// The strength half is flaggedMotifCategories (weakness.js) mirrored over a
+// readings array; the tendency half is the two directions the client declines.
 function categories(readings) {
     const out = [];
     if (!readings) return out;

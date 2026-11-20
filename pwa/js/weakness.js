@@ -13,22 +13,16 @@
 //
 //   weak       worse than the 3PL predicts on motif-heavy problems
 //              -> serve MORE of them: drill the deficit.
-//   overplay   your errors reach for the motif beyond what the boards offered
-//              -> serve problems whose answer is NOT the motif. That is where
-//                 the habit actually costs you, so this is a REDIRECT toward
-//                 low-loading problems, not a de-prioritisation of the axis.
 //   strong     better than the 3PL predicts on motif-heavy problems
 //              -> serve fewer of them: nothing to drill here.
 //
-// The tendency reading's OTHER sign — errors that carry LESS of the motif than
-// the answer did, beyond what the boards offered — is NOT a category. It says
-// only that the answer had the motif and the pick did not, which is the deficit
-// the `weak` reading already measures (and measures against the rating, where
-// this one sees failures alone); the pick itself names nothing the user was
-// drawn to, so there is no habit to redirect. Scored out of sample on the
-// attempt log, the problems it would serve are ones the user does no worse on
-// than usual (auxiliary/serve_criteria_backtest.py). The stats panel still
-// draws it; nothing is listed or served on it.
+// Only the STRENGTH reading makes a category. The TENDENCY reading — which way
+// the user's errors lean against what the boards offered — makes none in either
+// direction: replayed over the attempt log out of sample, the problems either
+// lean would have served are ones the user does no worse on than on any others,
+// where a `weak` flag finds problems they do measurably worse on
+// (ablations.motif_serve_figures). The stats panel draws the lean; nothing is
+// listed or served on it.
 //
 // The gate is CONFIDENCE ONLY (|z| > MOTIF_Z), with no minimum effect size: a
 // bias the user is reliably making is worth acting on however small it is.
@@ -45,19 +39,15 @@ import { computeMotifStats, isFlagged } from './motif-stats.js';
 // ever seems to deserve it: a category carried by most users at once makes the
 // served pool homogeneous and, being near-constant, is collinear with the
 // intercept, so the deficit it describes launders into the rank estimate
-// instead of steering anything. A fixed 50% tendency null realised exactly
-// that on `tenuki` (flagged for ~94% of users); the availability null
-// attributes that universality to the problem MENU — the answer to a tsumego
-// is by construction not a tenuki, so nearly every alternative loads higher —
-// and with the menu subtracted the flag rates are ordinary, so no category is
-// near-universal and there is nothing to bar.
+// instead of steering anything. The tendency readings are where that lives
+// (`tenuki`: the answer to a tsumego is by construction not one, so a lean flag
+// there is carried by most users), and they make no category.
 
 // One {k, sign, tail, kind, z} per (axis, direction) whose reading clears the
 // confidence gate. `sign` is the SERVE direction the selector argmaxes, hinged at
 // zero: +1 targets high loadings on the named tail, -1 targets low ones. `tail`
-// is the NAMED tail the category is DESCRIBED through, which for an overplay is
-// the opposite of its serve direction. `kind` says which reading
-// produced it, so a consumer can treat them differently — the training-focus
+// is the NAMED tail the category is DESCRIBED through. `kind` is `weak` or
+// `strong`, so a consumer can treat them differently — the training-focus
 // bubble shows the ones that are training directions and drops `strong`.
 // This is the reporting list, and selection draws from all of it — see
 // weaknessServeCategories below.
@@ -68,11 +58,11 @@ export function flaggedMotifCategories() {
     if (!stats) return [];
 
     const categories = [];
-    for (const { k, tendency, strength } of stats) {
+    for (const { k, strength } of stats) {
         const comp = labels[String(k)];
         if (!comp) continue;
         // Describe the axis from whichever tail carries a name, preferring the
-        // positive one, and mirror both readings so "weak" and "overplay" keep
+        // positive one, and mirror the reading so "weak" keeps
         // meaning the named motif throughout.
         const tail = comp.positive ? 'positive' : (comp.negative ? 'negative' : null);
         if (!tail) continue;
@@ -85,12 +75,6 @@ export function flaggedMotifCategories() {
             if (z < 0) categories.push({ k, sign: dir, tail, kind: 'weak', z: -z });
             // Better than predicted -> fewer of them.
             else categories.push({ k, sign: -dir, tail, kind: 'strong', z });
-        }
-        if (tendency && isFlagged(tendency)) {
-            const z = dir * tendency.z;
-            // Errors reach FOR the motif -> serve where it is not the answer.
-            // The opposite lean is deliberately no category (see the header).
-            if (z > 0) categories.push({ k, sign: -dir, tail, kind: 'overplay', z });
         }
     }
     return categories;

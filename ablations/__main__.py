@@ -47,6 +47,7 @@ PRODUCERS = (
     "calibration_figures",
     "improvement_figures",
     "motif_null_figures",
+    "motif_serve_figures",
     "axes_fit_figures",
     "cast_error_figures",
     "selfplay_motif_figures",

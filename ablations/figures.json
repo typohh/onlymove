@@ -11228,6 +11228,34 @@
         "data_version": "e91fce3f9a694b22"
       }
     },
+    "serve.attempts": {
+      "value": 360856,
+      "fmt": ",d",
+      "text": "360,856",
+      "producer": "ablations.motif_serve_figures",
+      "tier": "methodology",
+      "note": "first-time attempts on the curve's slope that an outcome is read from",
+      "measured": {
+        "at": "2026-11-20T15:45:59Z",
+        "git": "14d502e42+dirty",
+        "db_max_id": 753012,
+        "data_version": "e91fce3f9a694b22"
+      }
+    },
+    "serve.base_points": {
+      "value": -1.6834692418360349,
+      "fmt": "+.1f",
+      "text": "-1.7",
+      "producer": "ablations.motif_serve_figures",
+      "tier": "methodology",
+      "note": "mean outcome over all of them, success minus the rating's prediction, in percentage points",
+      "measured": {
+        "at": "2026-11-20T15:45:59Z",
+        "git": "14d502e42+dirty",
+        "db_max_id": 753012,
+        "data_version": "e91fce3f9a694b22"
+      }
+    },
     "serve.clear_100_300": {
       "value": 0.7817725752508361,
       "fmt": "%.1f",
@@ -11588,6 +11616,426 @@
       "measured": {
         "at": "2026-11-20T00:12:19Z",
         "git": "bd77b1fe8+dirty",
+        "db_max_id": 753012,
+        "data_version": "e91fce3f9a694b22"
+      }
+    },
+    "serve.overplay_bottom_points": {
+      "value": -1.0735938598127608,
+      "fmt": "+.1f",
+      "text": "-1.1",
+      "producer": "ablations.motif_serve_figures",
+      "tier": "methodology",
+      "note": "the same on the weaker half of matches",
+      "measured": {
+        "at": "2026-11-20T15:45:59Z",
+        "git": "14d502e42+dirty",
+        "db_max_id": 753012,
+        "data_version": "e91fce3f9a694b22"
+      }
+    },
+    "serve.overplay_finds_deficit": {
+      "value": 0,
+      "fmt": "d",
+      "text": "0",
+      "producer": "ablations.motif_serve_figures",
+      "tier": "methodology",
+      "note": "1 when the whole interval is below zero",
+      "measured": {
+        "at": "2026-11-20T15:45:59Z",
+        "git": "14d502e42+dirty",
+        "db_max_id": 753012,
+        "data_version": "e91fce3f9a694b22"
+      }
+    },
+    "serve.overplay_gap_hi": {
+      "value": 0.3898877221715424,
+      "fmt": "+.1f",
+      "text": "+0.4",
+      "producer": "ablations.motif_serve_figures",
+      "tier": "methodology",
+      "note": "upper end of that interval",
+      "measured": {
+        "at": "2026-11-20T15:45:59Z",
+        "git": "14d502e42+dirty",
+        "db_max_id": 753012,
+        "data_version": "e91fce3f9a694b22"
+      }
+    },
+    "serve.overplay_gap_lo": {
+      "value": -0.5050497518204674,
+      "fmt": "+.1f",
+      "text": "-0.5",
+      "producer": "ablations.motif_serve_figures",
+      "tier": "methodology",
+      "note": "lower end of the gap's user-clustered bootstrap 95% interval",
+      "measured": {
+        "at": "2026-11-20T15:45:59Z",
+        "git": "14d502e42+dirty",
+        "db_max_id": 753012,
+        "data_version": "e91fce3f9a694b22"
+      }
+    },
+    "serve.overplay_gap_points": {
+      "value": -0.038953362458737484,
+      "fmt": "+.1f",
+      "text": "-0.0",
+      "producer": "ablations.motif_serve_figures",
+      "tier": "methodology",
+      "note": "strongest tenth minus weaker half: negative = the flag finds problems the player does worse on",
+      "measured": {
+        "at": "2026-11-20T15:45:59Z",
+        "git": "14d502e42+dirty",
+        "db_max_id": 753012,
+        "data_version": "e91fce3f9a694b22"
+      }
+    },
+    "serve.overplay_top_points": {
+      "value": -1.1125472222714983,
+      "fmt": "+.1f",
+      "text": "-1.1",
+      "producer": "ablations.motif_serve_figures",
+      "tier": "methodology",
+      "note": "mean outcome on the strongest tenth of matches to a `overplay` flag held before the attempt, in percentage points",
+      "measured": {
+        "at": "2026-11-20T15:45:59Z",
+        "git": "14d502e42+dirty",
+        "db_max_id": 753012,
+        "data_version": "e91fce3f9a694b22"
+      }
+    },
+    "serve.overplay_users": {
+      "value": 616,
+      "fmt": ",d",
+      "text": "616",
+      "producer": "ablations.motif_serve_figures",
+      "tier": "methodology",
+      "note": "accounts that ever held a `overplay` flag — errors lean toward the motif (serves problems loading away from it)",
+      "measured": {
+        "at": "2026-11-20T15:45:59Z",
+        "git": "14d502e42+dirty",
+        "db_max_id": 753012,
+        "data_version": "e91fce3f9a694b22"
+      }
+    },
+    "serve.strong_bottom_points": {
+      "value": -1.1590400471141538,
+      "fmt": "+.1f",
+      "text": "-1.2",
+      "producer": "ablations.motif_serve_figures",
+      "tier": "methodology",
+      "note": "the same on the weaker half of matches",
+      "measured": {
+        "at": "2026-11-20T15:45:59Z",
+        "git": "14d502e42+dirty",
+        "db_max_id": 753012,
+        "data_version": "e91fce3f9a694b22"
+      }
+    },
+    "serve.strong_finds_deficit": {
+      "value": 1,
+      "fmt": "d",
+      "text": "1",
+      "producer": "ablations.motif_serve_figures",
+      "tier": "methodology",
+      "note": "1 when the whole interval is below zero",
+      "measured": {
+        "at": "2026-11-20T15:45:59Z",
+        "git": "14d502e42+dirty",
+        "db_max_id": 753012,
+        "data_version": "e91fce3f9a694b22"
+      }
+    },
+    "serve.strong_gap_hi": {
+      "value": -0.20488398541558636,
+      "fmt": "+.1f",
+      "text": "-0.2",
+      "producer": "ablations.motif_serve_figures",
+      "tier": "methodology",
+      "note": "upper end of that interval",
+      "measured": {
+        "at": "2026-11-20T15:45:59Z",
+        "git": "14d502e42+dirty",
+        "db_max_id": 753012,
+        "data_version": "e91fce3f9a694b22"
+      }
+    },
+    "serve.strong_gap_lo": {
+      "value": -1.0150197686996563,
+      "fmt": "+.1f",
+      "text": "-1.0",
+      "producer": "ablations.motif_serve_figures",
+      "tier": "methodology",
+      "note": "lower end of the gap's user-clustered bootstrap 95% interval",
+      "measured": {
+        "at": "2026-11-20T15:45:59Z",
+        "git": "14d502e42+dirty",
+        "db_max_id": 753012,
+        "data_version": "e91fce3f9a694b22"
+      }
+    },
+    "serve.strong_gap_points": {
+      "value": -0.5926951655295916,
+      "fmt": "+.1f",
+      "text": "-0.6",
+      "producer": "ablations.motif_serve_figures",
+      "tier": "methodology",
+      "note": "strongest tenth minus weaker half: negative = the flag finds problems the player does worse on",
+      "measured": {
+        "at": "2026-11-20T15:45:59Z",
+        "git": "14d502e42+dirty",
+        "db_max_id": 753012,
+        "data_version": "e91fce3f9a694b22"
+      }
+    },
+    "serve.strong_top_points": {
+      "value": -1.7517352126437453,
+      "fmt": "+.1f",
+      "text": "-1.8",
+      "producer": "ablations.motif_serve_figures",
+      "tier": "methodology",
+      "note": "mean outcome on the strongest tenth of matches to a `strong` flag held before the attempt, in percentage points",
+      "measured": {
+        "at": "2026-11-20T15:45:59Z",
+        "git": "14d502e42+dirty",
+        "db_max_id": 753012,
+        "data_version": "e91fce3f9a694b22"
+      }
+    },
+    "serve.strong_users": {
+      "value": 1167,
+      "fmt": ",d",
+      "text": "1,167",
+      "producer": "ablations.motif_serve_figures",
+      "tier": "methodology",
+      "note": "accounts that ever held a `strong` flag — better than the rating predicts on the motif's problems",
+      "measured": {
+        "at": "2026-11-20T15:45:59Z",
+        "git": "14d502e42+dirty",
+        "db_max_id": 753012,
+        "data_version": "e91fce3f9a694b22"
+      }
+    },
+    "serve.top_share_pct": {
+      "value": 0.09999999999999998,
+      "fmt": "%.0f",
+      "text": "10",
+      "producer": "ablations.motif_serve_figures",
+      "tier": "methodology",
+      "note": "share of the corpus counted as a flag's strongest matches",
+      "measured": {
+        "at": "2026-11-20T15:45:59Z",
+        "git": "14d502e42+dirty",
+        "db_max_id": 753012,
+        "data_version": "e91fce3f9a694b22"
+      }
+    },
+    "serve.underplay_bottom_points": {
+      "value": -1.2858739844880949,
+      "fmt": "+.1f",
+      "text": "-1.3",
+      "producer": "ablations.motif_serve_figures",
+      "tier": "methodology",
+      "note": "the same on the weaker half of matches",
+      "measured": {
+        "at": "2026-11-20T15:45:59Z",
+        "git": "14d502e42+dirty",
+        "db_max_id": 753012,
+        "data_version": "e91fce3f9a694b22"
+      }
+    },
+    "serve.underplay_finds_deficit": {
+      "value": 0,
+      "fmt": "d",
+      "text": "0",
+      "producer": "ablations.motif_serve_figures",
+      "tier": "methodology",
+      "note": "1 when the whole interval is below zero",
+      "measured": {
+        "at": "2026-11-20T15:45:59Z",
+        "git": "14d502e42+dirty",
+        "db_max_id": 753012,
+        "data_version": "e91fce3f9a694b22"
+      }
+    },
+    "serve.underplay_gap_hi": {
+      "value": 0.9629277587092367,
+      "fmt": "+.1f",
+      "text": "+1.0",
+      "producer": "ablations.motif_serve_figures",
+      "tier": "methodology",
+      "note": "upper end of that interval",
+      "measured": {
+        "at": "2026-11-20T15:45:59Z",
+        "git": "14d502e42+dirty",
+        "db_max_id": 753012,
+        "data_version": "e91fce3f9a694b22"
+      }
+    },
+    "serve.underplay_gap_lo": {
+      "value": 0.02732412408499326,
+      "fmt": "+.1f",
+      "text": "+0.0",
+      "producer": "ablations.motif_serve_figures",
+      "tier": "methodology",
+      "note": "lower end of the gap's user-clustered bootstrap 95% interval",
+      "measured": {
+        "at": "2026-11-20T15:45:59Z",
+        "git": "14d502e42+dirty",
+        "db_max_id": 753012,
+        "data_version": "e91fce3f9a694b22"
+      }
+    },
+    "serve.underplay_gap_points": {
+      "value": 0.5085955842075235,
+      "fmt": "+.1f",
+      "text": "+0.5",
+      "producer": "ablations.motif_serve_figures",
+      "tier": "methodology",
+      "note": "strongest tenth minus weaker half: negative = the flag finds problems the player does worse on",
+      "measured": {
+        "at": "2026-11-20T15:45:59Z",
+        "git": "14d502e42+dirty",
+        "db_max_id": 753012,
+        "data_version": "e91fce3f9a694b22"
+      }
+    },
+    "serve.underplay_top_points": {
+      "value": -0.7772784002805714,
+      "fmt": "+.1f",
+      "text": "-0.8",
+      "producer": "ablations.motif_serve_figures",
+      "tier": "methodology",
+      "note": "mean outcome on the strongest tenth of matches to a `underplay` flag held before the attempt, in percentage points",
+      "measured": {
+        "at": "2026-11-20T15:45:59Z",
+        "git": "14d502e42+dirty",
+        "db_max_id": 753012,
+        "data_version": "e91fce3f9a694b22"
+      }
+    },
+    "serve.underplay_users": {
+      "value": 622,
+      "fmt": ",d",
+      "text": "622",
+      "producer": "ablations.motif_serve_figures",
+      "tier": "methodology",
+      "note": "accounts that ever held a `underplay` flag — errors lean away from the motif (would serve problems loading toward it)",
+      "measured": {
+        "at": "2026-11-20T15:45:59Z",
+        "git": "14d502e42+dirty",
+        "db_max_id": 753012,
+        "data_version": "e91fce3f9a694b22"
+      }
+    },
+    "serve.users": {
+      "value": 1176,
+      "fmt": ",d",
+      "text": "1,176",
+      "producer": "ablations.motif_serve_figures",
+      "tier": "methodology",
+      "note": "accounts scored: enough first-time attempts for the readings, and a backend ability",
+      "measured": {
+        "at": "2026-11-20T15:45:59Z",
+        "git": "14d502e42+dirty",
+        "db_max_id": 753012,
+        "data_version": "e91fce3f9a694b22"
+      }
+    },
+    "serve.weak_bottom_points": {
+      "value": -1.0823803741415614,
+      "fmt": "+.1f",
+      "text": "-1.1",
+      "producer": "ablations.motif_serve_figures",
+      "tier": "methodology",
+      "note": "the same on the weaker half of matches",
+      "measured": {
+        "at": "2026-11-20T15:45:59Z",
+        "git": "14d502e42+dirty",
+        "db_max_id": 753012,
+        "data_version": "e91fce3f9a694b22"
+      }
+    },
+    "serve.weak_finds_deficit": {
+      "value": 1,
+      "fmt": "d",
+      "text": "1",
+      "producer": "ablations.motif_serve_figures",
+      "tier": "methodology",
+      "note": "1 when the whole interval is below zero",
+      "measured": {
+        "at": "2026-11-20T15:45:59Z",
+        "git": "14d502e42+dirty",
+        "db_max_id": 753012,
+        "data_version": "e91fce3f9a694b22"
+      }
+    },
+    "serve.weak_gap_hi": {
+      "value": -1.9647872084305393,
+      "fmt": "+.1f",
+      "text": "-2.0",
+      "producer": "ablations.motif_serve_figures",
+      "tier": "methodology",
+      "note": "upper end of that interval",
+      "measured": {
+        "at": "2026-11-20T15:45:59Z",
+        "git": "14d502e42+dirty",
+        "db_max_id": 753012,
+        "data_version": "e91fce3f9a694b22"
+      }
+    },
+    "serve.weak_gap_lo": {
+      "value": -2.951854897129177,
+      "fmt": "+.1f",
+      "text": "-3.0",
+      "producer": "ablations.motif_serve_figures",
+      "tier": "methodology",
+      "note": "lower end of the gap's user-clustered bootstrap 95% interval",
+      "measured": {
+        "at": "2026-11-20T15:45:59Z",
+        "git": "14d502e42+dirty",
+        "db_max_id": 753012,
+        "data_version": "e91fce3f9a694b22"
+      }
+    },
+    "serve.weak_gap_points": {
+      "value": -2.448161838885928,
+      "fmt": "+.1f",
+      "text": "-2.4",
+      "producer": "ablations.motif_serve_figures",
+      "tier": "methodology",
+      "note": "strongest tenth minus weaker half: negative = the flag finds problems the player does worse on",
+      "measured": {
+        "at": "2026-11-20T15:45:59Z",
+        "git": "14d502e42+dirty",
+        "db_max_id": 753012,
+        "data_version": "e91fce3f9a694b22"
+      }
+    },
+    "serve.weak_top_points": {
+      "value": -3.5305422130274895,
+      "fmt": "+.1f",
+      "text": "-3.5",
+      "producer": "ablations.motif_serve_figures",
+      "tier": "methodology",
+      "note": "mean outcome on the strongest tenth of matches to a `weak` flag held before the attempt, in percentage points",
+      "measured": {
+        "at": "2026-11-20T15:45:59Z",
+        "git": "14d502e42+dirty",
+        "db_max_id": 753012,
+        "data_version": "e91fce3f9a694b22"
+      }
+    },
+    "serve.weak_users": {
+      "value": 1170,
+      "fmt": ",d",
+      "text": "1,170",
+      "producer": "ablations.motif_serve_figures",
+      "tier": "methodology",
+      "note": "accounts that ever held a `weak` flag — worse than the rating predicts on the motif's problems",
+      "measured": {
+        "at": "2026-11-20T15:45:59Z",
+        "git": "14d502e42+dirty",
         "db_max_id": 753012,
         "data_version": "e91fce3f9a694b22"
       }
