@@ -229,7 +229,7 @@ export async function showDetailedStats() {
         // Weaknesses is the default (first) page. Empty panes (no weaknesses, too
         // little data for a chart) are dropped by showStatsModal.
         showStatsModal([
-            { label: getTerm('statsTabWeaknesses'), content: weaknessPane },
+            { label: getTerm('statsTabSkills'), content: weaknessPane },
             { label: getTerm('statsTabTendencies'), content: tendencyPane },
             { label: getTerm('statsTabTime'), content: makeTimePane(), make: makeTimePane },
             { label: getTerm('statsTabRank'), content: makeRankPane(), make: makeRankPane },
