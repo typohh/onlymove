@@ -37,6 +37,8 @@ The freeze → operate → unfreeze procedure these run inside is `docs/db_surge
 The harnesses that VALIDATE the shipped mapping — `check_mapped_vs_declared_rank.py`, `eval_rank_map_cv.py`, `eval_equivalent_tournament_games.py`, `eval_recall_model.py` — live in `ablations/`. What stays here is the surface for mapping work not yet decided:
 
 - **`map_rating_to_rank_dev.py`** — the experimental copy of `pipeline.map_rating_to_rank`; writes nothing by default so it can never clobber the shipped curve. Where mapping experiments (time forms, gauge, coupling structure) are run.
+- **`similarity_residuals.py`** — whether two problems' similarity in the activation network's trunk state (the cosine at the answer cell) predicts one user's outcomes on both beyond what the rating model already predicts. Reads the residual correlation per similarity bucket against the same users' all-pairs value.
+- **`serve_criteria_backtest.py`** (with its node half, `serve_criteria_backtest.mjs`) — which serve criterion finds the problems a user underperforms on, scored on the attempt log out of sample in time: the shipped motif categories, or similarity to the user's own earlier failures. The `.mjs` runs the shipped client readings unmodified over each user's history prefix.
 
 ## Per-user replicas
 

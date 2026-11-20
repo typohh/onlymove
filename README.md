@@ -10,6 +10,7 @@ Each problem has exactly one correct first move. From the attempt log the pipeli
 
 - **`pipeline/`** — executable scripts that form the core workflow (generation, benchmarking, rating, feature extraction, packaging).
 - **`utils/`** — the shared logic, split by domain: **`utils/katago/`** is the Go and KataGo side (engine controller and queries, the vendored PyTorch copy, coordinates, SGF construction, problem finding, board rendering) and **`utils/rating/`** is the statistical side (feature assembly, the model's layer stack, the rating artifacts reader, rank-curve fitting, surveys, the motif rules, the SE-floor geometry). The boundary is one-way and holds at import time: `utils/katago/` imports nothing from `utils/rating/`, and importing the rating side loads nothing from the KataGo side — the few engine helpers it needs are imported inside the functions that use them. `utils/constants.py` holds the handful of values both need and imports from neither.
+- **`ablations/`** — repeatable, seeded measurements against what ships (the rating fit, the rank map, the client's estimators), and the ledger of every number the documents quote. See [Ablations and the documents](#ablations-and-the-documents).
 - **`auxiliary/`** — analysis tools, rating-model research, and diagnostic scripts (not part of the main flow), plus `vast_orchestration.py`, the wrapper for running the heavy pipeline steps on a rented Vast.ai GPU.
 - **`pwa/`** — the front-end (vanilla JS + esbuild) and the Cloudflare Worker that hosts it.
 - **`analysis_server/`** — a small KataGo-backed HTTP service used as the PWA's analysis fallback. `worker.py` lets a faster machine dial in and take that service's work over while it is running.
@@ -194,6 +195,26 @@ Deployment is manual — there is no git-triggered auto-deploy:
 ```bash
 npm run deploy      # build + wrangler deploy
 ```
+
+## Ablations and the documents
+
+No number in `docs/methodology.md` or the site's About page (`pwa/about.html`) is typed in by hand. Each one is a **figure** that a script under `ablations/` measures from the shipped artifacts and records in `ablations/figures.json`, and the document quotes it through a `<span data-fig="KEY">` that names the ledger entry.
+
+```bash
+./.venv/bin/python3 -m ablations --tier about        # minutes, no GPU: everything the About page quotes
+./.venv/bin/python3 -m ablations --tier methodology  # adds the GPU measurements the methodology quotes
+./.venv/bin/python3 -m ablations --check             # documents against the ledger, no measurement
+./.venv/bin/python3 -m ablations --list              # every producer, its keys, and where each is quoted
+```
+
+This is what keeps the documents current after a refit:
+
+- **Re-running a producer rewrites the quoted numbers in place** and prints every span it changed, so the sentences around a moved number can be reviewed before committing.
+- **A sentence that leans on a figure without quoting it carries a guard**, an invisible `<!-- fig-guard: KEY OP NUMBER -->` comment. When a re-measured figure breaks the guard, the check fails and names the sentence to rewrite.
+- **`npm run build` refuses to build while a document disagrees with the ledger**, so a stale or unbacked number cannot reach the site.
+- **Producers abort on any surprise in their inputs**, so a run is also a check on the artifacts the pipeline just wrote.
+
+The routine after a refit is therefore: run the tier, read the printed span diff and any violated guards, fix the sentences, and commit the ledger and the documents together. The comparisons behind the design choices (the `refit` tier, which refits the model under each alternative at several seeds) run the same way but take GPU-days; `ablations/README.md` has the full contract.
 
 ## License
 
