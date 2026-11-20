@@ -54,10 +54,12 @@ const MAX_MOTIFS = 3;
 // and it must stay there if the shared gate is ever retuned.
 const CONFIDENT_Z = 2;
 // Whether the training-focus list shows TENTATIVE findings — those between the
-// admission gate and CONFIDENT_Z, worded "you might…". Off, the list carries
-// only confident findings; serving and the stats panes are unaffected either
-// way, since they read the flagged categories directly.
-const SHOW_POSSIBLE_WEAKNESSES = false;
+// admission gate and CONFIDENT_Z, worded "you might…". On, so the list names
+// everything selection is serving for: flags at the admission gate are what the
+// serve draw acts on, and scored out of sample they do find problems the player
+// goes on to do worse on (ablations.motif_serve_figures). Off, a player whose
+// weaknesses are all tentative sees no list at all while being served on them.
+const SHOW_POSSIBLE_WEAKNESSES = true;
 // Sub-pixel slack on the fits-on-screen comparison: both sides are fractional
 // CSS pixels, and a bubble whose last text row ends a rounding error past the
 // band is visible.

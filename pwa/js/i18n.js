@@ -249,7 +249,7 @@ const localization = {
     onbStats: '打开「菜单」并点击「我的统计」——查看段位变化、解题速度、活动记录、与社区的对比，以及应用学到的你的技能强弱和倾向。',
     onbAccount: '打开「菜单」并点击「账户」——你的进度会保存为一个代码，在其他设备上输入即可同步；也可以用 Google 登录，免去输入代码。',
     onbBoardSize: '打开「菜单」即可在 9×9 和 13×13 之间切换。',
-    onbTrainingFocus: '应用现在会针对您的弱项出题。此列表是它正在重点练习的弱点。详情请见菜单「我的统计」中的弱点页。',
+    onbTrainingFocus: '应用现在会针对您的弱项出题。此列表是它正在重点练习的弱点。详情请见菜单「我的统计」中的技能页。',
     onbRecallButton: '有题目到了复习时间——徽章显示等待中的数量。它们会自动混入你的题目流，也可以点击「回忆」立即复习一道。',
     onbLeaderboard: '你已经匿名出现在排行榜上了。打开「菜单」并点击「账户」——关联 EGD 或 AGA 棋手记录，就能以真名参与竞争，也可以挑选自己的别名。',
     onbLinked: '这是别人分享的题目——尽管一试！它不会影响你的段位和历史记录。'
@@ -500,7 +500,7 @@ const localization = {
     onbStats: '「メニュー」を開いて「自分の統計」をタップ——ランクの推移、解答スピード、活動記録、コミュニティとの比較、そしてアプリが学んだあなたのスキルと傾向が見られます。',
     onbAccount: '「メニュー」を開いて「アカウント」をタップ——進捗はコードとして保存され、他の端末で入力すれば同期できます。Google でログインすればコード入力も不要です。',
     onbBoardSize: '「メニュー」を開くと、9×9 と 13×13 を切り替えられます。',
-    onbTrainingFocus: 'アプリはあなたの弱点に合わせて問題を出すようになりました。このリストは現在重点的に出題している弱点です。詳しくはメニューの「自分の統計」の弱点タブへ。',
+    onbTrainingFocus: 'アプリはあなたの弱点に合わせて問題を出すようになりました。このリストは現在重点的に出題している弱点です。詳しくはメニューの「自分の統計」のスキルタブへ。',
     onbRecallButton: '復習の時期になった問題があります。バッジは待機中の数です。放っておいても出題に混ざりますが、「リコール」をタップすれば今すぐ解けます。',
     onbLeaderboard: 'あなたはすでに匿名でランキングに載っています。「メニュー」を開いて「アカウント」をタップ——EGD または AGA の棋士登録を連携すると実名で参加できます。自分で別名を選ぶこともできます。',
     onbLinked: '共有された問題です。気軽に挑戦してください——ランクや履歴には影響しません。'
@@ -751,7 +751,7 @@ const localization = {
     onbStats: '「메뉴」를 열고 「내 통계」를 탭하세요——랭크 추이, 풀이 속도, 활동 기록, 커뮤니티와의 비교, 그리고 앱이 파악한 스킬과 경향을 볼 수 있습니다.',
     onbAccount: '「메뉴」를 열고 「계정」을 탭하세요——진행 상황이 코드로 저장되어, 다른 기기에서 입력하면 동기화됩니다. Google 로그인을 쓰면 코드 입력 없이도 됩니다.',
     onbBoardSize: '「메뉴」를 열면 9×9 와 13×13 을 전환할 수 있습니다.',
-    onbTrainingFocus: '앱이 이제 약점에 맞춰 문제를 냅니다. 이 목록은 현재 집중적으로 출제 중인 약점입니다. 자세한 내용은 메뉴 「내 통계」의 약점 탭에서 확인하세요.',
+    onbTrainingFocus: '앱이 이제 약점에 맞춰 문제를 냅니다. 이 목록은 현재 집중적으로 출제 중인 약점입니다. 자세한 내용은 메뉴 「내 통계」의 스킬 탭에서 확인하세요.',
     onbRecallButton: '복습할 때가 된 문제가 있어요. 배지는 대기 중인 개수입니다. 그냥 두면 출제에 섞여 나오고, 「리콜」을 탭하면 지금 바로 풀 수 있습니다.',
     onbLeaderboard: '이미 익명으로 순위표에 올라 있습니다. 「메뉴」를 열고 「계정」에서 EGD 또는 AGA 기사 등록을 연결하면 실명으로 경쟁할 수 있습니다. 직접 별명을 고를 수도 있습니다.',
     onbLinked: '공유된 문제입니다. 부담 없이 도전해 보세요——랭크나 기록에는 영향을 주지 않습니다.'
@@ -877,7 +877,7 @@ const localization = {
     onbStats: 'Open the menu and tap My stats — your rank over time, solving speed, activity, how you compare to the community, and the skills and tendencies the app has learned.',
     onbAccount: 'Open the menu and tap Account — your progress saves to a code you can enter on another device to sync, or sign in with Google to skip the code.',
     onbBoardSize: 'Open the menu to switch between 9×9 and 13×13.',
-    onbTrainingFocus: 'The app now aims some problems at your weak points. This list shows the weaknesses it is serving extra problems for. Details are under Weaknesses in My stats in the menu.',
+    onbTrainingFocus: 'The app now aims some problems at your weak points. This list shows the weaknesses it is serving extra problems for. Details are under Skills in My stats in the menu.',
     onbRecallButton: 'A problem is due for review — the badge counts the ones waiting. They mix into your feed on their own, or tap Recall to do one now.',
     onbLeaderboard: 'You\'re already on the leaderboard — anonymously. Open the menu and tap Account to link your EGD or AGA record and compete under your name, or pick your own alias.',
     onbLinked: 'A shared problem — give it a try! It won\'t affect your rank or history.',
